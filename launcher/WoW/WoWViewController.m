@@ -216,7 +216,14 @@ static UIStackView *Stack(NSArray<UIView *> *views, CGFloat spacing) {
         NSError *error=nil;
         NSDictionary *plan=[client planForProduct:product[@"id"] region:region locale:locale error:&error];
         TKWoWInstallation *installation=plan?TKWoWInspectInstallation(self->_library,product,plan):nil;
-        BOOL updateAttempted=plan && (install || installation.state==TKWoWInstallationOutdated) && !client.cancelled;
+        // A completed copy imported through Finder/USB can satisfy an earlier
+        // download request. Do not replay its stale transaction over that copy.
+        // Explicit repair remains requested even when the executable is current.
+        BOOL satisfied=plan && installation.state==TKWoWInstallationReady && !repair;
+        if(satisfied && !client.cancelled)
+            [NSUserDefaults.standardUserDefaults removeObjectForKey:installKey];
+        BOOL updateAttempted=plan && (repair || (install && !satisfied) ||
+            installation.state==TKWoWInstallationOutdated) && !client.cancelled;
         if(updateAttempted) {
             __block NSString *lastPhase=nil;
             void (^progress)(NSString *,uint64_t,uint64_t)=^(NSString *phase,uint64_t done,uint64_t total) {
