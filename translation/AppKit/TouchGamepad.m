@@ -375,7 +375,7 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
         [sliders addObject:slider]; [_settings addSubview:slider];
     }
     _sliders = sliders; _values = values; [self updateValues];
-    // The original saved flag swaps away from the default outer-trigger layout.
+    // The saved flag swaps away from the original outer-trigger slot order.
     _swapShouldersSwitch = [UISwitch new]; _swapShouldersSwitch.on = !_preferences.swapShoulders;
     _hapticsSwitch = [UISwitch new]; _hapticsSwitch.on = _preferences.hapticsEnabled;
     _editSwitch = [UISwitch new];

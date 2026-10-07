@@ -6,7 +6,82 @@ requirements. The public fork is distributed as source for personal Xcode builds
 public Wolkara IPA or notarized build is provided. See [Getting started](GETTING_STARTED.md)
 and the [fresh-install checklist](FRESH_INSTALL_TEST.md).
 
-## Closest practical goal: open Xcode and Run
+## Free-account setup: investigate External JIT first
+
+Updated requirement, 2026-10-07: users should not need a **paid** Apple Developer
+membership. They can still use their own free Apple Account/Personal Team in
+Xcode. This changes the proposed default route; the existing paid integrated
+build remains the working baseline, not the intended public prerequisite.
+
+**External JIT is the first candidate to validate.** This is a source and
+documentation assessment, not a successful free-account WoW test.
+
+Our `TolkaraDiagnostics` target excludes the integrated packet-tunnel extension
+and already supports External JIT. `runtime/DebuggerArena.c` uses the same
+prepare-region/detach register and breakpoint protocol described by the
+[StikJIT integration guide](https://github.com/StikDebug/StikJIT/blob/main/INTEGRATION.md).
+The launcher currently asks users to enable JIT elsewhere; no automatic handoff
+is implemented. The target also still inherits the memory entitlements, so it
+is **not** ready to select a Personal Team and Run unchanged. The existing IPA
+packager anticipates a sideloader adjusting the signature; that does not fix
+direct Xcode provisioning.
+
+The [StikDebug project](https://github.com/StikDebug/StikDebug) documents free
+Apple Account builds, a pairing file and an external loopback VPN. It is no
+longer on the App Store. [LocalDevVPN](https://apps.apple.com/us/app/localdevvpn/id6755608044)
+is currently a separate free App Store app. Moving the network extension there
+could remove that capability from Wolkara's own signing requirements; it does
+not remove the local-tunnel dependency or prove cellular-only reliability.
+
+Two integration levels are worth distinguishing:
+
+| Candidate | Proposed setup and launch | Main open questions |
+| --- | --- | --- |
+| External StikDebug | Build Wolkara with a free-compatible profile; provision pairing through a Mac helper; Play requests preparation from StikDebug and resumes after readiness checks | Extra sideloaded app; profile refresh; actual script, memory and iOS/device compatibility |
+| Embedded StikJIT | Same free-compatible host, with preparation coordinated through a helper process and external LocalDevVPN | Helper extension type, free-account signing and lifecycle need prototyping; not a framework that can simply run in the host process |
+
+StikJIT documents a URL handoff and an embedded helper alternative. Both need
+`get-task-allow` and pairing; embedded preparation must run in another process.
+Its guide still requires LocalDevVPN and describes manual network recovery
+without Wi-Fi. Matching our breakpoint protocol is promising, not proof of
+successful memory preparation or lower startup time.
+
+The first prototype should have narrow acceptance gates:
+
+1. Generate a separate free-account build configuration without the integrated
+   network extension or unsupported memory capabilities. Keep existing personal
+   signing and the installed game untouched. Verify the final profile actually
+   contains development permission; compiling unsigned is not a passing result.
+2. Test our synthetic fixture through External JIT, including executable memory
+   after detachment. Then manually test WoW with the same capability set. Record
+   memory budget, address-space failures, startup time and sustained gameplay.
+   `NativeCodeMemory.c` adapts the reservation to the process budget; this does
+   not guarantee the full game fits without extended-address-space/increased-
+   memory capabilities. A paid profile with those keys omitted is an early
+   comparison, not proof of free-account provisioning.
+3. Only after those gates pass, add Mac-assisted pairing and the launch handoff,
+   preserving the invariant that no debugger remains attached at game entry.
+4. Test a real Personal Team, weekly signature renewal without deleting game
+   data, reboot, a client update and mobile-data startup away from the Mac.
+
+[Apple's free provisioning](https://developer.apple.com/help/account/basics/about-your-developer-account)
+expires after seven days and allows three installed apps per device. Rebuilding
+with Xcode or a separately tested refresh tool remains necessary. A paid
+membership can be avoided in principle; an Apple Account and recurring signing
+cannot be promised away in this workflow.
+
+**Local signing is not currently the shortcut for WoW.** The builder accepts a
+development identity; its name alone does not establish that paid membership
+is intrinsically required. Free-profile loading still needs a device test.
+More immediately, `tools/build_signed_container.py` cannot obtain the final
+pages required by the documented WoW startup, and the runtime rejects carried
+guest libraries/code pools in this mode. Containers are bound to one executable;
+a code-changing patch needs a new one. Signing on the phone is unimplemented.
+Automating today's Mac scripts cannot resolve those runtime limitations or
+deliver independent on-phone client updates. No game-code capture, patching or
+new signing integration was performed during this assessment.
+
+## Simplifying the existing paid Xcode route
 
 This is a feasible packaging/onboarding goal for users with a Mac and suitable
 development signing, not the current first-install experience. The current
@@ -193,9 +268,10 @@ code. No PAL-compatible execution permission or successful test is claimed.
 
 ## Suggested Reddit rollout
 
-For the current source release, prioritize the simplified Xcode flow above
-with a few independent testers. This reuses the execution route with recorded
-gameplay and lets each builder retain their own signing identity. A later
+For the current source release, describe the existing paid Xcode flow honestly.
+With free accounts now a requirement, validate the External JIT prototype above
+before building the public setup assistant or advertising easy installation.
+The paid route remains the comparison baseline with recorded gameplay. A later
 development-signed pilot with a desktop installer could avoid compilation by
 testers: connect phone, accept the prompts, press Install, complete local
 enrolment, then choose/download an edition. Neither proposed assistant is

@@ -13,8 +13,8 @@ disconnecting the physical pad restores it. Controller mode is always active;
 the former gamepad and pointer toggles are removed. The toolbar stays at the top center
 in every state, including with a physical pad connected or the keyboard open.
 
-- LT then LB at the upper left; RB then RT at the upper right (left-to-right).
-  Triggers are outermost on both sides.
+- LB then LT at the upper left; RT then RB at the upper right (left-to-right).
+  Triggers are innermost by default; their order can be changed in settings.
 - Two analog sticks at the bottom, with radial dead zones and clamped output.
 - Four independent direction buttons form an annular D-pad around the left stick.
 - Y/B/A/X form the matching ring around the right stick. Only the visible sectors
@@ -43,10 +43,10 @@ outside the controls, both with touch controls and with a physical controller.
 - **Shoulder button size:** 80–150%, default 100%.
 - **Sticks and face button size:** 65–140%, default 100%, subject to available
   safe-area space. Each stick and its annular buttons scale together.
-- **Triggers on the outside:** on by default, placing LT and RT nearer their
-  respective screen edges. Turning it off exchanges each trigger with the
+- **Triggers on the outside:** off by default. Turning it on places LT and RT
+  nearer their respective screen edges by exchanging each trigger with the
   shoulder button on the same side. Customized slots and their saved order are
-  preserved; labels and controller inputs stay matched. Reset turns it on.
+  preserved; labels and controller inputs stay matched. Reset turns it off.
 - **Haptic feedback:** on by default, saved on this device. A light tap accompanies
   each new controller-button press (including the D-pad, shoulders, triggers and
   `+`) and both toolbar buttons. Each stick gives a firmer cue when
@@ -55,7 +55,7 @@ outside the controls, both with touch controls and with a physical controller.
   both controller and toolbar feedback without changing game input.
 - **Edit layout:** drag either stick/ring group, each rear button, or `+`.
   Done editing exits the editor. Reset to defaults restores all sizes, opacity
-  and positions, restores outer triggers and enables haptic feedback.
+  and positions, restores inner triggers and enables haptic feedback.
   A 24-point grid, symmetric about the safe area's center, appears behind the
   controls while editing. Dashed horizontal/vertical center guides help align
   both sides. These are visual references: dragging stays free, saved positions
