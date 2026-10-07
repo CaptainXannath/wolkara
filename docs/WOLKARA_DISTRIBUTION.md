@@ -1,10 +1,72 @@
 # Sharing Wolkara
 
-Assessment: 2026-10-06. Wolkara is a WoW-focused fork of Tolkara. Changing its
+Assessment: 2026-10-07. Wolkara is a WoW-focused fork of Tolkara. Changing its
 name, home screen or distribution channel does not change iOS code-execution
 requirements. The public fork is distributed as source for personal Xcode builds. No tested
 public Wolkara IPA or notarized build is provided. See [Getting started](GETTING_STARTED.md)
 and the [fresh-install checklist](FRESH_INSTALL_TEST.md).
+
+## Closest practical goal: open Xcode and Run
+
+This is a feasible packaging/onboarding goal for users with a Mac and suitable
+development signing, not the current first-install experience. The current
+guide still requires XcodeGen, personal values in `local.env` and a separate
+`tools/enroll.sh` after installation. WoW/Battle.net on the Mac is not required.
+
+The next implementation should prioritize this source-build route:
+
+1. Ship a reproducibly generated, sanitized Xcode project or a double-click
+   setup assistant. Keep XcodeGen for maintainers. Present one Wolkara scheme
+   with debugger attachment and Metal validation already disabled.
+2. Select the user's team and connected phone once. Derive unique app/extension
+   identifiers and the Keychain group, then retain them for upgrades. Check
+   Xcode components, Python and signing capabilities before a long build.
+3. Add a local Mac setup helper that waits until installation is complete and
+   guides the existing USB enrollment. A normal build phase is too early for
+   first-install enrollment. Reuse valid enrollment; recover the exact stored
+   reference after reinstall when possible. Never enroll on every Run or attach
+   a debugger to a running game. Show setup completion in Wolkara before Play.
+4. Guide the remaining system prompts: device trust, Developer Mode and local
+   tunnel consent. These remain user actions; they cannot be silently accepted.
+5. Validate the entire flow on another user's signing identity and a clean
+   device, including a full download, patch, reboot, mobile-data startup and a
+   rebuild that preserves game data.
+
+The resulting target experience is **open project → select team and phone →
+Run → approve first-time prompts → choose/download an edition → Play**. This
+helper has not been implemented here. Making setup simpler also does not remove
+the several-minute memory preparation required at each game launch.
+
+[Apple documents Developer Mode and its confirmation/restart](https://developer.apple.com/documentation/xcode/enabling-developer-mode-on-a-device).
+The currently documented integrated build uses a paid developer membership;
+free Personal Team is not a validated replacement for its tunnel and memory
+capabilities. [Capabilities depend on membership](https://developer.apple.com/help/account/reference/supported-capabilities-ios/),
+and [Apple's free-account provisioning expires after seven days](https://developer.apple.com/help/account/basics/about-your-developer-account).
+A simpler project does not remove either signing requirements or expiry.
+
+## Is the local VPN the only execution route?
+
+For the **current integrated build with recorded iPhone gameplay**, keep it.
+`authorization/Tunnel/LocalPacketProvider.m` routes only the private service
+address, excludes the default route and sets no DNS override or remote server.
+This is on-device access to the developer service, not a commercial VPN or
+streaming connection. Cellular-only startup is still an unresolved acceptance
+test; local routing alone does not prove it works under every network condition.
+
+The engine has alternatives, but none is currently a verified simpler WoW route:
+
+| Route | What replaces the integrated tunnel | Current limitation |
+| --- | --- | --- |
+| External JIT | An external enabler prepares executable memory | Still needs a suitable signing profile and setup; an enabler may itself require a local tunnel or computer. WoW on this iPhone is unvalidated in this mode. |
+| Local signing | User-signed, per-executable page container | Current tools build it on a Mac. The documented WoW case needs final code pages that Tolkara cannot capture; every changed executable needs a new container. Not a working automatic-update replacement. |
+
+See [the execution-mode implementation notes](BUILDING.md#4-set-up-your-execution-mode).
+An ordinary App Store/TestFlight/PAL package does not replace development
+authorization: [Apple DTS distinguishes development `get-task-allow` from distribution profiles](https://developer.apple.com/forums/thread/823069).
+[AltStore PAL requires notarized distribution](https://faq.altstore.io/developers/distribute-with-altstore-pal).
+The conclusion that these channels cannot run our current preparation path is
+an engineering assessment of that dependency, not a claim that no different
+future runtime could ever work.
 
 ## What is currently demonstrated
 
@@ -131,11 +193,13 @@ code. No PAL-compatible execution permission or successful test is claimed.
 
 ## Suggested Reddit rollout
 
-Prioritize a small development-signed pilot with a desktop setup assistant over
-requiring every tester to compile the project. The target experience is:
-connect phone, accept the system prompts, press Install, complete local
-enrolment, then choose/download an edition in Wolkara. This assistant is a
-proposal, not an implemented or validated workflow.
+For the current source release, prioritize the simplified Xcode flow above
+with a few independent testers. This reuses the execution route with recorded
+gameplay and lets each builder retain their own signing identity. A later
+development-signed pilot with a desktop installer could avoid compilation by
+testers: connect phone, accept the prompts, press Install, complete local
+enrolment, then choose/download an edition. Neither proposed assistant is
+implemented or validated yet.
 
 For broader distribution, compare direct iLoader/Sideloadly installation against
 a paid development-certificate route using the same clean-device acceptance

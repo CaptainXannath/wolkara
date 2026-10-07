@@ -242,8 +242,9 @@ static void TestNativeInput(UIView *host, AKPreviewGamepad *manager) {
         assert(!CGRectIntersectsRect(settingsControls[i].frame,settingsControls[j].frame));
     CGRect lt=Button(host,GCInputLeftTrigger).frame, lb=Button(host,GCInputLeftShoulder).frame;
     CGRect rt=Button(host,GCInputRightTrigger).frame, rb=Button(host,GCInputRightShoulder).frame;
-    UISwitch *swap=(id)Find(host,@"wolkara.controls.swapShoulders"); assert(!swap.on);
-    swap.on=YES; [swap sendActionsForControlEvents:UIControlEventValueChanged]; [host layoutIfNeeded];
+    UISwitch *swap=(id)Find(host,@"wolkara.controls.swapShoulders"); assert(swap.on);
+    assert(CGRectGetMidX(lt)<CGRectGetMidX(lb) && CGRectGetMidX(rt)>CGRectGetMidX(rb));
+    swap.on=NO; [swap sendActionsForControlEvents:UIControlEventValueChanged]; [host layoutIfNeeded];
     assert(CGRectEqualToRect(Button(host,GCInputLeftTrigger).frame,lb));
     assert(CGRectEqualToRect(Button(host,GCInputLeftShoulder).frame,lt));
     assert(CGRectEqualToRect(Button(host,GCInputRightTrigger).frame,rb));
@@ -298,9 +299,10 @@ static void TestNativeInput(UIView *host, AKPreviewGamepad *manager) {
     assert(pad.buttonA.pressed && manager.feedback.buttons==silentButtons);
     [Button(host,GCInputButtonA) sendActionsForControlEvents:UIControlEventTouchUpInside];
     [manager toggleSettings];
+    assert(!((UISwitch *)Find(host,@"wolkara.controls.swapShoulders")).on);
     [(UIButton *)Find(host,@"wolkara.controls.reset") sendActionsForControlEvents:UIControlEventTouchUpInside];
     assert(((UISwitch *)Find(host,@"wolkara.controls.haptics")).on);
-    assert(!((UISwitch *)Find(host,@"wolkara.controls.swapShoulders")).on);
+    assert(((UISwitch *)Find(host,@"wolkara.controls.swapShoulders")).on);
     [manager toggleSettings]; [host layoutIfNeeded];
     [Button(host,GCInputButtonA) sendActionsForControlEvents:UIControlEventTouchDown];
     [Button(host,GCInputButtonA) sendActionsForControlEvents:UIControlEventTouchUpInside];

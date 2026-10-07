@@ -375,11 +375,12 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
         [sliders addObject:slider]; [_settings addSubview:slider];
     }
     _sliders = sliders; _values = values; [self updateValues];
-    _swapShouldersSwitch = [UISwitch new]; _swapShouldersSwitch.on = _preferences.swapShoulders;
+    // The original saved flag swaps away from the default outer-trigger layout.
+    _swapShouldersSwitch = [UISwitch new]; _swapShouldersSwitch.on = !_preferences.swapShoulders;
     _hapticsSwitch = [UISwitch new]; _hapticsSwitch.on = _preferences.hapticsEnabled;
     _editSwitch = [UISwitch new];
     NSArray<UISwitch *> *toggles = @[_swapShouldersSwitch,_hapticsSwitch,_editSwitch];
-    NSArray *titles = @[@"Swap LT/LB & RT/RB",@"Haptic feedback",@"Edit layout"];
+    NSArray *titles = @[@"Triggers on the outside",@"Haptic feedback",@"Edit layout"];
     NSArray *identifiers = @[@"swapShoulders",@"haptics",@"edit"];
     NSMutableArray *labels = [NSMutableArray new];
     for (NSUInteger i=0; i<3; i++) {
@@ -403,7 +404,7 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     [self updateAppearance]; if (self.configurationChanged) self.configurationChanged();
 }
 - (void)swapShouldersChanged:(UISwitch *)sender {
-    [self reset]; _preferences.swapShoulders = sender.on; [_preferences save];
+    [self reset]; _preferences.swapShoulders = !sender.on; [_preferences save];
     [self updateAppearance];
 }
 - (void)updateValues {
@@ -432,7 +433,7 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
 - (void)resetLayout {
     [self reset]; [_preferences reset];
     _sliders[0].value = 1-_preferences.opacity; _sliders[1].value = _preferences.rearScale; _sliders[2].value = _preferences.frontScale;
-    _hapticsSwitch.on = _preferences.hapticsEnabled; _swapShouldersSwitch.on = _preferences.swapShoulders;
+    _hapticsSwitch.on = _preferences.hapticsEnabled; _swapShouldersSwitch.on = !_preferences.swapShoulders;
     [self updateValues]; [self updateAppearance];
 }
 - (void)finishConfiguration {
