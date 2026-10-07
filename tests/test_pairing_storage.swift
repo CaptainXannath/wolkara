@@ -56,6 +56,29 @@ private func fixture(device: String = "device-one", changed: Bool = false) throw
         reject { try store.insertTrusted(changed) }
         check(try store.load(deviceIdentifier:first.deviceIdentifier)?.fingerprint == first.fingerprint,"conflict preserves original")
         let saved = backend.records
+        let suite = "org.tolkara.tests.reference." + UUID().uuidString
+        let defaults = UserDefaults(suiteName:suite)!
+        defer { defaults.removePersistentDomain(forName:suite) }
+        defaults.set("unchanged",forKey:"unrelated")
+        let reference = "TKEnrolledDeviceIdentifier"
+        let queriesBeforeRecovery = backend.queries.count
+        try EnrollmentImport.restoreReference(device:first.deviceIdentifier,store:store,defaults:defaults)
+        try EnrollmentImport.restoreReference(device:first.deviceIdentifier,store:store,defaults:defaults)
+        check(defaults.string(forKey:reference) == first.deviceIdentifier,"restore and repeat exact reference")
+        check(defaults.string(forKey:"unrelated") == "unchanged","preserve other preferences")
+        reject { try EnrollmentImport.restoreReference(device:other.deviceIdentifier,store:store,defaults:defaults) }
+        check(defaults.string(forKey:reference) == first.deviceIdentifier,"do not replace a conflicting reference")
+        defaults.removeObject(forKey:reference)
+        reject { try EnrollmentImport.restoreReference(device:"missing-device",store:store,defaults:defaults) }
+        check(defaults.object(forKey:reference) == nil,"absent trust pin does not restore reference")
+        backend.forced = errSecInteractionNotAllowed
+        reject { try EnrollmentImport.restoreReference(device:first.deviceIdentifier,store:store,defaults:defaults) }
+        backend.forced = nil
+        check(defaults.object(forKey:reference) == nil,"locked Keychain does not restore reference")
+        for query in backend.queries.dropFirst(queriesBeforeRecovery) {
+            check(query[kSecReturnData as String] as? Bool == true,"recovery only reads exact trust pins")
+        }
+        check(NSDictionary(dictionary:backend.records).isEqual(to:saved),"recovery leaves trust records unchanged")
         let key = backend.records.first(where:{ ($0.value[kSecValueData as String] as? Data).flatMap { try? PairingEnrollment(untrustedData:$0) }?.deviceIdentifier == first.deviceIdentifier })!.key
         backend.records[key]![kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
         reject { _ = try store.load(deviceIdentifier:first.deviceIdentifier) }
@@ -65,6 +88,8 @@ private func fixture(device: String = "device-one", changed: Bool = false) throw
         backend.records = saved
         backend.records[key]![kSecValueData as String] = Data(repeating:0,count:16385)
         reject { _ = try store.load(deviceIdentifier:first.deviceIdentifier) }
+        reject { try EnrollmentImport.restoreReference(device:first.deviceIdentifier,store:store,defaults:defaults) }
+        check(defaults.object(forKey:reference) == nil,"corrupt record does not restore reference")
         backend.records = saved
         for status in [errSecInteractionNotAllowed,errSecMissingEntitlement,errSecNotAvailable,errSecAuthFailed] {
             backend.forced = status
@@ -89,6 +114,6 @@ private func fixture(device: String = "device-one", changed: Bool = false) throw
         envelope["approved"] = true
         reject { _ = try PairingEnrollment(untrustedData:PropertyListSerialization.data(fromPropertyList:envelope,format:.binary,options:0)) }
         reject { _ = try PairingEnrollment(untrustedData:Data(repeating:0,count:16385)) }
-        print("Pairing storage: envelope bounds, exact protected queries, immutable pins, device isolation and failure propagation passed")
+        print("Pairing storage: envelope bounds, exact protected queries, immutable pins, device isolation, reference recovery and failure propagation passed")
     }
 }

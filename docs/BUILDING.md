@@ -150,6 +150,17 @@ After enrolment the Mac is no longer needed: launches, relaunches and reboots
 work on the iPad alone. You need to repeat steps 3 and 4 only when your
 provisioning profile expires or you change the bundle ID or Keychain group.
 
+Deleting the app for a clean-install test also deletes its enrolled-device
+reference in preferences, even when its device-only Keychain record survives.
+For the same device, bundle ID and Keychain group, a development launch with
+`--restore-authorization-reference --expected-device <trusted USB device ID>`
+restores that reference from the exact existing record. It rejects missing,
+locked or corrupt records and conflicting references; it never enumerates the
+Keychain or replaces a trust pin. The result is written to
+`Documents/authorization-reference-result.txt`. Reopen normally after recovery
+and verify the authenticated local tunnel. Writing the preferences plist from
+the Mac alone is insufficient when iOS still caches the old values.
+
 > `tools/enroll.sh` packages the procedure used during development into one
 > command. If it fails, the individual steps are readable in the script and
 > each prints its own diagnosis.

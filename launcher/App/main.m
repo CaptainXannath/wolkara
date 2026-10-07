@@ -869,6 +869,16 @@ static BOOL PreparedFromOutside(void) { return hd_may_run_unsigned_code() || ng_
         return;
     }
 #if TOLKARA_INTEGRATED_AUTH
+    if([arguments containsObject:@"--restore-authorization-reference"]) {
+        NSUInteger device=[arguments indexOfObject:@"--expected-device"];
+        NSString *result=@"Authorization reference recovery arguments missing.";
+        if(device!=NSNotFound && device+1<arguments.count)
+            result=[TKEnrollmentImport restoreReferenceWithDevice:arguments[device+1]];
+        self.status.text=result;
+        [result writeToFile:TKDocumentsPath(@"authorization-reference-result.txt")
+            atomically:YES encoding:NSUTF8StringEncoding error:NULL];
+        return;
+    }
     if([arguments containsObject:@"--prepare-authorization-import"]) {
         self.status.text=[TKEnrollmentImport prepare]?@"Protected enrollment handoff directory ready.":@"Enrollment handoff directory unavailable.";
         return;

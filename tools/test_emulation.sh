@@ -51,7 +51,7 @@ xcrun swiftc -module-cache-path build/swift-module-cache -warnings-as-errors \
 build/emulation/test_pairing
 xcrun swiftc -module-cache-path build/swift-module-cache -warnings-as-errors \
     -g -sanitize=address authorization/Pairing/PairingWire.swift \
-    authorization/Pairing/PairingIdentity.swift authorization/Storage/*.swift \
+    authorization/Pairing/PairingIdentity.swift authorization/Storage/*.swift authorization/App/EnrollmentImport.swift \
     tests/test_pairing_storage.swift -o build/emulation/test_pairing_storage
 build/emulation/test_pairing_storage
 xcrun swiftc -module-cache-path build/swift-module-cache -warnings-as-errors \

@@ -14,6 +14,25 @@ import Foundation
             return true
         } catch { return false }
     }
+    // Reinstalling removes preferences while the device-only trust pin can
+    // survive. Recover only an exact record named by the trusted USB caller;
+    // never enumerate Keychain records or import/replace a pairing identity.
+    static func restoreReference(device: String, store: PairingKeychain, defaults: UserDefaults) throws {
+        let key = "TKEnrolledDeviceIdentifier"
+        if let existing = defaults.object(forKey:key) {
+            guard let value = existing as? String, value.isEmpty || value == device else { throw PairingError.authenticationFailed }
+        }
+        guard try store.load(deviceIdentifier:device) != nil else { throw PairingError.authenticationFailed }
+        defaults.set(device,forKey:key)
+    }
+    @objc public static func restoreReference(device: String) -> String {
+        do {
+            try restoreReference(device:device,store:PairingKeychain(),defaults:.standard)
+            return "Existing authorization reference restored from a verified device-only Keychain record. No trust pin was changed."
+        } catch {
+            return "Authorization reference recovery rejected; no matching trusted record is available or the current reference conflicts."
+        }
+    }
     @objc public static func importPending(device: String, fingerprint: String) -> String {
         let file = directory.appendingPathComponent("Enrollment.pending")
         defer { try? FileManager.default.removeItem(at:file) }
