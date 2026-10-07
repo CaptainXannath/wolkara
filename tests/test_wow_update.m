@@ -35,7 +35,69 @@ static NSData *IndexObjects(NSArray<NSData *> *objects){
 }
 static NSData *Index(NSData *raw){return IndexObjects(@[raw]);}
 
+@interface TKWoWUpdater (StorageTests)
+- (NSNumber *)importantStorageAtPath:(NSString *)path error:(NSError **)error;
+- (NSNumber *)freeStorageAtPath:(NSString *)path error:(NSError **)error;
+- (BOOL)checkStorageAtPath:(NSString *)path missingBytes:(uint64_t)missing looseBytes:(uint64_t)loose error:(NSError **)error;
+@end
+@interface TKStorageUpdater : TKWoWUpdater
+@property(nonatomic) NSNumber *importantCapacity;
+@property(nonatomic) NSNumber *freeCapacity;
+@end
+@implementation TKStorageUpdater
+- (NSNumber *)importantStorageAtPath:(NSString *)path error:(NSError **)error {
+    (void)path;if(!_importantCapacity && error)*error=TKWoWError(@"Synthetic unavailable important capacity");
+    return _importantCapacity;
+}
+- (NSNumber *)freeStorageAtPath:(NSString *)path error:(NSError **)error {
+    (void)path;
+    if(!_freeCapacity && error)*error=TKWoWError(@"Synthetic unavailable filesystem capacity");
+    return _freeCapacity;
+}
+@end
+static void TestStorage(void) {
+    TKStorageUpdater *updater=[[TKStorageUpdater alloc] initWithClient:[TKUpdateClient new]];
+    NSError *error=nil;
+    // iOS may report 115 GB for user-requested resources with only 30 GB of raw
+    // free blocks. A 68 GB installation must use the former, including reclaimable caches.
+    updater.importantCapacity=@115000000000ULL;updater.freeCapacity=@30000000000ULL;
+    assert([updater checkStorageAtPath:@"/synthetic" missingBytes:67000000000ULL looseBytes:0 error:&error]);
+    assert(!error);
+    updater.importantCapacity=@66000000000ULL;
+    assert(![updater checkStorageAtPath:@"/synthetic" missingBytes:67000000000ULL looseBytes:0 error:&error]);
+    assert([error.localizedDescription containsString:@"66.0 GB available"]);
+    updater.importantCapacity=@0;updater.freeCapacity=@0;
+    assert(![updater checkStorageAtPath:@"/synthetic" missingBytes:1 looseBytes:0 error:&error]);
+    // A silent zero from the important-usage service must not hide real blocks.
+    updater.freeCapacity=@115000000000ULL;error=nil;
+    assert([updater checkStorageAtPath:@"/synthetic" missingBytes:67000000000ULL looseBytes:0 error:&error]);
+    assert(!error);
+    updater.importantCapacity=nil;error=nil;
+    assert([updater checkStorageAtPath:@"/synthetic" missingBytes:67000000000ULL looseBytes:0 error:&error]);
+    assert(!error);
+    updater.freeCapacity=nil;error=nil;
+    assert(![updater checkStorageAtPath:@"/synthetic" missingBytes:1 looseBytes:0 error:&error]);
+    assert([error.localizedDescription containsString:@"Could not check available storage"]);
+    assert([error.localizedDescription containsString:@"Synthetic unavailable filesystem capacity"]);
+    assert(![error.localizedDescription containsString:@"Not enough storage"]);
+    updater.importantCapacity=@(-1);updater.freeCapacity=@115000000000ULL;error=nil;
+    assert([updater checkStorageAtPath:@"/synthetic" missingBytes:67000000000ULL looseBytes:0 error:&error]);
+    assert(!error);
+    updater.importantCapacity=(NSNumber *)NSNull.null;updater.freeCapacity=@(-1);
+    assert(![updater checkStorageAtPath:@"/synthetic" missingBytes:1 looseBytes:0 error:&error]);
+    assert([error.localizedDescription containsString:@"Could not check available storage"]);
+    // Boundaries and overflow must not wrap into an apparently small requirement.
+    updater.importantCapacity=@(67000000000ULL+1024ULL*1024*1024);
+    assert([updater checkStorageAtPath:@"/synthetic" missingBytes:67000000000ULL looseBytes:0 error:&error]);
+    assert(![updater checkStorageAtPath:@"/synthetic" missingBytes:67000000000ULL looseBytes:1 error:&error]);
+    assert(![updater checkStorageAtPath:@"/synthetic" missingBytes:UINT64_MAX looseBytes:0 error:&error]);
+    assert([error.localizedDescription containsString:@"requirement is too large"]);
+    assert(![updater checkStorageAtPath:@"/synthetic" missingBytes:0 looseBytes:UINT64_MAX error:&error]);
+    assert([error.localizedDescription containsString:@"requirement is too large"]);
+}
+
 int main(void){@autoreleasepool{
+    TestStorage();
     TKUpdateClient *client=[TKUpdateClient new];NSData *old=Text(@"old code"),*original=Text(@"our own new code"),*raw=Wrap(original);
     NSData *asset=Wrap(Text(@"new asset")),*present=Wrap(Text(@"existing asset"));
     client.responses[TKWoWMD5(asset)]=asset;client.responses[TKWoWMD5(present)]=present;
@@ -187,7 +249,13 @@ int main(void){@autoreleasepool{
     // A fresh synthetic install activates all files and only initial locale/portal settings.
     NSString *freshRoot=[base stringByAppendingPathComponent:@"fresh-parent/World of Warcraft"];
     resume.changed=NO;error=nil;
-    result=[[[TKWoWUpdater alloc] initWithClient:resume] updatePlan:plan root:freshRoot progress:^(NSString *phase,uint64_t done,uint64_t total){(void)phase;(void)done;(void)total;} error:&error];
+    TKStorageUpdater *fresh=[[TKStorageUpdater alloc] initWithClient:resume];
+    result=[fresh updatePlan:plan root:freshRoot progress:^(NSString *phase,uint64_t done,uint64_t total){(void)phase;(void)done;(void)total;} error:&error];
+    assert(!result && [error.localizedDescription containsString:@"Could not check available storage"]);
+    assert(![fm fileExistsAtPath:freshRoot]);
+    error=nil;
+    fresh.importantCapacity=@115000000000ULL;fresh.freeCapacity=@0;
+    result=[fresh updatePlan:plan root:freshRoot progress:^(NSString *phase,uint64_t done,uint64_t total){(void)phase;(void)done;(void)total;} error:&error];
     if(!result)fprintf(stderr,"Fresh install: %s\n",error.localizedDescription.UTF8String);assert(result);
     NSString *freshConfig=[NSString stringWithContentsOfFile:[freshRoot stringByAppendingPathComponent:@"_classic_beta_/WTF/Config.wtf"] encoding:NSUTF8StringEncoding error:&error];
     assert([freshConfig containsString:@"SET portal \"test\""] && [freshConfig containsString:@"SET textLocale \"enUS\""]);
@@ -202,5 +270,5 @@ int main(void){@autoreleasepool{
     bad=[Index(raw) mutableCopy];((uint8_t *)bad.mutableBytes)[bad.length-1]^=1;assert(!TKWoWArchiveEntries(bad,0,NULL));
     assert(TKWoWJenkins("",0,NULL,0)==0xdeadbeef);
     assert([fm removeItemAtPath:base error:&error]);
-    puts("WoW updater PASS: unchanged data reuse, archive ranges, cancel before activation, durable resume, atomic activation, settings/addon preservation, superseded build and malformed input.");
+    puts("WoW updater PASS: important-usage storage/fallback/errors/overflow, unchanged data reuse, archive ranges, cancel before activation, durable resume, atomic activation, settings/addon preservation, superseded build and malformed input.");
 }return 0;}
