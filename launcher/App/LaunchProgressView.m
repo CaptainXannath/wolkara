@@ -3,93 +3,110 @@
 #include <math.h>
 
 @implementation TKLaunchProgressView {
-    CAShapeLayer *_ring;
-    NSArray<CALayer *> *_digits;
-    NSArray *_glyphs;
-    CFTimeInterval _started;
+    NSArray<CALayer *> *_tracks;
+    NSArray<UILabel *> *_labels;
+    CALayer *_activity;
+    TKLaunchPhase _phase;
+    BOOL _running;
+    CGFloat _animationWidth;
 }
 - (instancetype)initWithFrame:(CGRect)frame {
-    if (!(self = [super initWithFrame:frame])) return nil;
-    self.hidden = YES;
-    self.isAccessibilityElement = YES;
-    self.accessibilityLabel = @"Startup elapsed time";
-    _ring = [CAShapeLayer layer];
-    _ring.frame = CGRectMake(0, 7, 24, 24);
-    _ring.path = [UIBezierPath bezierPathWithArcCenter:CGPointMake(12, 12) radius:10
-        startAngle:0 endAngle:1.5 * M_PI clockwise:YES].CGPath;
-    _ring.fillColor = UIColor.clearColor.CGColor;
-    _ring.strokeColor = UIColor.grayColor.CGColor;
-    _ring.lineWidth = 2;
-    _ring.lineCap = kCALineCapRound;
-    [self.layer addSublayer:_ring];
-    UILabel *caption = [[UILabel alloc] initWithFrame:CGRectMake(38, 0, 70, 38)];
-    caption.text = @"Elapsed";
-    caption.font = [UIFont systemFontOfSize:17];
-    caption.textColor = UIColor.secondaryLabelColor;
-    [self addSubview:caption];
-    UIFont *font = [UIFont monospacedDigitSystemFontOfSize:24 weight:UIFontWeightMedium];
-    NSMutableArray *glyphs = [NSMutableArray array];
-    UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithSize:CGSizeMake(20, 38)];
-    for (unsigned i = 0; i < 10; ++i) {
-        UIImage *image = [renderer imageWithActions:^(UIGraphicsImageRendererContext *context) {
-            (void)context;
-            [[NSString stringWithFormat:@"%u", i] drawAtPoint:CGPointMake(2, 4)
-                // An opaque middle gray remains legible in both appearances;
-                // the pre-rendered glyphs outlive the app's paused UI thread.
-                withAttributes:@{NSFontAttributeName:font, NSForegroundColorAttributeName:UIColor.grayColor}];
-        }];
-        [glyphs addObject:(__bridge id)image.CGImage];
+    if (!(self=[super initWithFrame:frame])) return nil;
+    self.hidden=YES;
+    self.isAccessibilityElement=YES;
+    self.accessibilityLabel=@"Startup progress";
+    NSMutableArray *tracks=[NSMutableArray new], *labels=[NSMutableArray new];
+    for (NSString *title in @[@"Connection",@"Memory",@"Game"]) {
+        CALayer *track=[CALayer layer];
+        track.cornerRadius=3; track.masksToBounds=YES;
+        [self.layer addSublayer:track]; [tracks addObject:track];
+        UILabel *label=[UILabel new];
+        label.text=title; label.font=[UIFont systemFontOfSize:12 weight:UIFontWeightMedium];
+        label.textAlignment=NSTextAlignmentCenter;
+        [self addSubview:label]; [labels addObject:label];
     }
-    _glyphs = glyphs;
-    NSMutableArray *digits = [NSMutableArray array];
-    for (unsigned i = 0; i < 4; ++i) {
-        CALayer *digit = [CALayer layer];
-        digit.frame = CGRectMake(112 + i * 20 + (i >= 2 ? 8 : 0), 0, 20, 38);
-        digit.contents = _glyphs[0];
-        digit.contentsScale = ((UIGraphicsImageRendererFormat *)renderer.format).scale;
-        [self.layer addSublayer:digit];
-        [digits addObject:digit];
-    }
-    _digits = digits;
-    UILabel *colon = [[UILabel alloc] initWithFrame:CGRectMake(152, 0, 8, 38)];
-    colon.text = @":"; colon.font = font; colon.textColor = UIColor.secondaryLabelColor;
-    [self addSubview:colon];
+    _tracks=tracks; _labels=labels;
+    _activity=[CALayer layer]; _activity.name=@"startup.activity"; _activity.cornerRadius=3;
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(resumeActivity:)
+        name:UIApplicationDidBecomeActiveNotification object:nil];
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(resumeActivity:)
+        name:UIAccessibilityReduceMotionStatusDidChangeNotification object:nil];
+    [self registerForTraitChanges:@[UITraitUserInterfaceStyle.class] withAction:@selector(updateAppearance)];
     return self;
 }
-- (CGSize)intrinsicContentSize { return CGSizeMake(200, 38); }
+- (CGSize)intrinsicContentSize { return CGSizeMake(270,38); }
+- (void)layoutSubviews {
+    [super layoutSubviews];
+    CGFloat width=MAX(0,(self.bounds.size.width-16)/3);
+    [CATransaction begin]; [CATransaction setDisableActions:YES];
+    for (NSUInteger i=0;i<_tracks.count;i++) {
+        _tracks[i].frame=CGRectMake(i*(width+8),3,width,6);
+        _labels[i].frame=CGRectMake(i*(width+8),13,width,20);
+    }
+    _activity.bounds=CGRectMake(0,0,width*0.35,6);
+    _activity.position=CGPointMake(width/2,3);
+    [CATransaction commit];
+    [self updateAppearance];
+    [self ensureActivity];
+}
+- (void)updateAppearance {
+    UIColor *accent=[self.tintColor resolvedColorWithTraitCollection:self.traitCollection];
+    [CATransaction begin]; [CATransaction setDisableActions:YES];
+    for (NSUInteger i=0;i<_tracks.count;i++) {
+        _tracks[i].backgroundColor=(i<_phase ? accent :
+            [accent colorWithAlphaComponent:i==_phase ? 0.24 : 0.10]).CGColor;
+        _labels[i].textColor=i<=_phase ? accent : UIColor.secondaryLabelColor;
+    }
+    _activity.backgroundColor=accent.CGColor;
+    [CATransaction commit];
+}
+- (void)tintColorDidChange { [super tintColorDidChange]; if (_tracks) [self updateAppearance]; }
+- (void)didMoveToWindow { [super didMoveToWindow]; [self ensureActivity]; }
+- (void)ensureActivity {
+    if (!_running || self.hidden || !self.window) return;
+    CALayer *track=_tracks[_phase];
+    if (_activity.superlayer!=track) {
+        [_activity removeFromSuperlayer]; [track addSublayer:_activity];
+        [_activity removeAllAnimations];
+    }
+    CGFloat width=track.bounds.size.width;
+    if (UIAccessibilityIsReduceMotionEnabled() || width<=0) {
+        [_activity removeAllAnimations]; return;
+    }
+    if ([_activity animationForKey:@"activity"] && _animationWidth==width) return;
+    _animationWidth=width;
+    CABasicAnimation *sweep=[CABasicAnimation animationWithKeyPath:@"position.x"];
+    sweep.fromValue=@(-width*0.2); sweep.toValue=@(width*1.2);
+    sweep.duration=1.3; sweep.repeatCount=HUGE_VALF;
+    [_activity addAnimation:sweep forKey:@"activity"];
+}
+- (void)resumeActivity:(NSNotification *)notification {
+    (void)notification;
+    // iOS may remove animations during the handoff to the JIT helper. Recreate
+    // them on return without resetting completed milestones.
+    [_activity removeAllAnimations]; [self ensureActivity];
+}
 - (void)start {
-    if (!self.hidden) return;
-    self.hidden = NO;
-    _started = CACurrentMediaTime();
-    // These animate elapsed wall time only, never a completion percentage.
-    const unsigned counts[] = {10, 10, 6, 10};
-    const double periods[] = {6000, 600, 60, 10};
-    for (unsigned i = 0; i < 4; ++i) {
-        CAKeyframeAnimation *animation = [CAKeyframeAnimation animationWithKeyPath:@"contents"];
-        animation.values = [_glyphs subarrayWithRange:NSMakeRange(0, counts[i])];
-        NSMutableArray *times = [NSMutableArray array];
-        for (unsigned j = 0; j < counts[i]; ++j) [times addObject:@((double)j / counts[i])];
-        animation.keyTimes = times;
-        animation.calculationMode = kCAAnimationDiscrete;
-        animation.duration = periods[i];
-        animation.repeatCount = HUGE_VALF;
-        animation.beginTime = [_digits[i] convertTime:_started fromLayer:nil];
-        [_digits[i] addAnimation:animation forKey:@"elapsed"];
-    }
-    if (!UIAccessibilityIsReduceMotionEnabled()) {
-        CABasicAnimation *spin = [CABasicAnimation animationWithKeyPath:@"transform.rotation.z"];
-        spin.fromValue = @0; spin.toValue = @(2 * M_PI);
-        spin.duration = 1.2; spin.repeatCount = HUGE_VALF;
-        [_ring addAnimation:spin forKey:@"activity"];
-    }
+    if (_running) return;
+    _phase=TKLaunchPhaseConnection; _running=YES; self.hidden=NO;
+    [self setNeedsLayout]; [self layoutIfNeeded];
+    [self.superview layoutIfNeeded]; [self ensureActivity]; [CATransaction flush];
+}
+- (void)showPhase:(TKLaunchPhase)phase {
+    if (phase>TKLaunchPhaseGame) return;
+    if (!_running) [self start];
+    if (phase<_phase) return;
+    _phase=phase;
+    [self updateAppearance]; [self ensureActivity]; [CATransaction flush];
 }
 - (NSString *)accessibilityValue {
-    unsigned elapsed = (unsigned)MAX(0, CACurrentMediaTime() - _started);
-    return [NSString stringWithFormat:@"%u minutes, %u seconds", elapsed / 60, elapsed % 60];
+    if (!_running) return @"Not running";
+    return @[@"Connecting. 0 of 3 phases complete.",
+             @"Preparing memory. 1 of 3 phases complete.",
+             @"Loading game. 2 of 3 phases complete."][_phase];
 }
 - (void)stop {
-    self.hidden = YES;
-    [_ring removeAllAnimations];
-    for (CALayer *digit in _digits) [digit removeAllAnimations];
+    _running=NO; self.hidden=YES; [_activity removeAllAnimations];
 }
+- (void)dealloc { [NSNotificationCenter.defaultCenter removeObserver:self]; }
 @end

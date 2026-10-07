@@ -105,7 +105,8 @@ static UIStackView *Stack(NSArray<UIView *> *views, CGFloat spacing) {
     _progressBar=[[UIProgressView alloc] initWithProgressViewStyle:UIProgressViewStyleDefault];
     _progressBar.progressTintColor=Gold(); _progressBar.accessibilityIdentifier=@"wow.progress";
     _launchProgress=[TKLaunchProgressView new];
-    _launchProgress.accessibilityIdentifier=@"wow.elapsed";
+    _launchProgress.accessibilityIdentifier=@"wow.startupProgress";
+    _launchProgress.tintColor=Gold();
     _diagnosticsButton=[self button:@"wow.diagnostics" action:@selector(diagnostics)];
     [_diagnosticsButton setTitle:@"Diagnostics and logs" forState:UIControlStateNormal];
     _diagnosticsButton.tintColor=Gold(); _diagnosticsButton.hidden=YES;

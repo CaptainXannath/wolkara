@@ -16,6 +16,10 @@ alone. Requires a physical arm64 device running iOS 26 or later.
 - After attachment, a worker prepares the existing External JIT arena. The UI
   stays responsive. Game entry requires published executable memory and a
   detached debugger. The runtime's existing entry checks still apply.
+- Startup uses a Connection → Memory → Game bar. Completion comes from actual
+  phase transitions; the active segment animates without inventing a byte or
+  overall percentage. Returning from StikDebug restores the animation without
+  resetting completed phases. The elapsed counter was removed.
 - Requests are single use. Errors and a five-minute timeout block startup;
   delayed completion cannot launch the game after failure. Once the helper has
   been contacted, retry requires closing the app and opening a new process.
@@ -73,6 +77,12 @@ Personal Team provisioning** or game memory capacity. On iPhone 16 Pro Max /
 iOS 27, StikDebug 3.1.13 prepared our one-page fixture, detached, and both
 execution and rewrite passed (`42`, then `1337`); the user confirmed the screen.
 Physical results are recorded separately in `COMPATIBILITY.md`.
+
+The phase-bar follow-up passes the UIKit fixture, including visible movement
+following simulated app handoff/animation removal, monotonic phase completion,
+and failure/retry cleanup. Both External JIT and integrated device schemes
+compile; the full sanitizer suite passes. No new gameplay claim follows from
+these UI tests.
 
 Commands used (personal identity/device values omitted):
 

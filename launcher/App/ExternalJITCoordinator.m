@@ -30,11 +30,11 @@ static BOOL DevelopmentPermission(void) {
     BOOL _probe;
     BOOL _workerStarted;
     NSString *_lastMessage;
-    void (^_status)(NSString *);
+    void (^_status)(NSString *,TKExternalJITState);
     void (^_completion)(BOOL,BOOL,NSString *);
 }
 - (void)startProbe:(BOOL)probe logPath:(NSString *)path
-           status:(void (^)(NSString *))status
+           status:(void (^)(NSString *,TKExternalJITState))status
        completion:(void (^)(BOOL,BOOL,NSString *))completion {
     NSAssert(NSThread.isMainThread,@"Start on the UI thread");
     if (_request && (_request.state!=TKExternalJITFailed || _request.restartRequired)) {
@@ -86,7 +86,7 @@ static BOOL DevelopmentPermission(void) {
     });
 }
 - (void)update {
-    if (_status) _status(_request.message);
+    if (_status) _status(_request.message,_request.state);
     if (![_lastMessage isEqualToString:_request.message]) {
         _lastMessage=_request.message;
         [_lastMessage writeToFile:[_path stringByAppendingString:@".status.txt"] atomically:YES encoding:NSUTF8StringEncoding error:NULL];

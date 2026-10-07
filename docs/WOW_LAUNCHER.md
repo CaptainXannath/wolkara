@@ -17,8 +17,8 @@ The app opens directly into a native WoW home screen with edition selection,
 automatic updates and one primary action. `feature/wow-home` continues from
 `feature/keyboard-dictation` at `e5ecdb6` and makes this the only normal launcher:
 all interface copy is English, with one game heading and no adventure slogans.
-Download language remains independently selectable. Startup preparation, elapsed
-time, failure and session end stay in the same home card; no separate loading
+Download language remains independently selectable. Startup preparation, a
+three-phase progress bar, failure and session end stay in the same home card; no separate loading
 screen or general application library is exposed. Settings retains diagnostics;
 there is no startup-mode picker. About includes the bundled MIT copyright/license and
 third-party notices, plus an independent-project attribution.

@@ -289,6 +289,7 @@ static BOOL PreparedFromOutside(void) { return hd_may_run_unsigned_code() || ng_
         [self.status.centerYAnchor constraintEqualToAnchor:controller.view.centerYAnchor],
         [self.launchProgress.topAnchor constraintEqualToAnchor:self.status.bottomAnchor constant:20],
         [self.launchProgress.leadingAnchor constraintEqualToAnchor:self.status.leadingAnchor],
+        [self.launchProgress.trailingAnchor constraintLessThanOrEqualToAnchor:self.status.trailingAnchor],
         [self.startupActivity.topAnchor constraintEqualToAnchor:self.launchProgress.bottomAnchor constant:12],
         [self.startupActivity.leadingAnchor constraintEqualToAnchor:self.status.leadingAnchor],
         [self.startupActivity.trailingAnchor constraintEqualToAnchor:self.status.trailingAnchor],
@@ -439,7 +440,7 @@ static BOOL PreparedFromOutside(void) { return hd_may_run_unsigned_code() || ng_
             AKHostSceneDelegate *host=weakSelf;
             if (!host.externalJIT) host.externalJIT=[TKExternalJITCoordinator new];
             [host.externalJIT startProbe:YES logPath:TKDocumentsPath(@"external-jit.log")
-                status:^(NSString *message) { report(message,NO); }
+                status:^(NSString *message,TKExternalJITState state) { (void)state; report(message,NO); }
                 completion:^(BOOL ready,BOOL restart,NSString *message) {
                     (void)ready; (void)restart; report(message,YES);
                 }];
@@ -580,7 +581,10 @@ static BOOL PreparedFromOutside(void) { return hd_may_run_unsigned_code() || ng_
     }
     // The container is named after the executable's current SHA-256; hashing
     // it is slow, so look for the container off the main thread.
-    if (self.wowController) [self.wowController beginStartup];
+    if (self.wowController) {
+        [self.wowController beginStartup];
+        [self.wowController.launchProgress showPhase:TKLaunchPhaseMemory];
+    }
     self.libraryController.navigationItem.prompt=[NSString stringWithFormat:@"Preparing %@…",app.name];
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0),^{
         NSString *sha=[self.library currentSHA256OfApp:app error:NULL];
@@ -629,7 +633,10 @@ static BOOL PreparedFromOutside(void) { return hd_may_run_unsigned_code() || ng_
     if (!self.externalJIT) self.externalJIT=[TKExternalJITCoordinator new];
     __weak AKHostSceneDelegate *weakSelf=self;
     [self.externalJIT startProbe:NO logPath:TKDocumentsPath(@"external-jit.log")
-        status:^(NSString *message) { weakSelf.status.text=message; }
+        status:^(NSString *message,TKExternalJITState state) {
+            weakSelf.status.text=message;
+            if (state==TKExternalJITPreparing) [weakSelf.launchProgress showPhase:TKLaunchPhaseMemory];
+        }
         completion:^(BOOL ready,BOOL restart,NSString *message) {
             AKHostSceneDelegate *host=weakSelf;
             if (ready && ng_external_arena_ready()) {
@@ -678,7 +685,7 @@ static BOOL PreparedFromOutside(void) { return hd_may_run_unsigned_code() || ng_
     self.externalJIT=[TKExternalJITCoordinator new];
     __weak AKHostSceneDelegate *weakSelf=self;
     [self.externalJIT startProbe:YES logPath:TKDocumentsPath(@"external-jit.log")
-        status:^(NSString *message) { weakSelf.status.text=message; }
+        status:^(NSString *message,TKExternalJITState state) { (void)state; weakSelf.status.text=message; }
         completion:^(BOOL ready,BOOL restart,NSString *message) {
             (void)ready; (void)restart; weakSelf.status.text=message;
             [weakSelf showStartStopped];
@@ -785,6 +792,7 @@ static BOOL PreparedFromOutside(void) { return hd_may_run_unsigned_code() || ng_
     [self.status.superview layoutIfNeeded];
 }
 - (void)arenaWillPrepare:(NSNotification *)notification {
+    [self.launchProgress showPhase:TKLaunchPhaseMemory];
     double mib = [notification.userInfo[@"bytes"] unsignedLongLongValue] / (1024.0 * 1024.0);
     self.status.text=self.wowController?@"Preparing to run. This can take a few minutes. Keep this app open.":
         [NSString stringWithFormat:@"Setting up %.0f MiB of execution memory. Keep this app open.",mib];
@@ -802,7 +810,7 @@ static BOOL PreparedFromOutside(void) { return hd_may_run_unsigned_code() || ng_
     [self.status.superview layoutIfNeeded];
 }
 #endif
-// What startup is doing, below the elapsed time, until the app's own window
+// What startup is doing, below the phase bar, until the app's own window
 // is on screen: application code may hold the main thread meanwhile.
 - (void)startStartupActivityInFolder:(NSString *)folder {
     static mach_timebase_info_data_t timebase;
@@ -817,7 +825,10 @@ static BOOL PreparedFromOutside(void) { return hd_may_run_unsigned_code() || ng_
 }
 - (void)windowBecameVisible:(NSNotification *)notification {
     UIWindow *window=notification.object;
-    if (window!=self.window && window.windowLevel==UIWindowLevelNormal) [self stopStartupActivity];
+    if (window!=self.window && window.windowLevel==UIWindowLevelNormal) {
+        [self.launchProgress stop];
+        [self stopStartupActivity];
+    }
 }
 - (void)stopStartupActivity {
     [self.startupActivity stop];
@@ -826,6 +837,7 @@ static BOOL PreparedFromOutside(void) { return hd_may_run_unsigned_code() || ng_
 // container: Local signing's validated page container, or nil for the
 // Developer-service/debugger path. Callers choose it; this only applies it.
 - (void)runNativeGame:(BOOL)fullStartup app:(TKApp *)app container:(NSString *)container {
+    [self.launchProgress showPhase:TKLaunchPhaseGame];
     NSArray<NSString *> *arguments=NSProcessInfo.processInfo.arguments;
     UIApplication.sharedApplication.idleTimerDisabled = YES;
     NSString *logPath = TKDocumentsPath(@"native-guest.log");
