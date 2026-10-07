@@ -27,12 +27,10 @@ xcrun clang -fobjc-arc -Wall -Wextra -Werror -O1 -g \
     launcher/WoW/Manifest.m launcher/WoW/CASC.m tests/test_wow_verification.m \
     -o build/wow-launcher/test_wow_verification
 build/wow-launcher/test_wow_verification
+xcrun clang -fobjc-arc -Wall -Wextra -Werror -O1 -g \
+    -fsanitize=address,undefined -fno-omit-frame-pointer -framework Foundation \
+    launcher/WoW/AddonCleanup.m tests/test_wow_addon_cleanup.m -o build/wow-launcher/test_wow_addon_cleanup
+build/wow-launcher/test_wow_addon_cleanup
 xcrun clang -fobjc-arc -Wall -Wextra -Werror -O2 -framework Foundation -lz \
     launcher/WoW/Manifest.m launcher/WoW/CASC.m launcher/WoW/Client.m tools/wow_cdn.m \
     -o build/wow-launcher/wow_cdn
-
-xcrun clang -fobjc-arc -Wall -Wextra -Werror -O1 -g \
-    -fsanitize=address,undefined -fno-omit-frame-pointer -framework Foundation \
-    launcher/WoW/TouchAddon.m tests/test_wow_touch_addon.m \
-    -o build/wow-launcher/test_wow_touch_addon
-build/wow-launcher/test_wow_touch_addon

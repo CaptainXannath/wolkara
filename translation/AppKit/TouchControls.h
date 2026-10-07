@@ -10,7 +10,6 @@
 - (void)touchSpecialKey:(unsigned short)code characters:(NSString *)characters;
 - (void)touchTrackpadChanged:(BOOL)enabled;
 - (void)touchKeyboardVisibilityChanged:(BOOL)visible;
-- (void)touchGamepadPreferenceChanged:(BOOL)enabled;
 - (void)touchControlSettings;
 @end
 
@@ -19,8 +18,6 @@
 @interface AKTouchControls : UIView <UIKeyInput>
 @property (nonatomic, weak) id<AKTouchControlsDelegate> delegate;
 @property (nonatomic) BOOL trackpadEnabled;
-@property (nonatomic, readonly) BOOL gamepadEnabled;
-- (void)setGamepadVisible:(BOOL)visible;
 @property (nonatomic, readonly) BOOL keyboardVisible;
 - (void)processTouches:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event;
 - (void)cancelTouches;

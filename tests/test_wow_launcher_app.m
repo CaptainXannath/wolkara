@@ -54,7 +54,6 @@ static UIView *Find(UIView *view, NSString *identifier) {
     (void)session; (void)options;
     method_setImplementation(class_getInstanceMethod(TKWoWClient.class,@selector(planForProduct:region:locale:error:)),(IMP)Plan);
     method_setImplementation(class_getInstanceMethod(TKWoWUpdater.class,@selector(updatePlan:root:progress:error:)),(IMP)Update);
-    [NSUserDefaults.standardUserDefaults setBool:YES forKey:@"WolkaraTouchHintShown"];
     [NSUserDefaults.standardUserDefaults setObject:@"wow_classic_beta" forKey:@"WoWProduct"];
     [NSUserDefaults.standardUserDefaults removeObjectForKey:@"WoWRepairRequested.wow_classic_beta"];
     // Simulate an earlier interrupted download followed by a complete USB copy.
@@ -65,6 +64,10 @@ static UIView *Find(UIView *view, NSString *identifier) {
         fprintf(stderr,"WoW UIKit TIMEOUT\n"); _Exit(1);
     });
     fixture=[TKFixtureLibrary new];
+    NSString *retired=[fixture.directory stringByAppendingPathComponent:@"Interface/AddOns/WolkaraTouch"];
+    assert([NSFileManager.defaultManager createDirectoryAtPath:retired withIntermediateDirectories:YES attributes:nil error:NULL]);
+    assert([@"synthetic addon" writeToFile:[retired stringByAppendingPathComponent:@"Fixture.lua"] atomically:YES encoding:NSUTF8StringEncoding error:NULL]);
+    [NSUserDefaults.standardUserDefaults removeObjectForKey:@"WolkaraTouchHintShown"];
     self.window=[[UIWindow alloc] initWithWindowScene:(UIWindowScene *)scene];
     self.controller=[[TKWoWViewController alloc] initWithLibrary:(id)fixture];
     __weak TKWoWFixtureDelegate *weakSelf=self;
@@ -86,6 +89,8 @@ static UIView *Find(UIView *view, NSString *identifier) {
     [self performSelector:@selector(checkReady) withObject:nil afterDelay:0.3];
 }
 - (void)checkReady {
+    assert(!self.controller.presentedViewController);
+    assert(![NSFileManager.defaultManager fileExistsAtPath:[fixture.directory stringByAppendingPathComponent:@"Interface/AddOns/WolkaraTouch"]]);
     assert(atomic_load(&updates)==0);
     assert(![NSUserDefaults.standardUserDefaults boolForKey:@"WoWInstallRequested.wow_classic_beta"]);
     assert([self primary].enabled);

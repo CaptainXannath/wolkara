@@ -3,13 +3,10 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 mkdir -p build/emulation
 bash tools/test_wow_launcher.sh
-python3 tests/test_wolkara_touch_addon.py
 bash tools/test_local_service_retry.sh
 CC=(xcrun clang -std=c11 -D_DARWIN_C_SOURCE -Wall -Wextra -Werror -O1 -g
     -fsanitize=address,undefined -fno-omit-frame-pointer -Iruntime)
 "${CC[@]}" -Itranslation/AppKit translation/AppKit/TouchTrackpad.c tests/test_touch_trackpad.c -o build/emulation/test_touch_trackpad
-"${CC[@]}" -Itranslation/AppKit translation/AppKit/TouchAdventureState.c tests/test_touch_adventure.c -o build/emulation/test_touch_adventure
-build/emulation/test_touch_adventure
 build/emulation/test_touch_trackpad
 "${CC[@]}" runtime/GuestWaitTrace.c tests/test_wait_trace.c -o build/emulation/test_wait_trace
 build/emulation/test_wait_trace

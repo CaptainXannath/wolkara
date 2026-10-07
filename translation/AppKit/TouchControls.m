@@ -143,9 +143,8 @@
 @end
 
 @implementation AKTouchControls {
-    UIButton *_keyboardButton, *_gamepadButton, *_settingsButton;
+    UIButton *_keyboardButton, *_settingsButton;
     UIButton *_insertDraftButton, *_clearDraftButton;
-    BOOL _gamepadEnabled;
     UIView *_accessory, *_composer;
     NSTimer *_holdTimer;
     AKKeyboardTextView *_keyboardInput;
@@ -187,15 +186,11 @@ static void AKEmitTouch(void *context, AKTrackpadAction action, double x, double
         [self buildComposer];
         _keyboardButton = [self buttonWithSymbol:@"keyboard" label:@"Show keyboard" action:@selector(toggleKeyboard)];
         _keyboardButton.accessibilityIdentifier = @"tolkara.keyboard";
-        _gamepadButton = [self buttonWithSymbol:@"gamecontroller" label:@"Use controller and trackpad" action:@selector(toggleGamepad)];
-        _gamepadButton.accessibilityIdentifier = @"tolkara.gamepad";
         _settingsButton = [self buttonWithSymbol:@"gearshape" label:@"Touch control settings" action:@selector(showControlSettings)];
         _settingsButton.accessibilityIdentifier = @"wolkara.controlSettings";
-        _gamepadButton.accessibilityHint = @"Switch between the touch adventure layout and controller mode with a trackpad. A connected physical controller always enables the trackpad.";
-        NSNumber *gamepad = [NSUserDefaults.standardUserDefaults objectForKey:@"TKTouchGamepadEnabled"];
-        _gamepadEnabled = gamepad ? gamepad.boolValue : NO;
-        [self setGamepadVisible:NO];
-        self.trackpadEnabled = _gamepadEnabled;
+        // Controller mode is automatic; old mode preferences must not disable
+        // the touch controller or trackpad after upgrading from the experiment.
+        self.trackpadEnabled = YES;
         [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(suspendInput:) name:UIApplicationWillResignActiveNotification object:nil];
         [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(backgroundInput:) name:UIApplicationDidEnterBackgroundNotification object:nil];
         [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(windowResigned:) name:UIWindowDidResignKeyNotification object:nil];
@@ -210,37 +205,22 @@ static void AKEmitTouch(void *context, AKTrackpadAction action, double x, double
     (void)notification;
     AKGamepadLayout *layout = [[AKGamepadLayout alloc] initWithDefaults:NSUserDefaults.standardUserDefaults];
     _haptics.enabled = layout.hapticsEnabled;
-    for (UIButton *button in @[_keyboardButton, _gamepadButton, _settingsButton]) button.alpha = layout.opacity;
+    for (UIButton *button in @[_keyboardButton, _settingsButton]) button.alpha = layout.opacity;
 }
 - (void)buttonTouchDown { [_haptics buttonPressed]; }
 
 - (void)layoutSubviews {
     [super layoutSubviews];
     _keyboardButton.frame = CGRectMake(0, 0, 44, 44);
-    _gamepadButton.frame = CGRectMake(52, 0, 44, 44);
-    _settingsButton.frame = CGRectMake(104, 0, 44, 44);
+    _settingsButton.frame = CGRectMake(52, 0, 44, 44);
 }
 - (void)setTrackpadEnabled:(BOOL)enabled {
-    if (_trackpadEnabled == enabled) return;
     [self cancelTouches];
     _trackpadEnabled = enabled;
-    [self setGamepadVisible:NO];
     [self.delegate touchTrackpadChanged:enabled];
 }
-- (BOOL)gamepadEnabled { return _gamepadEnabled; }
 - (void)showControlSettings {
     [self cancelTouches]; [self dismissKeyboard]; [self.delegate touchControlSettings];
-}
-- (void)setGamepadVisible:(BOOL)visible {
-    _gamepadButton.tintColor = self.trackpadEnabled ? UIColor.systemCyanColor : UIColor.whiteColor;
-    _gamepadButton.accessibilityLabel = _gamepadEnabled ? @"Use touch adventure controls" : @"Use controller and trackpad";
-    _gamepadButton.accessibilityValue = self.trackpadEnabled ? (visible ? @"Touch controller and trackpad" : @"Controller and trackpad") : @"Touch adventure";
-}
-- (void)toggleGamepad {
-    _gamepadEnabled = !_gamepadEnabled;
-    [NSUserDefaults.standardUserDefaults setBool:_gamepadEnabled forKey:@"TKTouchGamepadEnabled"];
-    [self setGamepadVisible:NO];
-    [self.delegate touchGamepadPreferenceChanged:_gamepadEnabled];
 }
 - (BOOL)canBecomeFirstResponder { return YES; }
 - (BOOL)keyboardVisible { return _keyboardInput.isFirstResponder; }

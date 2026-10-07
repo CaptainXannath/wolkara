@@ -1,24 +1,26 @@
 # Experimental touch input
 
-The AppKit adapter provides three translucent toolbar buttons: keyboard,
-controller mode and control settings (gear). The toolbar stays at the top
-center inside the safe area, including with a physical controller or keyboard.
-The opacity slider applies to all three buttons. The keyboard opens a native
-draft editor with Escape, Tab, arrows, backspace, Return and close controls.
+The AppKit adapter provides two translucent toolbar buttons: keyboard and control
+settings (gear). They remain fixed at the top center inside the safe area, including
+with a physical controller or the keyboard open. The keyboard opens a visible draft
+editor above it; the guest's rendering size stays unchanged. The accessory row
+provides Escape, Tab, left/right arrows, game backspace, Return and a close button.
+The transparency setting also fades both toolbar buttons, but not the keyboard
+or settings panel.
 
-Controller mode enables the touch trackpad automatically, with a physical
-controller or the full on-screen controller. There is no separate pointer
-button. Use the controller button to switch to/from the touch adventure layout
-when no hardware controller is connected. The last choice is saved; a fresh
-installation starts in adventure mode. Full-controller layout and settings are
-described in [touch controller details](TOUCH_CONTROLLER_PROPOSAL.md).
+Controller mode is always active: touch controls appear automatically without a
+physical controller, disappear when one connects, and return on disconnection.
+The layout provides two sticks, D-pad, ABXY, LB/LT/RB/RT and `+`. Opening the
+keyboard hides the touch controller and releases held inputs. Touches outside
+controls always use the trackpad, including with a physical controller; there
+are no mode toggles. Old mode preferences are ignored.
+See [touch controller details](TOUCH_CONTROLLER_PROPOSAL.md).
 
-Adventure mode provides a movement stick using the game's W/A/S/D bindings and
-relative right-button camera dragging on the free right area. Initial finger
-position never becomes a camera displacement. The rightmost 33% and bottom 16%
-remain direct-touch areas for the [WolkaraTouch addon](TOUCH_ADDON.md). A direct
-ability touch releases a held camera button first; movement can remain held.
-Use controller/trackpad mode for menus and dragging spells onto ability pages.
+The experimental touch adventure mode and bundled WolkaraTouch addon have been
+removed following reported Lua errors. The launcher moves an existing copy from
+`Interface/AddOns/WolkaraTouch` to `Interface/DisabledAddOns/WolkaraTouch-<unique ID>`
+before play. It preserves all files and other addons; WoW does not load the retired
+folder. There is no first-launch touch tutorial popup.
 
 | Finger action in trackpad mode | Mouse input |
 | --- | --- |

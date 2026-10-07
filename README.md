@@ -38,11 +38,9 @@ A successful build alone does not prove that a signing profile permits startup.
   game data. Updates preserve settings and addons.
 - An iOS keyboard with dictation and an editable draft that replaces the focused
   game field, plus a touch trackpad with two-finger scrolling.
-- Physical controller support and an optional on-screen controller. Controller
-  mode automatically enables the touch trackpad.
-- Experimental [touch adventure mode and WolkaraTouch addon](docs/TOUCH_ADDON.md):
-  movement stick, relative camera drag, eight action slots and four extra pages.
-- Movable touch controls, opacity and size settings, an alignment grid and haptics.
+- Physical controller support and an on-screen controller when none is connected.
+- Movable touch controls, opacity and size settings, shoulder-position swapping,
+  an alignment grid and haptics. Compact settings require no scrolling.
 
 ## What has been tested
 
@@ -51,8 +49,7 @@ playing WoW Forever (Classic beta). This is a gameplay report, not a benchmark
 or a promise for every scene/device. Render scale was not specified in this
 latest report; the earlier quality-2 session used 50% render scale.
 
-Forever login, gameplay and the earlier touch controls have been tested on that
-phone. The new adventure layout and addon still need an in-game device test.
+Forever login, gameplay and the touch controls have been tested on that phone.
 Classic Era reached its cinematic and login screen. A Mac-disconnected launch,
 including after reboot, has also been reported with the existing authorization.
 The edition selector includes other WoW clients; their presence is not a
@@ -89,7 +86,6 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md) before contributing.
 
 - [Launcher and updater](docs/WOW_LAUNCHER.md)
 - [Touch input](docs/TOUCH_INPUT.md)
-- [Touch adventure addon](docs/TOUCH_ADDON.md)
 - [Touch controller](docs/TOUCH_CONTROLLER_PROPOSAL.md)
 - [Engine architecture](docs/ARCHITECTURE.md)
 - [Advanced Tolkara build and execution modes](docs/BUILDING.md)

@@ -9,8 +9,8 @@ experiment remains separate, and the inherited keyboard correction is retained.
 
 When the guest window is active and no physical gamepad is connected, a translucent
 controller appears automatically. Connecting a physical gamepad removes it;
-disconnecting the physical pad restores it. The toolbar's gamepad icon toggles
-Automatic / Off and saves that preference. The toolbar stays at the top center
+disconnecting the physical pad restores it. Controller mode is always active;
+the former gamepad and pointer toggles are removed. The toolbar stays at the top center
 in every state, including with a physical pad connected or the keyboard open.
 
 - LT then LB at the upper left; RB then RT at the upper right (left-to-right).
@@ -32,26 +32,29 @@ A cancelled asynchronous connection cannot restore an unwanted overlay.
 
 ## Customization
 
-The fourth toolbar button (gear) opens a scrollable panel. Its Done and Reset
-buttons remain pinned at the bottom. The pointer icon toggles the trackpad.
+The gear opens a compact panel with two columns in landscape and one in portrait.
+All settings, Done and Reset fit without scrolling. The trackpad is always enabled
+outside the controls, both with touch controls and with a physical controller.
 
 - **Transparency:** 0–80%, applied to the existing translucent artwork;
-  default 20% additional transparency. It also applies immediately to all four
-  toolbar buttons (pointer, keyboard, controller and settings), including when
+  default 20% additional transparency. It also applies immediately to both
+  toolbar buttons (keyboard and settings), including when
   the touch controller is hidden. The saved value is restored at launch.
 - **Shoulder button size:** 80–150%, default 100%.
 - **Sticks and face button size:** 65–140%, default 100%, subject to available
   safe-area space. Each stick and its annular buttons scale together.
+- **Swap LT/LB & RT/RB:** swaps the two upper button positions on each side,
+  including customized positions. Labels and controller inputs stay matched.
+  Off by default; saved locally and cleared by Reset to defaults.
 - **Haptic feedback:** on by default, saved on this device. A light tap accompanies
   each new controller-button press (including the D-pad, shoulders, triggers and
-  `+`) and each of the four toolbar buttons. Each stick gives a firmer cue when
+  `+`) and both toolbar buttons. Each stick gives a firmer cue when
   it reaches its outer limit. Holding or sliding around the rim stays silent;
   moving inward or lifting the finger rearms the cue. Turning this off silences
   both controller and toolbar feedback without changing game input.
 - **Edit layout:** drag either stick/ring group, each rear button, or `+`.
   Done editing exits the editor. Reset to defaults restores all sizes, opacity
-  and positions, and enables haptic feedback, without changing whether automatic
-  controls are enabled.
+  and positions, turns shoulder swapping off and enables haptic feedback.
   A 24-point grid, symmetric about the safe area's center, appears behind the
   controls while editing. Dashed horizontal/vertical center guides help align
   both sides. These are visual references: dragging stays free, saved positions
@@ -64,8 +67,6 @@ to the available safe area, saved locally, and clamped after rotation/resizing.
 The toolbar and editor exit remain fixed, so moved controls cannot strand the UI.
 Preferences use `WolkaraTouchLayoutV1` and contain no game or account data.
 Older saved layouts keep their positions and sizes and default to haptics on.
-The pointer symbol has a small optical offset to the right inside its existing
-button; the button's size, position and touch target are unchanged.
 
 Haptics use UIKit's public `UIImpactFeedbackGenerator` on the phone. They do not
 produce controller rumble, inspect the game or generate additional inputs.

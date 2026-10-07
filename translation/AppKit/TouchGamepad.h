@@ -12,9 +12,6 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size);
 @property(nonatomic) BOOL keyboardVisible;
 @property(nonatomic, readonly) BOOL visible;
 @property(nonatomic, readonly) BOOL configuring;
-// Logical mode remains selected while its overlay is hidden by the keyboard.
-@property(nonatomic, readonly) BOOL controllerModeActive;
-@property(nonatomic, copy, nullable) void (^modeChanged)(BOOL active);
 @property(nonatomic, copy, nullable) void (^visibilityChanged)(BOOL visible);
 - (void)refresh;
 - (void)toggleSettings;

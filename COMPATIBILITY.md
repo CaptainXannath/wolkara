@@ -218,23 +218,13 @@ An entry records what one person observed. It is not a promise that the
 application will keep working, and it says nothing about whether its publisher
 permits it: read "Online games and account risk" in the [README](README.md).
 
-## Touch adventure experiment (2026-10-07)
+## Controller-only follow-up (2026-10-07)
 
-The `feature/touch-addon` branch adds an original WolkaraTouch addon, a movement
-stick and a camera gesture with relative deltas from touch-down. The addon uses
-normal secure action buttons and four latched page selectors. Controller mode
-(physical or virtual) enables the trackpad automatically. The addon is bundled
-and copied into `Interface/AddOns` before launch, without overwriting manual
-edits or other addons. See [scope and manual checks](docs/TOUCH_ADDON.md).
-
-Synthetic C/Objective-C/Lua and UIKit fixtures cover touch cancellation, page
-selection, drag targets, combat editing boundaries, addon installation and
-storage preflight. These checks do not validate Blizzard's secure environment
-or demonstrate in-game compatibility. Manual Forever testing is still pending;
-previous gameplay reports above refer to earlier input revisions.
-
-Storage preflight now compares both important-usage capacity and filesystem
-free blocks, accepts the largest valid result, reports query failures separately
-and logs available/required bytes. The reported 115 GB available / 68 GB required
-case is covered synthetically; the fresh device download needs retrying with
-this build.
+The user confirmed that Forever starts after restoring the enrollment reference.
+They reported Lua errors with the experimental WolkaraTouch addon, so the addon
+and touch-adventure mode were withdrawn. Controller mode now stays active: the
+touch controller appears without physical hardware and hides when it connects.
+The native trackpad remains available and the first-launch touch tutorial is gone.
+Existing WolkaraTouch files are retired outside AddOns without deleting other
+addons. Settings gain saved shoulder-position swapping and a compact layout.
+Runtime validation of this revised controller layout on the iPhone is pending.

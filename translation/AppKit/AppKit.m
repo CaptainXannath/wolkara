@@ -4,7 +4,6 @@
 #import "TextInput.h"
 #import "TouchControls.h"
 #import "TouchGamepad.h"
-#import "TouchAdventure.h"
 #import <GameController/GameController.h>
 #import <objc/message.h>
 #import <objc/runtime.h>
@@ -243,17 +242,13 @@ NSEventModifierFlags AKModifiersReconciled(NSEventModifierFlags held, NSEventMod
     return AKHeldFlags(held);
 }
 
-@interface AKHostView : UIView <UIPointerInteractionDelegate, AKTouchControlsDelegate, AKTouchAdventureDelegate>
+@interface AKHostView : UIView <UIPointerInteractionDelegate, AKTouchControlsDelegate>
 @property (nonatomic, weak) NSWindow *nsWindow;
 @end
 
 @implementation AKHostView { CGPoint _last; NSEventModifierFlags _mods; BOOL _pressedRight, _pressedLeft, _pointerInside, _softwareCursor; UIImageView *_cursorView; UIPointerInteraction *_pointer; UIPointerStyle *_gamePointerStyle; unsigned _hoverUpdates, _pointerUpdates, _cursorVisibilityReasons; NSTimeInterval _pointerReportTime;
     AKTouchControls *_touchControls;
     AKTouchGamepad *_touchGamepad;
-    AKTouchAdventure *_touchAdventure;
-    UITouch *_directTouch;
-    BOOL _adventureCameraHeld;
-    BOOL _touchApplicationSuspended, _touchWindowSuspended;
     BOOL _touchCursorActive, _touchCursorInitialized, _pressedMiddle;
     NSTimeInterval _lastTouchClickTime;
     CGPoint _lastTouchClickPoint;
@@ -282,117 +277,30 @@ NSEventModifierFlags AKModifiersReconciled(NSEventModifierFlags held, NSEventMod
         _touchControls.translatesAutoresizingMaskIntoConstraints = NO;
         [self addSubview:_touchControls];
         [NSLayoutConstraint activateConstraints:@[
-            [_touchControls.widthAnchor constraintEqualToConstant:148],
+            [_touchControls.widthAnchor constraintEqualToConstant:96],
             [_touchControls.heightAnchor constraintEqualToConstant:44],
             [_touchControls.topAnchor constraintEqualToAnchor:self.safeAreaLayoutGuide.topAnchor constant:8],
             [_touchControls.centerXAnchor constraintEqualToAnchor:self.safeAreaLayoutGuide.centerXAnchor],
         ]];
-        _touchAdventure = [[AKTouchAdventure alloc] initWithFrame:self.bounds];
-        _touchApplicationSuspended = UIApplication.sharedApplication.applicationState != UIApplicationStateActive;
-        _touchAdventure.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-        _touchAdventure.layer.zPosition = 99998;
-        _touchAdventure.delegate = self;
-        [self insertSubview:_touchAdventure belowSubview:_touchControls];
         _touchGamepad = [[AKTouchGamepad alloc] initWithHostView:self];
         __weak AKHostView *weakSelf = self;
         _touchGamepad.visibilityChanged = ^(BOOL visible) {
             AKHostView *host = weakSelf;
             if (!host) return;
             [host->_touchControls cancelTouches];
-            [host->_touchControls setGamepadVisible:visible];
-            [host updateTouchMode];
+            (void)visible;
         };
-        _touchGamepad.modeChanged = ^(BOOL active) { (void)active; [weakSelf updateTouchMode]; };
-        for (NSString *name in @[UIApplicationDidBecomeActiveNotification, UIApplicationWillResignActiveNotification,
-                UIApplicationDidEnterBackgroundNotification,
-                UIWindowDidBecomeKeyNotification, UIWindowDidResignKeyNotification,
-                UIWindowDidBecomeHiddenNotification, UIWindowDidBecomeVisibleNotification])
-            [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(touchEnvironmentChanged:) name:name object:nil];
-        _touchGamepad.enabled = _touchControls.gamepadEnabled;
-        [self updateTouchMode];
+        _touchGamepad.enabled = YES;
         [self touchTrackpadChanged:_touchControls.trackpadEnabled];
     }
     return self;
 }
 - (void)didMoveToWindow {
-    [super didMoveToWindow];
-    _touchWindowSuspended = !self.window.isKeyWindow || self.window.hidden;
-    [_touchGamepad refresh]; [self updateTouchMode];
+    [super didMoveToWindow]; [_touchGamepad refresh];
 }
 - (BOOL)nativeControlsActive { return _touchControls.keyboardVisible || _touchGamepad.configuring; }
-- (void)touchKeyboardVisibilityChanged:(BOOL)visible { _touchGamepad.keyboardVisible = visible; [self updateTouchMode]; }
-- (void)touchGamepadPreferenceChanged:(BOOL)enabled { _touchGamepad.enabled = enabled; }
-- (void)touchControlSettings { [_touchGamepad toggleSettings]; [self updateTouchMode]; }
-- (void)cancelDirectTouch {
-    if (_directTouch && _pressedLeft) [self postMouse:NSEventTypeLeftMouseUp at:_last button:0];
-    _directTouch = nil;
-}
-- (void)touchEnvironmentChanged:(NSNotification *)note {
-    // WillResign callbacks run before UIKit changes applicationState. Preserve
-    // the interruption across gamepad/keyboard callbacks in that interval.
-    if ([note.name isEqual:UIApplicationWillResignActiveNotification] ||
-        [note.name isEqual:UIApplicationDidEnterBackgroundNotification]) _touchApplicationSuspended = YES;
-    else if ([note.name isEqual:UIApplicationDidBecomeActiveNotification]) {
-        _touchApplicationSuspended = NO;
-        _touchWindowSuspended = !self.window.isKeyWindow || self.window.hidden;
-    }
-    if (note.object == self.window) {
-        if ([note.name isEqual:UIWindowDidResignKeyNotification] ||
-            [note.name isEqual:UIWindowDidBecomeHiddenNotification]) _touchWindowSuspended = YES;
-        else if ([note.name isEqual:UIWindowDidBecomeKeyNotification] ||
-                 [note.name isEqual:UIWindowDidBecomeVisibleNotification])
-            _touchWindowSuspended = !self.window.isKeyWindow || self.window.hidden;
-    }
-    if (_touchApplicationSuspended || _touchWindowSuspended) {
-        [_touchAdventure cancelTouches]; [self cancelDirectTouch];
-    }
-    [self updateTouchMode];
-}
-- (void)updateTouchMode {
-    BOOL trackpad = _touchGamepad.controllerModeActive;
-    if (_touchControls.trackpadEnabled != trackpad) {
-        [_touchAdventure cancelTouches]; [self cancelDirectTouch];
-        _touchControls.trackpadEnabled = trackpad;
-    }
-    BOOL active = !_touchApplicationSuspended && !_touchWindowSuspended &&
-        self.window.isKeyWindow && !self.window.hidden &&
-        UIApplication.sharedApplication.applicationState == UIApplicationStateActive;
-    _touchAdventure.enabled = active && !trackpad && ![self nativeControlsActive];
-    if ([self nativeControlsActive]) [self cancelDirectTouch];
-}
-- (void)touchAdventureKey:(unsigned short)code pressed:(BOOL)pressed {
-    NSString *characters = code == 13 ? @"w" : code == 0 ? @"a" : code == 1 ? @"s" : code == 2 ? @"d" : nil;
-    if (!characters) return;
-    NSEvent *event = [NSEvent new];
-    event.type = pressed ? NSEventTypeKeyDown : NSEventTypeKeyUp;
-    event.window = self.nsWindow; event.keyCode = code;
-    event.characters = event.charactersIgnoringModifiers = characters;
-    event.timestamp = NSProcessInfo.processInfo.systemUptime;
-    [NSApp postEvent:event atStart:NO];
-}
-- (void)touchAdventureCameraButtonPressed:(BOOL)pressed {
-    if (pressed && (_directTouch || _pressedLeft || _pressedRight)) { [_touchAdventure cancelCameraForDirectTouch]; return; }
-    if (_adventureCameraHeld == pressed) return;
-    _adventureCameraHeld = pressed;
-    [self touchButton:1 pressed:pressed];
-}
-- (void)touchAdventureCameraMoveBy:(CGPoint)delta {
-    if (!_adventureCameraHeld || !isfinite(delta.x) || !isfinite(delta.y)) return;
-    // Always relative, including the first queued move before the guest has
-    // processed right-down/capture. Never use the finger's absolute location.
-    NSEvent *event = [NSEvent new];
-    event.type = NSEventTypeRightMouseDragged; event.buttonNumber = 1;
-    event.window = self.nsWindow; event.locationInWindow = self.nsWindow.ak_mouseLocation;
-    event.modifierFlags = _mods; event.deltaX = delta.x; event.deltaY = delta.y;
-    event.timestamp = NSProcessInfo.processInfo.systemUptime;
-    [NSApp postEvent:event atStart:NO];
-}
-- (void)touchAdventureTapAt:(CGPoint)point {
-    if (_directTouch || _pressedLeft || _pressedRight) return;
-    _last = point;
-    [self postMouse:NSEventTypeMouseMoved at:point button:0];
-    [self touchButton:0 pressed:YES]; [self touchButton:0 pressed:NO];
-}
+- (void)touchKeyboardVisibilityChanged:(BOOL)visible { _touchGamepad.keyboardVisible = visible; }
+- (void)touchControlSettings { [_touchGamepad toggleSettings]; }
 - (BOOL)canBecomeFirstResponder { return YES; }
 - (void)setNsWindow:(NSWindow *)window {
     _nsWindow = window;
@@ -412,7 +320,7 @@ NSEventModifierFlags AKModifiersReconciled(NSEventModifierFlags held, NSEventMod
     }
 }
 - (void)touchTrackpadChanged:(BOOL)enabled {
-    self.multipleTouchEnabled = YES;
+    self.multipleTouchEnabled = enabled;
     if (enabled && !_touchCursorInitialized && self.bounds.size.width > 0 && self.bounds.size.height > 0) {
         _last = CGPointMake(CGRectGetMidX(self.bounds), CGRectGetMidY(self.bounds));
         self.nsWindow.ak_mouseLocation = CGPointMake(_last.x, self.bounds.size.height - _last.y);
@@ -643,45 +551,21 @@ static BOOL AKIsRight(UIEvent *ev) { return (ev.buttonMask & UIEventButtonMaskSe
     }
     return NO;
 }
-- (BOOL)handleAdventureDirectTouches:(NSSet<UITouch *> *)touches {
-    if (!_touchAdventure.enabled) return NO;
-    BOOL handled = NO;
-    for (UITouch *touch in touches) {
-        if (touch.type != UITouchTypeDirect) continue;
-        handled = YES;
-        if (touch.phase == UITouchPhaseBegan && !_directTouch) {
-            [_touchAdventure cancelCameraForDirectTouch];
-            _directTouch = touch;
-            _last = [touch locationInView:self];
-            [self postMouse:NSEventTypeMouseMoved at:_last button:0];
-            [self touchButton:0 pressed:YES];
-        } else if (touch == _directTouch && touch.phase == UITouchPhaseMoved) {
-            [self postMouse:NSEventTypeLeftMouseDragged at:[touch locationInView:self] button:0];
-        } else if (touch == _directTouch && (touch.phase == UITouchPhaseEnded || touch.phase == UITouchPhaseCancelled)) {
-            // Cancel releases at the last valid point, rather than moving to a
-            // system gesture's position. Other fingers cannot release this one.
-            CGPoint point = touch.phase == UITouchPhaseCancelled ? _last : [touch locationInView:self];
-            [self postMouse:NSEventTypeLeftMouseUp at:point button:0];
-            _directTouch = nil;
-        }
-    }
-    return handled;
-}
 - (void)touchesBegan:(NSSet<UITouch *> *)t withEvent:(UIEvent *)ev {
-    if ([self handleTrackpadTouches:t event:ev] || [self handleAdventureDirectTouches:t]) return;
+    if ([self handleTrackpadTouches:t event:ev]) return;
     BOOL r = AKIsRight(ev);if(r?_pressedRight:_pressedLeft)return; _last = [t.anyObject locationInView:self];
     [self reconcileModifiers:AKMods(ev.modifierFlags)];
     [self postMouse:r ? NSEventTypeRightMouseDown : NSEventTypeLeftMouseDown at:_last button:r];
 }
 - (void)touchesMoved:(NSSet<UITouch *> *)t withEvent:(UIEvent *)ev {
-    if ([self handleTrackpadTouches:t event:ev] || [self handleAdventureDirectTouches:t]) return;
+    if ([self handleTrackpadTouches:t event:ev]) return;
     if([self usesRelativeMouse])return;
     BOOL r = _pressedRight;
     CGPoint point=[t.anyObject locationInView:self];if(CGPointEqualToPoint(point,_last))return;
     [self postMouse:r ? NSEventTypeRightMouseDragged : NSEventTypeLeftMouseDragged at:point button:r];
 }
 - (void)touchesEnded:(NSSet<UITouch *> *)t withEvent:(UIEvent *)ev {
-    if ([self handleTrackpadTouches:t event:ev] || [self handleAdventureDirectTouches:t]) return;
+    if ([self handleTrackpadTouches:t event:ev]) return;
     if(!_pressedRight && !_pressedLeft)return;
     [self postMouse:_pressedRight ? NSEventTypeRightMouseUp : NSEventTypeLeftMouseUp at:[self usesRelativeMouse]?_last:[t.anyObject locationInView:self] button:_pressedRight];
 }

@@ -156,13 +156,13 @@ static void TestPreferences(void) {
     layout.opacity=NAN; layout.rearScale=INFINITY; layout.frontScale=-INFINITY;
     assert(layout.opacity==0.8 && layout.rearScale==1 && layout.frontScale==1);
     CGRect bounds=CGRectMake(20,10,500,300), frame=CGRectMake(200,60,120,120);
-    [layout moveItem:@"menu" toFrame:frame inBounds:bounds]; layout.opacity=.4; layout.hapticsEnabled=NO; [layout save];
+    [layout moveItem:@"menu" toFrame:frame inBounds:bounds]; layout.opacity=.4; layout.hapticsEnabled=NO; layout.swapShoulders=YES; [layout save];
     layout=[[AKGamepadLayout alloc] initWithDefaults:defaults];
-    assert(layout.opacity==.4 && !layout.hapticsEnabled);
+    assert(layout.opacity==.4 && !layout.hapticsEnabled && layout.swapShoulders);
     assert(CGRectEqualToRect([layout frameForItem:@"menu" defaultFrame:frame inBounds:bounds],frame));
     CGRect small=CGRectMake(0,0,220,120);
     assert(CGRectContainsRect(small,[layout frameForItem:@"menu" defaultFrame:frame inBounds:small]));
-    [layout reset]; assert(layout.opacity==.8 && layout.frontScale==1 && layout.hapticsEnabled);
+    [layout reset]; assert(layout.opacity==.8 && layout.frontScale==1 && layout.hapticsEnabled && !layout.swapShoulders);
     assert(CGRectEqualToRect([layout frameForItem:@"menu" defaultFrame:frame inBounds:bounds],frame));
     [defaults removePersistentDomainForName:suite];
 }
@@ -229,7 +229,26 @@ static void TestNativeInput(UIView *host, AKPreviewGamepad *manager) {
     // gameplay input. Preferences and dragged positions survive a new model.
     [manager toggleSettings]; [host layoutIfNeeded]; Drain();
     assert(!pad.leftShoulder.pressed && !pad.buttonA.pressed && pad.leftThumbstick.xAxis.value==0);
-    assert(Find(host,@"wolkara.controls.settings"));
+    UIView *settings=Find(host,@"wolkara.controls.settings"); assert(settings);
+    // All settings and actions fit in the visible panel; no scrolling or overlap.
+    NSMutableArray<UIView *> *settingsControls=[NSMutableArray new];
+    for(UIView *view in settings.subviews) {
+        assert(![view isKindOfClass:UIScrollView.class]);
+        assert(CGRectContainsRect(settings.bounds,view.frame));
+        assert(CGRectContainsRect(host.bounds,[view convertRect:view.bounds toView:host]));
+        if([view isKindOfClass:UIControl.class]) [settingsControls addObject:view];
+    }
+    for(NSUInteger i=0;i<settingsControls.count;i++) for(NSUInteger j=i+1;j<settingsControls.count;j++)
+        assert(!CGRectIntersectsRect(settingsControls[i].frame,settingsControls[j].frame));
+    CGRect lt=Button(host,GCInputLeftTrigger).frame, lb=Button(host,GCInputLeftShoulder).frame;
+    CGRect rt=Button(host,GCInputRightTrigger).frame, rb=Button(host,GCInputRightShoulder).frame;
+    UISwitch *swap=(id)Find(host,@"wolkara.controls.swapShoulders"); assert(!swap.on);
+    swap.on=YES; [swap sendActionsForControlEvents:UIControlEventValueChanged]; [host layoutIfNeeded];
+    assert(CGRectEqualToRect(Button(host,GCInputLeftTrigger).frame,lb));
+    assert(CGRectEqualToRect(Button(host,GCInputLeftShoulder).frame,lt));
+    assert(CGRectEqualToRect(Button(host,GCInputRightTrigger).frame,rb));
+    assert(CGRectEqualToRect(Button(host,GCInputRightShoulder).frame,rt));
+    assert([[AKGamepadLayout alloc] initWithDefaults:NSUserDefaults.standardUserDefaults].swapShoulders);
     NSUInteger silentButtons=manager.feedback.buttons, silentLimits=manager.feedback.limits;
     [Button(host,GCInputButtonA) sendActionsForControlEvents:UIControlEventTouchDown]; Drain();
     assert(!pad.buttonA.pressed);
@@ -273,7 +292,7 @@ static void TestNativeInput(UIView *host, AKPreviewGamepad *manager) {
     [cluster removeGestureRecognizer:pan];
     AKGamepadLayout *saved=[[AKGamepadLayout alloc] initWithDefaults:NSUserDefaults.standardUserDefaults];
     assert(fabs(saved.frontScale-1.3)<.001 && fabs(saved.opacity-.3)<.001);
-    assert(!saved.hapticsEnabled);
+    assert(!saved.hapticsEnabled && saved.swapShoulders);
     [(UIButton *)Find(host,@"wolkara.layout.done") sendActionsForControlEvents:UIControlEventTouchUpInside];
     [Button(host,GCInputButtonA) sendActionsForControlEvents:UIControlEventTouchDown]; Drain();
     assert(pad.buttonA.pressed && manager.feedback.buttons==silentButtons);
@@ -281,6 +300,7 @@ static void TestNativeInput(UIView *host, AKPreviewGamepad *manager) {
     [manager toggleSettings];
     [(UIButton *)Find(host,@"wolkara.controls.reset") sendActionsForControlEvents:UIControlEventTouchUpInside];
     assert(((UISwitch *)Find(host,@"wolkara.controls.haptics")).on);
+    assert(!((UISwitch *)Find(host,@"wolkara.controls.swapShoulders")).on);
     [manager toggleSettings]; [host layoutIfNeeded];
     [Button(host,GCInputButtonA) sendActionsForControlEvents:UIControlEventTouchDown];
     [Button(host,GCInputButtonA) sendActionsForControlEvents:UIControlEventTouchUpInside];
@@ -336,7 +356,8 @@ static void TestLifecycle(UIView *host) {
     assert(!pad.visible); count=pad.connections;
     [pad refresh]; [pad refresh]; assert(pad.connections==count); // no retry loop
     pad.enabled=NO; pad.enabled=YES; [pad.lastConnection finish:nil]; assert(pad.visible);
-    pad.devices=@[(id)physical]; [pad refresh]; assert(!pad.visible);
+    [pad toggleSettings]; assert(pad.configuring);
+    pad.devices=@[(id)physical]; [pad refresh]; assert(!pad.visible && !pad.configuring);
     physical.isSnapshot=YES; [pad refresh]; [pad.lastConnection finish:nil]; assert(pad.visible);
     host.hidden=YES; [pad refresh]; assert(!pad.visible);
     host.hidden=NO; [pad refresh];
@@ -424,6 +445,8 @@ static void TestLifecycle(UIView *host) {
     NSLog(@"FIXTURE_CONTROLLER_COUNT=%lu",(unsigned long)GCController.controllers.count);
     [self.gamepad refresh];
     [self performSelector:@selector(report) withObject:nil afterDelay:2];
+    if ([NSProcessInfo.processInfo.arguments containsObject:@"--preview-settings"])
+        [self.gamepad performSelector:@selector(toggleSettings) withObject:nil afterDelay:1];
 }
 - (void)testInput { TestNativeInput(self.window.rootViewController.view,(id)self.gamepad); fflush(stdout); exit(0); }
 - (void)report {
