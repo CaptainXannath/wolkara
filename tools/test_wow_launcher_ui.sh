@@ -34,6 +34,7 @@ cat > "$APP/Info.plist" <<'PLIST'
 </dict></plist>
 PLIST
 cp LICENSE NOTICE.md "$APP/"
+cp -R addons/WolkaraTouch "$APP/"
 codesign --force --sign - "$APP" > /dev/null
 xcrun simctl install "$SIM_ID" "$APP"
 LOG=$(mktemp)

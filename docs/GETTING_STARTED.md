@@ -90,8 +90,13 @@ It checks for updates when opened and before launch, and installs required
 updates before enabling Play. If interrupted, reopen and retry to resume.
 
 After **Ready to play**, press **Play** and allow memory preparation to finish.
-Log in manually using your eligible account. Touch controls appear without a
-physical controller; the upper toolbar opens the keyboard, trackpad and settings.
+Log in manually using your eligible account. The upper toolbar has keyboard,
+controller-mode and settings buttons. A fresh installation starts in touch
+adventure mode: movement stick on the left, camera drag on the free right area,
+and direct taps on the addon bars. Enable controller mode for the trackpad,
+menus and spellbook dragging; a physical controller enables it automatically.
+The original WolkaraTouch addon is installed before launch in this experimental
+branch. See [controls and action pages](TOUCH_ADDON.md).
 
 The full first-download flow is still under physical-device validation. If it
 fails, record Settings → Technical details; do not delete the app or its data as

@@ -2,6 +2,7 @@
 #import "Client.h"
 #import "Installation.h"
 #import "Updater.h"
+#import "TouchAddon.h"
 #import "../App/LaunchProgressView.h"
 
 static UIColor *Gold(void) { return [UIColor colorWithRed:0.88 green:0.73 blue:0.43 alpha:1]; }
@@ -163,7 +164,19 @@ static UIStackView *Stack(NSArray<UIView *> *views, CGFloat spacing) {
     _columns.axis=horizontal?UILayoutConstraintAxisHorizontal:UILayoutConstraintAxisVertical;
     _columns.alignment=horizontal?UIStackViewAlignmentTop:UIStackViewAlignmentFill;
 }
-- (void)viewDidAppear:(BOOL)animated { [super viewDidAppear:animated]; if (!_busy && !_sessionUsed && !_starting) [self refresh]; }
+- (void)viewDidAppear:(BOOL)animated {
+    [super viewDidAppear:animated];
+    if (!_busy && !_sessionUsed && !_starting) [self refresh];
+    if (![NSUserDefaults.standardUserDefaults boolForKey:@"WolkaraTouchHintShown"] && !self.presentedViewController) {
+        UIAlertController *hint = [UIAlertController alertControllerWithTitle:@"Touch controls"
+            message:@"Use trackpad mode to access menus.\n\nTap the controller button at the top of the game to enable the trackpad. Turn controller mode off for the movement stick, touch camera and ability bars. M1–M4 select ability pages; select a page before dragging spells onto it outside combat."
+            preferredStyle:UIAlertControllerStyleAlert];
+        [hint addAction:[UIAlertAction actionWithTitle:@"Got it" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+            (void)action; [NSUserDefaults.standardUserDefaults setBool:YES forKey:@"WolkaraTouchHintShown"];
+        }]];
+        [self presentViewController:hint animated:YES completion:nil];
+    }
+}
 - (void)viewDidDisappear:(BOOL)animated { [super viewDidDisappear:animated]; [self cancel]; }
 - (void)foreground:(NSNotification *)note {
     (void)note;
@@ -245,6 +258,11 @@ static UIStackView *Stack(NSArray<UIView *> *views, CGFloat spacing) {
             NSLog(@"[wow-update] Verification bytes read=%llu reused=%llu",updater.verificationBytesRead,updater.verificationBytesReused);
         }
 
+        if (launch && !error && !client.cancelled && installation.state==TKWoWInstallationReady && installation.app) {
+            NSString *directory = [self->_library workingDirectoryForApp:installation.app error:&error];
+            NSString *source = [NSBundle.mainBundle.resourcePath stringByAppendingPathComponent:@"WolkaraTouch"];
+            if (directory && !error) TKWoWInstallTouchAddon(source, directory, &error);
+        }
         dispatch_async(dispatch_get_main_queue(),^{
             if (generation!=self->_generation) return;
             self->_plan=plan; self->_installation=installation; self->_error=error;

@@ -1,33 +1,31 @@
 # Experimental touch input
 
-The AppKit adapter provides four translucent toolbar buttons: pointer, keyboard,
-automatic touch controller and control settings (gear). The toolbar always stays
-at the top center inside the safe area, including with a physical controller,
-with the keyboard open or with touch controls hidden. The keyboard button opens
-and closes the iOS keyboard and a visible draft editor immediately above it;
-the guest's rendering size stays unchanged. The accessory row provides Escape,
-Tab, left/right arrows, game backspace, Return and a close button.
-The control-transparency slider also fades all four toolbar buttons, updates
-them live and restores the saved value at launch. It does not fade the native
-keyboard or the settings panel. The pointer icon is optically centered with a
-small rightward offset, without moving its touch target.
+The AppKit adapter provides three translucent toolbar buttons: keyboard,
+controller mode and control settings (gear). The toolbar stays at the top
+center inside the safe area, including with a physical controller or keyboard.
+The opacity slider applies to all three buttons. The keyboard opens a native
+draft editor with Escape, Tab, arrows, backspace, Return and close controls.
 
-The gamepad button enables automatic touch controls when no physical controller
-is connected, or turns them off. The custom layout provides two sticks, D-pad,
-ABXY, LB/LT/RB/RT and `+`; it hides and releases held input while the keyboard is
-open. See [touch controller details and validation](TOUCH_CONTROLLER_PROPOSAL.md).
+Controller mode enables the touch trackpad automatically, with a physical
+controller or the full on-screen controller. There is no separate pointer
+button. Use the controller button to switch to/from the touch adventure layout
+when no hardware controller is connected. The last choice is saved; a fresh
+installation starts in adventure mode. Full-controller layout and settings are
+described in [touch controller details](TOUCH_CONTROLLER_PROPOSAL.md).
 
-The pointer button toggles trackpad mode and appears cyan when enabled. The
-initial default is on for iPhone, off for iPad; a user's choice is saved
-locally. Switching it off restores direct touch input. Long-press the pointer
-button for a menu with left, right and middle clicks.
+Adventure mode provides a movement stick using the game's W/A/S/D bindings and
+relative right-button camera dragging on the free right area. Initial finger
+position never becomes a camera displacement. The rightmost 33% and bottom 16%
+remain direct-touch areas for the [WolkaraTouch addon](TOUCH_ADDON.md). A direct
+ability touch releases a held camera button first; movement can remain held.
+Use controller/trackpad mode for menus and dragging spells onto ability pages.
 
 | Finger action in trackpad mode | Mouse input |
 | --- | --- |
 | Slide one finger | Relative cursor movement; lifting/repositioning does not move the cursor. |
 | Tap once / twice | Left click / double click. |
 | Tap with two fingers | Right click. |
-| Tap with three fingers | Middle click. The pointer button's menu provides an alternative. |
+| Tap with three fingers | Middle click. |
 | Slide two fingers | Vertical or horizontal wheel scrolling, with accumulated partial steps. |
 | Hold one finger still for about half a second, then slide | Left-button drag until release. |
 | Hold two fingers still for about half a second, then slide | Right-button drag, including relative camera motion when the guest captures the mouse. |

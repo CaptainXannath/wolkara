@@ -2,6 +2,8 @@
 #import "AppKit.h"
 #import "TouchControls.h"
 #import "TouchGamepad.h"
+#import "TouchAdventure.h"
+#import <objc/runtime.h>
 #include <assert.h>
 
 @interface AKInputFixtureView : NSView
@@ -102,6 +104,144 @@ static void AKFixtureInputSource(void *context) {
     (void)context;
     NSEvent *event = [NSEvent new]; event.type = NSEventTypeMouseMoved;
     [NSApp postEvent:event atStart:NO];
+}
+
+@interface AKTouchGamepad (InputModeFixture)
+- (NSArray<GCController *> *)connectedControllers;
+- (BOOL)wantsController;
+@end
+@interface UIView (InputModeFixture)
+- (void)updateTouchMode;
+- (void)touchAdventureTapAt:(CGPoint)point;
+@end
+@interface AKBridgeFixtureTouch : UITouch
+@property CGPoint point;
+@property NSTimeInterval time;
+@property UITouchPhase fixturePhase;
+@end
+@implementation AKBridgeFixtureTouch
+- (CGPoint)locationInView:(UIView *)view { (void)view; return self.point; }
+- (NSTimeInterval)timestamp { return self.time; }
+- (UITouchType)type { return UITouchTypeDirect; }
+- (UITouchPhase)phase { return self.fixturePhase; }
+@end
+@interface AKBridgeFixtureController : NSObject
+@property BOOL isSnapshot;
+@property id extendedGamepad;
+@property id microGamepad;
+@end
+@implementation AKBridgeFixtureController
+@end
+static NSArray<GCController *> *AKBridgeFixtureControllers;
+static NSArray<GCController *> *AKBridgeConnectedControllers(id object, SEL selector) {
+    (void)object; (void)selector; return AKBridgeFixtureControllers ?: @[];
+}
+static BOOL AKBridgeNeverConnect(id object, SEL selector) {
+    (void)object; (void)selector; return NO;
+}
+static AKBridgeFixtureTouch *AKBridgeTouch(CGPoint point, NSTimeInterval time) {
+    AKBridgeFixtureTouch *touch=[AKBridgeFixtureTouch new];
+    touch.point=point; touch.time=time; touch.fixturePhase=UITouchPhaseBegan; return touch;
+}
+static NSArray<NSEvent *> *AKTakeBridgeEvents(void) {
+    // Inspect our synthetic queue instead of dispatching movement letters into
+    // the fixture's text field. The caller pauses its normal event pump.
+    NSMutableArray<NSEvent *> *events=[NSMutableArray new]; NSEvent *event;
+    while ((event=[NSApp nextEventMatchingMask:UINT64_MAX untilDate:NSDate.distantPast
+        inMode:NSDefaultRunLoopMode dequeue:YES])) [events addObject:event];
+    return events;
+}
+static void AKTestAdventureBridge(NSWindow *guest) {
+    UIView *host=[guest valueForKey:@"_host"];
+    AKTouchControls *controls=[host valueForKey:@"_touchControls"];
+    AKTouchGamepad *gamepad=[host valueForKey:@"_touchGamepad"];
+    AKTouchAdventure *adventure=[host valueForKey:@"_touchAdventure"];
+    [host layoutIfNeeded];
+    assert(fabs(controls.bounds.size.width-148)<0.1);
+    assert(!AKFindInputView(controls,@"tolkara.trackpad"));
+    NSUInteger buttons=0;
+    for (UIView *view in controls.subviews) if ([view isKindOfClass:UIButton.class]) buttons++;
+    assert(buttons==3 && AKFindInputView(controls,@"tolkara.keyboard") &&
+        AKFindInputView(controls,@"tolkara.gamepad") && AKFindInputView(controls,@"wolkara.controlSettings"));
+    // Substitute discovery/transport only inside our own fixture process. This
+    // tests real mode callbacks without connecting a virtual pad or touching a
+    // physical controller paired to the test Mac.
+    Method discover=class_getInstanceMethod(AKTouchGamepad.class,@selector(connectedControllers));
+    Method connect=class_getInstanceMethod(AKTouchGamepad.class,@selector(wantsController));
+    IMP originalDiscover=method_setImplementation(discover,(IMP)AKBridgeConnectedControllers);
+    IMP originalConnect=method_setImplementation(connect,(IMP)AKBridgeNeverConnect);
+    gamepad.enabled=NO; [host updateTouchMode];
+    assert(!controls.trackpadEnabled && adventure.enabled);
+    gamepad.enabled=YES;
+    assert(gamepad.controllerModeActive && controls.trackpadEnabled && !adventure.enabled);
+    gamepad.enabled=NO;
+    assert(!controls.trackpadEnabled && adventure.enabled);
+    AKBridgeFixtureController *physical=[AKBridgeFixtureController new]; physical.extendedGamepad=@YES;
+    AKBridgeFixtureControllers=@[(id)physical]; [gamepad refresh];
+    assert(!gamepad.enabled && gamepad.controllerModeActive && controls.trackpadEnabled && !adventure.enabled);
+    AKBridgeFixtureControllers=@[]; [gamepad refresh];
+    assert(!controls.trackpadEnabled && adventure.enabled);
+    [controls toggleKeyboard]; assert(controls.keyboardVisible && !adventure.enabled);
+    [controls dismissKeyboard]; assert(!controls.keyboardVisible && adventure.enabled);
+    [gamepad toggleSettings]; assert(gamepad.configuring && !adventure.enabled);
+    [gamepad toggleSettings]; assert(!gamepad.configuring && adventure.enabled);
+    [adventure layoutIfNeeded];
+    [host touchAdventureTapAt:CGPointMake(60,80)];
+    NSPoint anchor=guest.ak_mouseLocation;
+    (void)AKTakeBridgeEvents();
+    CGFloat width=host.bounds.size.width, height=host.bounds.size.height;
+    AKBridgeFixtureTouch *camera=AKBridgeTouch(CGPointMake(width*.56,height*.35),1);
+    [adventure touchesBegan:[NSSet setWithObject:camera] withEvent:nil];
+    assert(!AKTakeBridgeEvents().count);
+    camera.point=CGPointMake(camera.point.x+10,camera.point.y+7); camera.time=1.1;
+    [adventure touchesMoved:[NSSet setWithObject:camera] withEvent:nil];
+    NSArray<NSEvent *> *events=AKTakeBridgeEvents();
+    assert(events.count==2 && events[0].type==NSEventTypeRightMouseDown && events[1].type==NSEventTypeRightMouseDragged);
+    assert(CGPointEqualToPoint(events[0].locationInWindow,anchor) &&
+        CGPointEqualToPoint(events[1].locationInWindow,anchor));
+    assert(events[1].deltaX==10 && events[1].deltaY==7 && CGPointEqualToPoint(guest.ak_mouseLocation,anchor));
+    // An ability press must release the camera BEFORE moving the one guest
+    // pointer. A second unclaimed finger cannot release its held left button.
+    AKBridgeFixtureTouch *direct=AKBridgeTouch(CGPointMake(width*.84,height*.40),2);
+    [host touchesBegan:[NSSet setWithObject:direct] withEvent:nil];
+    events=AKTakeBridgeEvents();
+    assert(events.count==3 && events[0].type==NSEventTypeRightMouseUp &&
+        events[1].type==NSEventTypeMouseMoved && events[2].type==NSEventTypeLeftMouseDown);
+    AKBridgeFixtureTouch *other=AKBridgeTouch(CGPointMake(width*.90,height*.40),2.1);
+    [host touchesBegan:[NSSet setWithObject:other] withEvent:nil];
+    other.fixturePhase=UITouchPhaseEnded; [host touchesEnded:[NSSet setWithObject:other] withEvent:nil];
+    camera.fixturePhase=UITouchPhaseEnded; [adventure touchesEnded:[NSSet setWithObject:camera] withEvent:nil];
+    assert(!AKTakeBridgeEvents().count);
+    // Nor can a new camera finger steal that drag before its owner lifts.
+    camera=AKBridgeTouch(CGPointMake(width*.56,height*.35),3);
+    [adventure touchesBegan:[NSSet setWithObject:camera] withEvent:nil];
+    camera.point=CGPointMake(camera.point.x+12,camera.point.y); camera.time=3.1;
+    [adventure touchesMoved:[NSSet setWithObject:camera] withEvent:nil];
+    assert(!AKTakeBridgeEvents().count);
+    direct.fixturePhase=UITouchPhaseMoved; direct.point=CGPointMake(width*.82,height*.50);
+    [host touchesMoved:[NSSet setWithObject:direct] withEvent:nil];
+    direct.fixturePhase=UITouchPhaseEnded; [host touchesEnded:[NSSet setWithObject:direct] withEvent:nil];
+    events=AKTakeBridgeEvents();
+    assert(events.count==2 && events[0].type==NSEventTypeLeftMouseDragged && events[1].type==NSEventTypeLeftMouseUp);
+    // Window hiding is an interruption, even without an app background event.
+    direct=AKBridgeTouch(CGPointMake(width*.84,height*.40),4);
+    [host touchesBegan:[NSSet setWithObject:direct] withEvent:nil]; (void)AKTakeBridgeEvents();
+    [NSNotificationCenter.defaultCenter postNotificationName:UIWindowDidBecomeHiddenNotification object:host.window];
+    events=AKTakeBridgeEvents();
+    assert(!adventure.enabled && events.count==1 && events[0].type==NSEventTypeLeftMouseUp);
+    [NSNotificationCenter.defaultCenter postNotificationName:UIWindowDidBecomeVisibleNotification object:host.window];
+    [host updateTouchMode]; assert(adventure.enabled);
+    [NSNotificationCenter.defaultCenter postNotificationName:UIApplicationWillResignActiveNotification object:nil];
+    // UIKit still says Active while WillResign is being delivered. Later
+    // mode/configuration callbacks must not reactivate the touch surface.
+    gamepad.enabled=YES; gamepad.enabled=NO; [host updateTouchMode];
+    assert(!adventure.enabled);
+    [NSNotificationCenter.defaultCenter postNotificationName:UIApplicationDidBecomeActiveNotification object:nil];
+    assert(adventure.enabled);
+    [adventure cancelTouches]; (void)AKTakeBridgeEvents();
+    method_setImplementation(discover,originalDiscover); method_setImplementation(connect,originalConnect);
+    AKBridgeFixtureControllers=nil; [gamepad refresh];
+    puts("TOUCH_ADVENTURE_BRIDGE_PASS: three-button toolbar, automatic modes, native UI suspension, relative queued camera and direct touch ownership.");
 }
 
 @interface AKInputFixtureScene : UIResponder <UIWindowSceneDelegate>
@@ -264,6 +404,10 @@ static void AKFixtureInputSource(void *context) {
                 [reference becomeFirstResponder];
                 return;
             }
+            if (selfTest) {
+                [self.pump invalidate]; self.pump=nil;
+                AKTestAdventureBridge(self.guest);
+            }
             [controls toggleKeyboard];
             if (!selfTest) return;
             [NSTimer scheduledTimerWithTimeInterval:1 repeats:NO block:^(NSTimer *timer) {
@@ -417,4 +561,8 @@ static void AKFixtureInputSource(void *context) {
     return config;
 }
 @end
-int main(int argc, char **argv) { @autoreleasepool { return UIApplicationMain(argc, argv, nil, NSStringFromClass(AKInputFixtureApp.class)); } }
+int main(int argc, char **argv) { @autoreleasepool {
+    if ([NSProcessInfo.processInfo.arguments containsObject:@"--self-test"])
+        [NSUserDefaults.standardUserDefaults setBool:NO forKey:@"TKTouchGamepadEnabled"];
+    return UIApplicationMain(argc, argv, nil, NSStringFromClass(AKInputFixtureApp.class));
+} }

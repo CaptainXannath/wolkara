@@ -1,0 +1,8 @@
+## Interface: 16001
+## Title: Wolkara Touch
+## Notes: Eight touch actions, four selectable pages and compact menu shortcuts.
+## Author: Wolkara contributors
+## Version: 0.1.0
+## X-License: MIT
+
+WolkaraTouch.lua

@@ -54,6 +54,7 @@ static UIView *Find(UIView *view, NSString *identifier) {
     (void)session; (void)options;
     method_setImplementation(class_getInstanceMethod(TKWoWClient.class,@selector(planForProduct:region:locale:error:)),(IMP)Plan);
     method_setImplementation(class_getInstanceMethod(TKWoWUpdater.class,@selector(updatePlan:root:progress:error:)),(IMP)Update);
+    [NSUserDefaults.standardUserDefaults setBool:YES forKey:@"WolkaraTouchHintShown"];
     [NSUserDefaults.standardUserDefaults setObject:@"wow_classic_beta" forKey:@"WoWProduct"];
     [NSUserDefaults.standardUserDefaults removeObjectForKey:@"WoWRepairRequested.wow_classic_beta"];
     [NSUserDefaults.standardUserDefaults removeObjectForKey:@"WoWInstallRequested.wow_classic_beta"];

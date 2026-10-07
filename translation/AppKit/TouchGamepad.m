@@ -511,6 +511,11 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
 }
 - (void)refresh {
     NSAssert(NSThread.isMainThread, @"Touch controller lifecycle belongs on the main thread");
+    BOOL mode = !_invalidated && (_enabled || [self hasPhysicalController]);
+    if (_controllerModeActive != mode) {
+        _controllerModeActive = mode;
+        if (self.modeChanged) self.modeChanged(mode);
+    }
     if (_connecting) {
         // Wait for this attempt's reply before starting another one. A late
         // successful connect must not bring controls back after suspension.
