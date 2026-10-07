@@ -39,7 +39,9 @@ or memory requirements; see [the distribution plan](WOLKARA_DISTRIBUTION.md).
 - Checks at opening, foregrounding and before Play. An outdated installed copy
   **starts updating automatically**. A missing edition offers Install; an
   unverifiable installation offers Repair. Interrupted explicit installations
-  are remembered and resumed, including after reopening the process.
+  are remembered and resumed, including after reopening the process. A complete,
+  current client imported over USB satisfies a stale installation request without
+  replaying its partial download; an explicit Repair still runs.
 - Shows preparation, existing-data verification, downloading, file installation
   and activation progress. Play stays disabled until the current published build
   and its original executable pass verification. A failed check never counts as
@@ -79,7 +81,21 @@ credentials or game code are supplied by Tolkara.
 `Client.m` uses Blizzard's public HTTPS services, bounded responses and verified
 Range requests. It reuses a connection pool and groups adjacent archive objects
 into requests of up to 16 MiB (larger individual objects remain bounded at
-256 MiB). Every selected object is checked before being passed to storage.
+256 MiB). It downloads up to four ranges concurrently, with independent response
+buffers, bounds and errors. Each window retains at most 64 MiB of payload; an
+individual object above that limit runs alone. Checksum verification, storage
+writes and progress callbacks remain serial. Cancellation or a transport failure
+cancels pending tasks and waits for their completion before returning; failed
+windows never activate an installation. This improves throughput without changing
+the foreground-only download lifecycle or durable resume semantics. Every
+selected object is checked before being passed to storage.
+
+A synthetic HTTPS-transport test with fourteen 80 ms latency-bound requests took
+1.184 s serially and 0.344 s with four concurrent requests (3.44×). It uses original
+synthetic fixtures and no live CDN. This demonstrates reduced request-latency
+cost, not an expected speedup on every connection or a measured full-game download.
+The same suite covers interleaved responses, wrong/short ranges, corrupted payloads,
+consumer failure, cancellation, retry, the 64 MiB window and oversized objects.
 Metadata caches are content-addressed and reverified. Protocol sources and
 licences from TACTSharp, CascLib and lookup3 are recorded in `NOTICE.md`;
 no .NET runtime is embedded.

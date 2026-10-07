@@ -16,13 +16,13 @@ static NSData *Wrap(NSData *d){NSMutableData *r=[Text(@"BLTE") mutableCopy];BE(r
 @implementation TKUpdateClient
 - (instancetype)init { if((self=[super init])){_responses=[NSMutableDictionary new];_counts=[NSMutableDictionary new];}return self; }
 - (NSData *)fetch:(NSURL *)url limit:(NSUInteger)limit error:(NSError **)error {
-    NSString *key=url.lastPathComponent;_counts[key]=@([_counts[key] unsignedIntegerValue]+1);
+    NSString *key=url.lastPathComponent;@synchronized(self){_counts[key]=@([_counts[key] unsignedIntegerValue]+1);}
     NSData *data=_responses[key];if(self.changed && [key isEqual:@"versions"])data=Text(@"Region|BuildConfig|CDNConfig|VersionsName\neu|11111111111111111111111111111111|22222222222222222222222222222222|changed\n");
     if(self.cancelled || !data || data.length>limit){if(error)*error=TKWoWError(@"Synthetic missing/cancelled response");return nil;}return data;
 }
 - (NSData *)range:(NSURL *)url offset:(uint64_t)offset size:(NSUInteger)size error:(NSError **)error {
     (void)url; if(offset>_archive.length || size>_archive.length-offset){if(error)*error=TKWoWError(@"Bad synthetic range");return nil;}
-    _counts[@"range"]=@([_counts[@"range"] unsignedIntegerValue]+1);return [_archive subdataWithRange:NSMakeRange((NSUInteger)offset,size)];
+    @synchronized(self){_counts[@"range"]=@([_counts[@"range"] unsignedIntegerValue]+1);}return [_archive subdataWithRange:NSMakeRange((NSUInteger)offset,size)];
 }
 @end
 static NSString *Reference(NSString *name,NSData *d,TKUpdateClient *client){NSData *raw=Wrap(d);client.responses[TKWoWMD5(raw)]=raw;return [NSString stringWithFormat:@"%@ = %@ %@\n%@-size = %lu %lu\n",name,TKWoWMD5(d),TKWoWMD5(raw),name,(unsigned long)d.length,(unsigned long)raw.length];}
