@@ -6,6 +6,11 @@ on the iPhone/iPad. WoW and Battle.net do not need to be installed on your Mac.
 
 ## Requirements
 
+For the isolated, experimental Personal Team candidate, see
+[External JIT setup](EXTERNAL_JIT.md). Its `WolkaraExternalJIT` scheme has a
+separate app container and requires StikDebug plus LocalDevVPN. The instructions
+below remain the validated integrated route.
+
 - An Apple silicon Mac, Xcode with support for your device's iOS version,
   XcodeGen and Python 3. Install Xcode's requested platform components first.
 - Your own Apple developer signing. The integrated app and its tunnel need

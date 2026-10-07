@@ -12,6 +12,9 @@
 #import "NativeGuest.h"
 #import "SignedFileProbe.h"
 #import "StartupActivity.h"
+#if TOLKARA_EXTERNAL_JIT_PROTOTYPE
+#import "ExternalJITCoordinator.h"
+#endif
 #include "HostDiagnostics.h"
 #include <errno.h>
 #include <mach/mach_time.h>
@@ -43,6 +46,9 @@
 // This launch's execution mode and where it came from (logged; never a path).
 @property(nonatomic) TKExecutionMode executionMode;
 @property(nonatomic,copy) NSString *executionModeSource;
+#if TOLKARA_EXTERNAL_JIT_PROTOTYPE
+@property(nonatomic,strong) TKExternalJITCoordinator *externalJIT;
+#endif
 #if TOLKARA_INTEGRATED_AUTH
 @property(nonatomic,strong) TKLocalAuthorization *localAuthorization;
 // A development run's startup kind, kept while this iPad's Developer service prepares.
@@ -84,7 +90,9 @@ static void PrepareLocalSigningFolder(void) {
         withIntermediateDirectories:YES attributes:nil error:NULL];
 }
 // JIT enabled from outside, or an arena its enabler left.
+#if !TOLKARA_EXTERNAL_JIT_PROTOTYPE
 static BOOL PreparedFromOutside(void) { return hd_may_run_unsigned_code() || ng_arena_reserved(); }
+#endif
 
 // Explicit execution-mode choice: equal buttons, neither highlighted nor
 // recommended. The first choice cannot be dismissed without choosing.
@@ -172,10 +180,16 @@ static BOOL PreparedFromOutside(void) { return hd_may_run_unsigned_code() || ng_
 }
 // An enabler attaches only briefly: take its arena now.
 - (void)reserveExecutableMemory {
+#if TOLKARA_EXTERNAL_JIT_PROTOTYPE
+    // Only a deliberate, preflighted request may use the external protocol.
+    // In particular, an ordinary Xcode debugger must never service these traps.
+    return;
+#else
     // External JIT only: any other debugger stops at the request.
     if(self.executionMode!=TKExecutionModeExternalJIT || !TKExecutionModeAvailable(self.executionMode,NULL) ||
        ng_arena_reserved() || !hd_debugger_attached() || !CanStartApps()) return;
     ng_reserve_arena(NULL);
+#endif
 }
 - (void)sceneDidBecomeActive:(UIScene *)scene {
     (void)scene; [self reserveExecutableMemory];
@@ -241,6 +255,12 @@ static BOOL PreparedFromOutside(void) { return hd_may_run_unsigned_code() || ng_
     [self.window makeKeyAndVisible];
     // Timer callout, not dispatch_async: the guest never returns from main(), and a
     // main-queue block that never returns would wedge the main dispatch queue.
+#if TOLKARA_EXTERNAL_JIT_PROTOTYPE
+    if ([arguments containsObject:@"--external-jit-probe"]) {
+        [self performSelector:@selector(startExternalJITProbe) withObject:nil afterDelay:0];
+        return;
+    }
+#endif
     [self performSelector:@selector(startGuest) withObject:nil afterDelay:0];
 }
 - (UIViewController *)statusController {
@@ -411,6 +431,24 @@ static BOOL PreparedFromOutside(void) { return hd_may_run_unsigned_code() || ng_
 }
 - (NSArray<TKDiagnosticSection *> *)diagnosticSections {
     NSMutableArray *sections=[NSMutableArray new];
+#if TOLKARA_EXTERNAL_JIT_PROTOTYPE
+    __weak AKHostSceneDelegate *weakSelf=self;
+    TKDiagnostic *probe=[TKDiagnostic diagnosticWithTitle:@"Test External JIT setup"
+        detail:@"Connect LocalDevVPN and set up StikDebug first. Runs only our own sample, then requires a restart."
+        run:^(TKDiagnosticReport report) {
+            AKHostSceneDelegate *host=weakSelf;
+            if (!host.externalJIT) host.externalJIT=[TKExternalJITCoordinator new];
+            [host.externalJIT startProbe:YES logPath:TKDocumentsPath(@"external-jit.log")
+                status:^(NSString *message) { report(message,NO); }
+                completion:^(BOOL ready,BOOL restart,NSString *message) {
+                    (void)ready; (void)restart; report(message,YES);
+                }];
+        }];
+    probe.endsSession=YES;
+    [sections addObject:[TKDiagnosticSection sectionWithTitle:@"External JIT prototype"
+        footer:@"No game is needed for this test. A pass does not verify game memory requirements or Personal Team provisioning."
+        items:@[probe]]];
+#endif
     TKAppLibrary *library=self.library;
     [sections addObject:[TKDiagnosticSection sectionWithTitle:@"Runtime" footer:@"These checks run only Tolkara's own code." items:@[
         [TKDiagnostic diagnosticWithTitle:@"Host diagnostics" detail:@"Debugger, code signing, memory and the arena limit. No probe sample runs." run:^(TKDiagnosticReport report) {
@@ -584,12 +622,35 @@ static BOOL PreparedFromOutside(void) { return hd_may_run_unsigned_code() || ng_
         [self alert:@"Cannot Start App" message:error.localizedDescription];
         return;
     }
+#if TOLKARA_EXTERNAL_JIT_PROTOTYPE
+    [self showStatusScreen];
+    UIApplication.sharedApplication.idleTimerDisabled=YES;
+    [self.launchProgress start];
+    if (!self.externalJIT) self.externalJIT=[TKExternalJITCoordinator new];
+    __weak AKHostSceneDelegate *weakSelf=self;
+    [self.externalJIT startProbe:NO logPath:TKDocumentsPath(@"external-jit.log")
+        status:^(NSString *message) { weakSelf.status.text=message; }
+        completion:^(BOOL ready,BOOL restart,NSString *message) {
+            AKHostSceneDelegate *host=weakSelf;
+            if (ready && ng_external_arena_ready()) {
+                [host startPreparedExternalJITApp:app];
+            } else {
+                if (restart) [host endSession:message];
+                host.status.text=message; [host showStartStopped];
+            }
+        }];
+    return;
+#else
     // Opened without JIT: say so; the session stays usable.
     if(!PreparedFromOutside()) {
         [self alert:@"JIT Not Enabled" message:@"This app was opened without JIT. Enable JIT with your sideloading tool "
             "(such as SideStore) or a JIT enabler such as StikDebug, then open it again."];
         return;
     }
+    [self startPreparedExternalJITApp:app];
+#endif
+}
+- (void)startPreparedExternalJITApp:(TKApp *)app {
     [self endSession:[NSString stringWithFormat:@"%@ was started in this session. Close this app in the app switcher and open it again to start an app.",app.name]];
     self.launchingApp=app;
     [self.library recordLaunchOfApp:app error:NULL];
@@ -602,9 +663,28 @@ static BOOL PreparedFromOutside(void) { return hd_may_run_unsigned_code() || ng_
     [self performSelector:@selector(startExternalJITGame) withObject:nil afterDelay:0];
 }
 - (void)startExternalJITGame {
+#if TOLKARA_EXTERNAL_JIT_PROTOTYPE
+    if (!ng_external_arena_ready()) {
+        self.status.text=@"Execution memory is not ready or a debugger is attached. Close and reopen Wolkara JIT.";
+        [self showStartStopped]; return;
+    }
+#endif
     (void)ng_use_external_authorization();
     [self runNativeGame:YES app:self.launchingApp container:nil];
 }
+#if TOLKARA_EXTERNAL_JIT_PROTOTYPE
+- (void)startExternalJITProbe {
+    [self endSession:@"A JIT test used this session. Close and reopen Wolkara JIT before playing."];
+    self.externalJIT=[TKExternalJITCoordinator new];
+    __weak AKHostSceneDelegate *weakSelf=self;
+    [self.externalJIT startProbe:YES logPath:TKDocumentsPath(@"external-jit.log")
+        status:^(NSString *message) { weakSelf.status.text=message; }
+        completion:^(BOOL ready,BOOL restart,NSString *message) {
+            (void)ready; (void)restart; weakSelf.status.text=message;
+            [weakSelf showStartStopped];
+        }];
+}
+#endif
 
 #pragma mark Native runs
 

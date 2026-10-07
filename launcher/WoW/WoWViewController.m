@@ -388,7 +388,11 @@ static UIStackView *Stack(NSArray<UIView *> *views, CGFloat spacing) {
     case TKExecutionModeLocalSigning:
         _startupLabel.text=@"Startup requires a signed container matching this version."; break;
     case TKExecutionModeExternalJIT:
+#if TOLKARA_EXTERNAL_JIT_PROTOTYPE
+        _startupLabel.text=@"Play opens StikDebug to prepare this session. Keep LocalDevVPN connected."; break;
+#else
         _startupLabel.text=@"Enable JIT before starting a new session."; break;
+#endif
     case TKExecutionModeNone:
         _startupLabel.text=@"This build cannot start the game. See Diagnostics and logs."; break;
     }

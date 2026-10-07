@@ -13,18 +13,19 @@ membership. They can still use their own free Apple Account/Personal Team in
 Xcode. This changes the proposed default route; the existing paid integrated
 build remains the working baseline, not the intended public prerequisite.
 
-**External JIT is the first candidate to validate.** This is a source and
-documentation assessment, not a successful free-account WoW test.
+**External JIT now has an isolated prototype** on `feature/external-jit-setup`.
+See [setup and validation](EXTERNAL_JIT.md). This is not yet a successful
+free-account WoW test.
 
 Our `TolkaraDiagnostics` target excludes the integrated packet-tunnel extension
 and already supports External JIT. `runtime/DebuggerArena.c` uses the same
 prepare-region/detach register and breakpoint protocol described by the
 [StikJIT integration guide](https://github.com/StikDebug/StikJIT/blob/main/INTEGRATION.md).
-The launcher currently asks users to enable JIT elsewhere; no automatic handoff
-is implemented. The target also still inherits the memory entitlements, so it
-is **not** ready to select a Personal Team and Run unchanged. The existing IPA
-packager anticipates a sideloader adjusting the signature; that does not fix
-direct Xcode provisioning.
+The legacy diagnostics target retains its manual handoff and memory entitlements.
+The new **WolkaraExternalJIT** target instead removes those capabilities and the
+integrated extension, requests development permission and hands Play to StikDebug
+with the fixed `universal.js` protocol. Its signed build and sanitizer tests pass.
+The existing IPA packager remains separate; it does not select this new target.
 
 The [StikDebug project](https://github.com/StikDebug/StikDebug) documents free
 Apple Account builds, a pairing file and an external loopback VPN. It is no
@@ -46,7 +47,7 @@ Its guide still requires LocalDevVPN and describes manual network recovery
 without Wi-Fi. Matching our breakpoint protocol is promising, not proof of
 successful memory preparation or lower startup time.
 
-The first prototype should have narrow acceptance gates:
+The prototype retains these acceptance gates:
 
 1. Generate a separate free-account build configuration without the integrated
    network extension or unsupported memory capabilities. Keep existing personal
@@ -59,8 +60,9 @@ The first prototype should have narrow acceptance gates:
    not guarantee the full game fits without extended-address-space/increased-
    memory capabilities. A paid profile with those keys omitted is an early
    comparison, not proof of free-account provisioning.
-3. Only after those gates pass, add Mac-assisted pairing and the launch handoff,
-   preserving the invariant that no debugger remains attached at game entry.
+3. Validate the implemented URL handoff and Mac-assisted StikDebug pairing on
+   device, preserving the invariant that no debugger remains attached at game
+   entry. Only the synthetic fixture may run automatically during setup.
 4. Test a real Personal Team, weekly signature renewal without deleting game
    data, reboot, a client update and mobile-data startup away from the Mac.
 
