@@ -6,6 +6,38 @@ prepares executable memory and WoW reaches its own `main()` function, then a
 TACT Task Thread encounters `EXC_BAD_ACCESS` at `0x198` inside
 `libsystem_pthread.dylib` after roughly 40 seconds.
 
+## November 1: new evidence in native-guest(5).log
+
+The updated diagnostics reported:
+
+```text
+[tact-state] saved_caller_x19=0x14c34c480
+[tact-state] *(x19+0x10)=0x14c0e40a0
+[tact-state] *(*(x19+0x10)+0x700)=0
+[tact-probe] earlier guest frame=... guest_preferred=0x102a0bf10
+```
+
+The 0x700 field is NULL **at crash time**. The known ARM64 sequence
+near the earlier return address loads `x0` from that 0x700 field
+before calling an intermediary. A direct `BL` at preferred
+`0x102a0bf0c` targets preferred `0x102a2dcac`; this intermediary's
+internal operations are the next missing evidence. It is not yet
+established that the null 0x700 field was the actual `x0` used at
+that call, or that it is caused by a missing download.
+
+The diagnostic now also snapshots 96 ARM64 instruction words from the
+intermediary's preferred entry `0x102a2dcac` (after WoW's unpacking,
+via the safe read/write alias). Look for `[tact-middle]` messages.
+Do not suppress the mutex, fabricate the missing object, or claim a fix.
+
+The earlier WoW crash reports also showed
+`Failed to download the patch index`. Since WoW has an
+`enableBGDL` CVar, a reversible independent test is to back up
+`World of Warcraft/_classic_beta_/WTF/Config.wtf`, close Wolkara,
+and set `SET enableBGDL "0"` in it. This is not a proven solution;
+BGDL may not be the initializing TACT subsystem or may be ignored
+by this client. Revert to the original file after the test.
+
 ## What changed
 
 The existing guest `pthread_mutex_lock` wrapper is now bound for
