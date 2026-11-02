@@ -22,6 +22,30 @@ may differ from the executable as stored on disk. The word marked
 This is still diagnostic only; raw instructions do not reveal object
 ownership or prove the origin of a null pointer without further analysis.
 
+### November 1: the pointer is derived from 0x28
+
+The captured callsite at preferred address `0x102a39cc4` disassembles as:
+
+```asm
+mov x21, x0
+add x19, x0, #0x170
+mov x0, x19
+bl pthread_mutex_lock
+```
+
+The actual mutex argument is `0x198`, so `x0` on entry to this WoW
+function was `0x28`. That is strong evidence of an already-invalid object
+pointer (possibly a null base plus a `0x28` field offset); it does **not**
+establish which earlier initialization step failed.
+
+The probe now follows one validated ARM64 frame record to find the
+**upstream guest callsite** that passed `0x28`, then captures 64 preceding
+and eight following instructions through the prepared arena's writable
+alias. Look for `[tact-probe] upstream caller=...` and
+`[tact-upstream] arm64 preferred=... word=...` with a
+`<upstream call>` marker. A frame-chain failure is logged without
+changing game execution.
+
 The hook is scoped to **External JIT**; other execution modes keep their
 existing binding behavior. The probe is intended for temporary use on this
 branch, and can affect call timing, so it is not a production workaround.
@@ -42,12 +66,14 @@ The fork already has `.github/workflows/debug-ipa.yml`:
 
 ## Interpret the log
 
-Look for both the failing pointer and the instruction snapshot:
+Look for the failing pointer, its immediate caller, and the upstream instruction snapshot:
 
 ```text
 [tact-probe] External JIT mutex diagnostics armed; low addresses will be logged without changing lock semantics
 [tact-probe] pthread_mutex_lock mutex=0x198 caller=0x... guest_preferred=0x... (will call real pthread)
 [tact-probe] arm64 preferred=0x... word=... <call instruction>
+[tact-probe] upstream caller=0x... guest_preferred=0x...
+[tact-upstream] arm64 preferred=0x... word=... <upstream call>
 ```
 
 - **Probe line with `mutex=0x198`**: confirms the imported
