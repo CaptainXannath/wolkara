@@ -88,6 +88,44 @@ the next WoW crash report's `BGDLEnabled` and streaming diagnostics.
 Also distinguish installer **Verify and repair** completion from game
 runtime TACT patch-index fetching.
 
+## November 2: background-download disable test completed
+
+On iPhone, the user edited the existing
+`Documents/World of Warcraft/_classic_beta_/WTF/Config.wtf` and
+confirmed the saved line `SET enableBGDL "0"`. The next **new** WoW
+crash report `2026-11-02_12.06.18_Crash_22439.txt` (build
+1.60.1.70532) explicitly reports:
+
+```text
+<BGDLEnabled> No
+<CVar.enableBGDL> 0
+EXC_BAD_ACCESS: KERN_INVALID_ADDRESS at 0x198
+Failed to download the patch index. E-Key: fad27dc8c6b75e4c58d194d338e0ac5f.
+Server: 4294967295 | Error (1): unknown failure
+```
+
+The TACT Task Thread still faults via the existing
+`local.tolkara.app` pthread wrapper at the same WoW callsite;
+uptime was 42 seconds, `Current Frame: 0`,
+`No GX Device Created`, and successful WoWConnections was 0.
+
+**Result:** The config file is being read, and switching off
+background downloading does not avoid the null-object/mutex crash;
+the patch-index failure also persists. Do not request that the user
+repeat this test or suggest editing the same setting again. This
+does not establish whether failed patch-index retrieval *causes* the
+uninitialized object or is a separate consequence.
+
+**Next evidence to collect:** Separate the game-runtime TACT
+patch-index failure from the app's own installer/update verification.
+Back up game data, use Wolkara Settings > Verify and repair game
+files once, record whether that check *completes or fails* and its
+specific error, then compare the next startup diagnostics. Do not
+delete the Data directory or overwrite user settings. If repair
+completes but runtime patch-index fetching still fails, focus on
+TLS/CDN/file-access compatibility instrumentation rather than
+silencing synchronization faults.
+
 ## What changed
 
 The existing guest `pthread_mutex_lock` wrapper is now bound for
