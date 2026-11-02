@@ -852,6 +852,29 @@ static int guest_mutex_lock(pthread_mutex_t *mutex) {
                             }
                         } else LOG("[tact-probe] upstream code snapshot outside arena bounds\n");
                     }
+                    // The logged BL at guest-preferred 0x102a0bf0c
+                    // targets 0x102a2dcac in WoW Forever build 70532.
+                    // Snapshot this intermediate callee's actual post-init
+                    // instructions: its stack frame was omitted by the
+                    // backtrace, so frame walking alone cannot inspect it.
+                    if (preferred==0x102a39cc4ULL && guest.arena.writable) {
+                        uintptr_t target=(uintptr_t)guest.slide+0x102a2dcacULL;
+                        uintptr_t rxbase=(uintptr_t)guest.arena.executable;
+                        if (target>=rxbase) {
+                            size_t offset=(size_t)(target-rxbase);
+                            enum { COUNT=96 };
+                            if (offset<=guest.arena.size &&
+                                sizeof(uint32_t)*COUNT<=guest.arena.size-offset) {
+                                uint32_t words[COUNT];
+                                memcpy(words,(const char *)guest.arena.writable+offset,sizeof words);
+                                LOG("[tact-middle] BL target=0x102a2dcac instructions=%u (WoW build 70532)\n",COUNT);
+                                for (unsigned i=0;i<COUNT;i++)
+                                    LOG("[tact-middle] arm64 preferred=%#llx word=%08x%s\n",
+                                        (unsigned long long)(0x102a2dcacULL+(unsigned long long)i*4ULL),
+                                        words[i],i==0?" <entry>":"");
+                            } else LOG("[tact-middle] snapshot target outside executable arena\n");
+                        }
+                    }
                     // Additional frame records help distinguish the recorded
                     // return address from an actual direct caller. Capture
                     // only bounded snapshots, and never execute guest data.
