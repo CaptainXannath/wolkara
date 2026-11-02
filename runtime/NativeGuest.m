@@ -788,6 +788,44 @@ static int guest_mutex_lock(pthread_mutex_t *mutex) {
                     }
                 } else LOG("[tact-probe] code snapshot skipped (caller outside available arena range)\n");
             } else LOG("[tact-probe] code snapshot skipped (no writable alias for guest caller)\n");
+
+            // Follow the AArch64 frame-pointer chain once. The saved LR in
+            // the guest caller's frame identifies the earlier function that
+            // supplied the 0x28 object pointer. Read frames via vm_read_overwrite
+            // so unexpected/unmapped stack addresses do not add another crash.
+            uintptr_t fp=(uintptr_t)__builtin_frame_address(0);
+            uintptr_t wrapper_frame[2]={0}, guest_frame[2]={0};
+            vm_size_t got=0;
+            kern_return_t kr=vm_read_overwrite(mach_task_self(),(vm_address_t)fp,
+                                                sizeof wrapper_frame,(vm_address_t)wrapper_frame,&got);
+            if (kr==KERN_SUCCESS && got==sizeof wrapper_frame &&
+                wrapper_frame[0]>fp && wrapper_frame[0]-fp<1024*1024 &&
+                !(wrapper_frame[0]&15)) {
+                got=0;
+                kr=vm_read_overwrite(mach_task_self(),(vm_address_t)wrapper_frame[0],
+                                     sizeof guest_frame,(vm_address_t)guest_frame,&got);
+                uintptr_t parent=guest_frame[1]&0x0000ffffffffffffULL;
+                if (kr==KERN_SUCCESS && got==sizeof guest_frame && inside((const void *)parent,1)) {
+                    LOG("[tact-probe] upstream caller=%#lx guest_preferred=%#lx (source of the invalid object argument)\n",
+                        (unsigned long)parent,(unsigned long)(parent-guest.slide));
+                    uintptr_t rx=(uintptr_t)guest.arena.executable;
+                    size_t back=64u*4u, forward=8u*4u;
+                    if (guest.arena.writable && parent>=rx) {
+                        size_t offset=(size_t)(parent-rx);
+                        if (offset>=back && guest.arena.size>=forward &&
+                            offset<=guest.arena.size-forward) {
+                            uint32_t words[72];
+                            memcpy(words,(const char *)guest.arena.writable+offset-back,sizeof words);
+                            for (unsigned i=0;i<72;i++) {
+                                uintptr_t ip=parent-back+(uintptr_t)i*4u;
+                                LOG("[tact-upstream] arm64 preferred=%#lx word=%08x%s\n",
+                                    (unsigned long)(ip-guest.slide),words[i],
+                                    ip==parent-4?" <upstream call>":"");
+                            }
+                        } else LOG("[tact-probe] upstream code snapshot outside arena bounds\n");
+                    }
+                } else LOG("[tact-probe] upstream guest return address could not be identified\n");
+            } else LOG("[tact-probe] upstream frame unavailable (frame record not readable)\n");
             errno=previous_errno;
         }
     }
