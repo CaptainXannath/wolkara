@@ -867,7 +867,7 @@ static int guest_mutex_lock(pthread_mutex_t *mutex) {
                                 sizeof(uint32_t)*COUNT<=guest.arena.size-offset) {
                                 uint32_t words[COUNT];
                                 memcpy(words,(const char *)guest.arena.writable+offset,sizeof words);
-                                LOG("[tact-middle] BL target=0x102a2dcac instructions=%u (WoW build 70532)\n",COUNT);
+                                LOG("[tact-middle] BL target=0x102a2dcac instructions=%u (WoW build 70532)\n",(unsigned)COUNT);
                                 for (unsigned i=0;i<COUNT;i++)
                                     LOG("[tact-middle] arm64 preferred=%#llx word=%08x%s\n",
                                         (unsigned long long)(0x102a2dcacULL+(unsigned long long)i*4ULL),
