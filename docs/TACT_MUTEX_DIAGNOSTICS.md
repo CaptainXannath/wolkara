@@ -14,6 +14,14 @@ logs the pointer, caller return address, and guest-preferred call site
 (maximum eight reports). **It then calls the original pthread function.**
 Nothing is unlocked, skipped, faked, or made to succeed.
 
+The diagnostic also snapshots 16 ARM64 instruction words before, and four
+words after, the guest return address through the **writable alias** of the
+prepared executable arena. These are the post-initializer code bytes, which
+may differ from the executable as stored on disk. The word marked
+`<call instruction>` is the instruction immediately before the return address.
+This is still diagnostic only; raw instructions do not reveal object
+ownership or prove the origin of a null pointer without further analysis.
+
 The hook is scoped to **External JIT**; other execution modes keep their
 existing binding behavior. The probe is intended for temporary use on this
 branch, and can affect call timing, so it is not a production workaround.
@@ -34,11 +42,12 @@ The fork already has `.github/workflows/debug-ipa.yml`:
 
 ## Interpret the log
 
-Look for:
+Look for both the failing pointer and the instruction snapshot:
 
 ```text
 [tact-probe] External JIT mutex diagnostics armed; low addresses will be logged without changing lock semantics
 [tact-probe] pthread_mutex_lock mutex=0x198 caller=0x... guest_preferred=0x... (will call real pthread)
+[tact-probe] arm64 preferred=0x... word=... <call instruction>
 ```
 
 - **Probe line with `mutex=0x198`**: confirms the imported
