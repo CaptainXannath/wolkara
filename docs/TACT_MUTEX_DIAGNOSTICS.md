@@ -38,6 +38,56 @@ and set `SET enableBGDL "0"` in it. This is not a proven solution;
 BGDL may not be the initializing TACT subsystem or may be ignored
 by this client. Revert to the original file after the test.
 
+## November 1, 23:35:34: exact null-pointer path confirmed
+
+The sixth device log `native-guest(6).log`, from the debug IPA produced by
+GitHub Actions run [41394284982](https://github.com/CaptainXannath/wolkara/actions/runs/41394284982),
+includes the intermediary's live post-unpack instructions. This proves the
+following path in WoW Forever **1.60.1.70532**:
+
+```asm
+; Previously traced task object (x19), and the nested object.
+0x102a0bee4: ldr x8, [x19, #0x10]
+0x102a0bee8: ldr x0, [x8, #0x700]     ; the captured field is NULL
+0x102a0beec: cbz w1, 0x102a0bf08    ; this path leads to the failing call
+0x102a0bf08: mov x1, x2
+0x102a0bf0c: bl  0x102a2dcac
+
+; The targeted intermediary does not validate the pointer.
+0x102a2dcac: add x0, x0, #0x28       ; NULL becomes 0x28
+0x102a2dcb0: ldr w1, [x1]
+0x102a2dcb4: b   0x102a39c9c
+
+; Its tail-call helper constructs the mutex pointer.
+0x102a39cb8: add x19, x0, #0x170     ; 0x28 + 0x170 = 0x198
+0x102a39cbc: mov x0, x19
+0x102a39cc0: bl  pthread_mutex_lock   ; invalid address 0x198
+```
+
+The first step and the null `+0x700` field were also independently
+captured by the saved-register pointer reads. Together, these strongly
+establish that the bad mutex is a **consequence of a null TACT object**,
+not an error caused by pthread synchronization itself.
+
+**Root cause still not known**: we have not established whether the object
+was never allocated, initialized too late, freed, or absent due to some
+upstream CASC/download/compatibility failure.
+
+### Certificate hypothesis tested
+
+The debug IPA used for this sixth test was built with
+`TOLKARA_SYSTEM_ROOTS=YES`, confirmed in the actual GitHub Actions job log.
+The identical crash persisted. A missing public-root certificate package
+alone therefore **does not explain this crash**, though the certificate
+test does not establish the full TACT network state.
+
+**Do not** replace the null object with a fake object, skip the mutex
+call, or claim these diagnostics repair the game. Prefer a controlled
+test of WoW's `enableBGDL` setting (if not already done) and compare
+the next WoW crash report's `BGDLEnabled` and streaming diagnostics.
+Also distinguish installer **Verify and repair** completion from game
+runtime TACT patch-index fetching.
+
 ## What changed
 
 The existing guest `pthread_mutex_lock` wrapper is now bound for
