@@ -701,6 +701,10 @@ static void guest_abort(void) __attribute__((noreturn));
 // directories it creates and the environment variables it reads. Off by
 // default, and then the guest binds straight to libc for these.
 static bool trace_guest;
+// Experimental External JIT-only probe for the reproducible WoW TACT crash.
+// The wrapper logs low mutex pointers and then calls the real pthread API.
+static bool trace_tact_mutex;
+static atomic_uint tact_low_mutex_reports;
 static int guest_open(const char *, int, ...);
 static int guest_openat(int, const char *, int, ...);
 static int guest_stat(const char *, struct stat *);
@@ -753,7 +757,21 @@ static void pump_shader_wait(void) { CFRunLoopRunInMode(kCFRunLoopDefaultMode,.0
     unsigned tid=(trace_guest && gsv_enabled())?trace_tid():0; \
     GWWaitRecord previous=gwt_begin(tid,name,address); \
     int result=(expression); int code=errno; gwt_end(tid,previous); errno=code; return result
+__attribute__((noinline))
 static int guest_mutex_lock(pthread_mutex_t *mutex) {
+    // A WoW 70532 TACT worker repeatedly passed 0x198 into libsystem_pthread.
+    // Capture the guest call site before the same operation faults; never fake success.
+    if (trace_tact_mutex && (uintptr_t)mutex < 0x10000) {
+        unsigned count=atomic_fetch_add_explicit(&tact_low_mutex_reports,1,memory_order_relaxed);
+        if (count<8) {
+            int previous_errno=errno;
+            uintptr_t caller=(uintptr_t)__builtin_return_address(0);
+            uintptr_t preferred=inside((const void *)caller,1)?caller-guest.slide:0;
+            LOG("[tact-probe] pthread_mutex_lock mutex=%p caller=%#lx guest_preferred=%#lx (will call real pthread)\n",
+                mutex,(unsigned long)caller,(unsigned long)preferred);
+            errno=previous_errno;
+        }
+    }
     WAIT_TRACE_CALL("pthread_mutex_lock",mutex,pthread_mutex_lock(mutex));
 }
 static int guest_cond_wait(pthread_cond_t *condition,pthread_mutex_t *mutex) {
@@ -820,6 +838,7 @@ static void *hook(const char *name) {
     HOOK("mmap",guest_mmap); HOOK("mprotect",guest_mprotect); HOOK("munmap",guest_munmap);
     if (gv_enabled(&vm_budget) || gsv_enabled()) HOOK("madvise",guest_madvise);
     HOOK("memcpy",guest_memcpy); HOOK("memmove",guest_memmove); HOOK("memset",guest_memset);
+    if (trace_tact_mutex) HOOK("pthread_mutex_lock",guest_mutex_lock);
     if (gsv_enabled()) {
         HOOK("fstat",guest_fstat);
         HOOK("bzero",guest_bzero);
@@ -830,7 +849,7 @@ static void *hook(const char *name) {
         HOOK("strcmp",gsv_strcmp); HOOK("strncmp",gsv_strncmp);
         HOOK("memcmp",gsv_memcmp); HOOK("memchr",gsv_memchr); HOOK("strchr",gsv_strchr);
         if(trace_guest) {
-            HOOK("pthread_mutex_lock",guest_mutex_lock);
+            if (!trace_tact_mutex) HOOK("pthread_mutex_lock",guest_mutex_lock);
             HOOK("pthread_cond_wait",guest_cond_wait); HOOK("pthread_cond_timedwait",guest_cond_timedwait);
             HOOK("pthread_cond_timedwait_relative_np",guest_cond_relativewait);
             HOOK("pthread_rwlock_rdlock",guest_rwlock_read); HOOK("pthread_rwlock_wrlock",guest_rwlock_write);
@@ -1676,6 +1695,8 @@ bool ng_initialize(const char *path, const char *frameworks, const char *library
     external=!signed_backend && !local && (atomic_load(&use_external_authorization) ||
         [NSProcessInfo.processInfo.arguments containsObject:@"--external-authorization"]);
 #endif
+    trace_tact_mutex=external;
+    if (trace_tact_mutex) LOG("[tact-probe] External JIT mutex diagnostics armed; low addresses will be logged without changing lock semantics\n");
     if (!signed_backend) {
         // Only what certainly cannot fit is refused; the rest is the device's answer.
         size_t limit=nc_launch_limit(), available=nc_available_memory();
