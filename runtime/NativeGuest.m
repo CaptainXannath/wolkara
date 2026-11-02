@@ -705,6 +705,14 @@ static bool trace_guest;
 // The wrapper logs low mutex pointers and then calls the real pthread API.
 static bool trace_tact_mutex;
 static atomic_uint tact_low_mutex_reports;
+// Read a diagnostic pointer without dereferencing guest-controlled addresses.
+static bool tact_read_pointer(uintptr_t address, uintptr_t *out) {
+    if (!address || !out) return false;
+    vm_size_t got=0;
+    return vm_read_overwrite(mach_task_self(),(vm_address_t)address,
+                             sizeof *out,(vm_address_t)out,&got)==KERN_SUCCESS &&
+           got==sizeof *out;
+}
 static int guest_open(const char *, int, ...);
 static int guest_openat(int, const char *, int, ...);
 static int guest_stat(const char *, struct stat *);
@@ -806,8 +814,28 @@ static int guest_mutex_lock(pthread_mutex_t *mutex) {
                                      sizeof guest_frame,(vm_address_t)guest_frame,&got);
                 uintptr_t parent=guest_frame[1]&0x0000ffffffffffffULL;
                 if (kr==KERN_SUCCESS && got==sizeof guest_frame && inside((const void *)parent,1)) {
-                    LOG("[tact-probe] upstream caller=%#lx guest_preferred=%#lx (source of the invalid object argument)\n",
+                    LOG("[tact-probe] earlier guest frame=%#lx guest_preferred=%#lx (may not be the immediate caller)\n",
                         (unsigned long)parent,(unsigned long)(parent-guest.slide));
+                    // The confirmed WoW 70532 helper at 0x102a39c9c uses:
+                    // stp x20,x19,[sp,#0x20]; stp x29,x30,[sp,#0x30]
+                    // add x29,sp,#0x30. Therefore its saved *caller* x19
+                    // is at FP-8. x19 is callee-saved in the arm64 ABI.
+                    if (preferred==0x102a39cc4ULL && wrapper_frame[0]>=8) {
+                        uintptr_t saved_x19=0;
+                        if (tact_read_pointer(wrapper_frame[0]-8,&saved_x19)) {
+                            LOG("[tact-state] saved_caller_x19=%#lx\n",(unsigned long)saved_x19);
+                            uintptr_t outer=0, field=0;
+                            if (saved_x19 && saved_x19<=(uintptr_t)-1-0x10 &&
+                                tact_read_pointer(saved_x19+0x10,&outer)) {
+                                LOG("[tact-state] *(x19+0x10)=%#lx\n",(unsigned long)outer);
+                                if (outer && outer<=(uintptr_t)-1-0x700 &&
+                                    tact_read_pointer(outer+0x700,&field))
+                                    LOG("[tact-state] *(*(x19+0x10)+0x700)=%#lx (candidate from earlier code, not proven input)\n",
+                                        (unsigned long)field);
+                                else LOG("[tact-state] second field read unavailable\n");
+                            } else LOG("[tact-state] first field read unavailable\n");
+                        } else LOG("[tact-state] saved x19 unavailable\n");
+                    }
                     uintptr_t rx=(uintptr_t)guest.arena.executable;
                     size_t back=64u*4u, forward=8u*4u;
                     if (guest.arena.writable && parent>=rx) {
@@ -823,6 +851,34 @@ static int guest_mutex_lock(pthread_mutex_t *mutex) {
                                     ip==parent-4?" <upstream call>":"");
                             }
                         } else LOG("[tact-probe] upstream code snapshot outside arena bounds\n");
+                    }
+                    // Additional frame records help distinguish the recorded
+                    // return address from an actual direct caller. Capture
+                    // only bounded snapshots, and never execute guest data.
+                    uintptr_t previous_fp=wrapper_frame[0], next_fp=guest_frame[0];
+                    for (unsigned depth=2;depth<=4;depth++) {
+                        if (next_fp<=previous_fp || next_fp-previous_fp>1024*1024 || (next_fp&15)) break;
+                        uintptr_t record[2]={0};
+                        if (!tact_read_pointer(next_fp,&record[0]) ||
+                            !tact_read_pointer(next_fp+8,&record[1])) break;
+                        uintptr_t ra=record[1]&0x0000ffffffffffffULL;
+                        if (!inside((const void *)ra,1)) break;
+                        LOG("[tact-chain] depth=%u return=%#lx guest_preferred=%#lx\n",
+                            depth,(unsigned long)ra,(unsigned long)(ra-guest.slide));
+                        if (guest.arena.writable && ra>=rx) {
+                            size_t offset=(size_t)(ra-rx), back=24u*4u, after=4u*4u;
+                            if (offset>=back && guest.arena.size>=after && offset<=guest.arena.size-after) {
+                                uint32_t words[28];
+                                memcpy(words,(const char *)guest.arena.writable+offset-back,sizeof words);
+                                for (unsigned i=0;i<28;i++) {
+                                    uintptr_t ip=ra-back+(uintptr_t)i*4u;
+                                    LOG("[tact-chain-insn] depth=%u preferred=%#lx word=%08x%s\n",
+                                        depth,(unsigned long)(ip-guest.slide),words[i],
+                                        ip==ra-4?" <call>":"");
+                                }
+                            }
+                        }
+                        previous_fp=next_fp; next_fp=record[0];
                     }
                 } else LOG("[tact-probe] upstream guest return address could not be identified\n");
             } else LOG("[tact-probe] upstream frame unavailable (frame record not readable)\n");
