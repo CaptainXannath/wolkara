@@ -769,6 +769,25 @@ static int guest_mutex_lock(pthread_mutex_t *mutex) {
             uintptr_t preferred=inside((const void *)caller,1)?caller-guest.slide:0;
             LOG("[tact-probe] pthread_mutex_lock mutex=%p caller=%#lx guest_preferred=%#lx (will call real pthread)\n",
                 mutex,(unsigned long)caller,(unsigned long)preferred);
+            // Inspect the *writable alias*, never dereference the debugger's
+            // execute-only view. The on-disk WoW image may be unpacked at
+            // startup, so these are the actual post-initializer ARM64 words.
+            uintptr_t rx=(uintptr_t)guest.arena.executable;
+            size_t before=16u*4u, after=4u*4u;
+            if (guest.arena.writable && caller>=rx) {
+                size_t offset=(size_t)(caller-rx);
+                if (offset>=before && guest.arena.size>=after &&
+                    offset<=guest.arena.size-after) {
+                    uint32_t words[20];
+                    memcpy(words,(const char *)guest.arena.writable+offset-before,sizeof words);
+                    for (unsigned i=0;i<20;i++) {
+                        uintptr_t instruction=caller-before+(uintptr_t)i*4u;
+                        LOG("[tact-probe] arm64 preferred=%#lx word=%08x%s\n",
+                            (unsigned long)(instruction-guest.slide),words[i],
+                            instruction==caller-4?" <call instruction>":"");
+                    }
+                } else LOG("[tact-probe] code snapshot skipped (caller outside available arena range)\n");
+            } else LOG("[tact-probe] code snapshot skipped (no writable alias for guest caller)\n");
             errno=previous_errno;
         }
     }
