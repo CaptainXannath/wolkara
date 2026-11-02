@@ -22,6 +22,40 @@ may differ from the executable as stored on disk. The word marked
 This is still diagnostic only; raw instructions do not reveal object
 ownership or prove the origin of a null pointer without further analysis.
 
+### November 1, follow-up: earlier frame captured
+
+The next run, `native-guest(4).log`, confirmed the invalid mutex pointer and
+produced another stable return address at `0x102a0bf10`. A branch from
+`0x102a0bf0c` targets an **intermediate guest routine**, not the helper
+containing the mutex call. Therefore the earlier frame's address does
+**not** prove it is the direct caller or identify the initialization
+step responsible for `0x28`.
+
+The instructions near that earlier frame include:
+
+```asm
+ldr x8, [x19, #0x10]
+ldr x0, [x8, #0x700]
+```
+
+This is only a candidate source of an object pointer; branch conditions and
+intervening functions still need to be accounted for.
+
+The next probe version reads the **saved caller x19** from the known
+WoW-70532 mutex helper's frame (FP-8), followed by two **read-only,
+checked** pointer reads at `x19+0x10` and
+`*(x19+0x10)+0x700`. It also inspects up to three older guest frame
+records, with short instruction snapshots. All reads use
+`vm_read_overwrite` and may legitimately report unavailable; no data
+is written. New log prefixes are `[tact-state]`, `[tact-chain]`, and
+`[tact-chain-insn]`.
+
+**Interpretation:** if the candidate field contains `0x28`, it supports
+the hypothesis that an uninitialized pointer is stored in a TACT-related
+object. It still does not establish which earlier failure caused that
+state or whether the patch-index download error is causal. Do not
+substitute dummy objects, patch WoW code, or suppress mutex calls.
+
 ### November 1: the pointer is derived from 0x28
 
 The captured callsite at preferred address `0x102a39cc4` disassembles as:
@@ -38,12 +72,12 @@ function was `0x28`. That is strong evidence of an already-invalid object
 pointer (possibly a null base plus a `0x28` field offset); it does **not**
 establish which earlier initialization step failed.
 
-The probe now follows one validated ARM64 frame record to find the
-**upstream guest callsite** that passed `0x28`, then captures 64 preceding
-and eight following instructions through the prepared arena's writable
-alias. Look for `[tact-probe] upstream caller=...` and
-`[tact-upstream] arm64 preferred=... word=...` with a
-`<upstream call>` marker. A frame-chain failure is logged without
+The probe follows a validated ARM64 frame record to capture an **earlier
+return address** and 64 preceding and eight following instruction words
+through the prepared arena's writable alias. Look for `[tact-probe]
+earlier guest frame=...` and `[tact-upstream] arm64 preferred=...
+word=...` with a `<upstream call>` marker. This frame may not be the
+immediate caller. A frame-chain failure is logged without
 changing game execution.
 
 The hook is scoped to **External JIT**; other execution modes keep their
@@ -72,8 +106,11 @@ Look for the failing pointer, its immediate caller, and the upstream instruction
 [tact-probe] External JIT mutex diagnostics armed; low addresses will be logged without changing lock semantics
 [tact-probe] pthread_mutex_lock mutex=0x198 caller=0x... guest_preferred=0x... (will call real pthread)
 [tact-probe] arm64 preferred=0x... word=... <call instruction>
-[tact-probe] upstream caller=0x... guest_preferred=0x...
+[tact-probe] earlier guest frame=0x... guest_preferred=0x...
 [tact-upstream] arm64 preferred=0x... word=... <upstream call>
+[tact-state] saved_caller_x19=0x...
+[tact-state] *(*(x19+0x10)+0x700)=0x...
+[tact-chain] depth=2 return=0x... guest_preferred=0x...
 ```
 
 - **Probe line with `mutex=0x198`**: confirms the imported
