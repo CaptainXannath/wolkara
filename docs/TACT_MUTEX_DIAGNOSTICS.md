@@ -121,7 +121,12 @@ branch, and can affect call timing, so it is not a production workaround.
 The fork already has `.github/workflows/debug-ipa.yml`:
 
 1. GitHub > **Actions** > **Build Wolkara Debug IPA**.
-2. **Run workflow** with branch `diagnostics/tact-mutex-pointer`.
+2. **Run workflow** with branch `diagnostics/tact-mutex-pointer`. The
+   workflow now offers `public_root_certificates`: select `YES` for the
+   first test. The existing `NO` configuration can be tested afterward to
+   compare whether certificate trust affects patch-index downloads. This
+   affects only the experimental debug IPA; the public release workflow
+   remains unchanged.
 3. Download the **Wolkara-Debug-IPA** artifact and extract its ZIP.
 4. Sign/install the IPA through the user's existing sideloader. To preserve
    existing game data, ensure the signing and bundle identifier match the
