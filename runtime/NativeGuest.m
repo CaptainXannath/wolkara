@@ -753,8 +753,25 @@ static void pump_shader_wait(void) { CFRunLoopRunInMode(kCFRunLoopDefaultMode,.0
     unsigned tid=(trace_guest && gsv_enabled())?trace_tid():0; \
     GWWaitRecord previous=gwt_begin(tid,name,address); \
     int result=(expression); int code=errno; gwt_end(tid,previous); errno=code; return result
+// Diagnostic only: report a near-null mutex before libsystem_pthread faults.
+// Never turn a failing call into a fake success or modify guest memory.
+static void diagnose_guest_mutex(const char *operation, const void *mutex, const void *caller) {
+    if ((uintptr_t)mutex >= 4096) return;
+    uintptr_t at=(uintptr_t)caller;
+    LOG("[sync-probe] %s invalid pointer=%p caller=%p preferred=%#llx\\n",
+        operation,mutex,caller,
+        (unsigned long long)(inside((void *)at,4)?at-guest.slide:0));
+}
 static int guest_mutex_lock(pthread_mutex_t *mutex) {
-    WAIT_TRACE_CALL("pthread_mutex_lock",mutex,pthread_mutex_lock(mutex));
+    diagnose_guest_mutex("pthread_mutex_lock",mutex,__builtin_return_address(0));
+    if (trace_guest && gsv_enabled()) {
+        WAIT_TRACE_CALL("pthread_mutex_lock",mutex,pthread_mutex_lock(mutex));
+    }
+    return pthread_mutex_lock(mutex);
+}
+static int guest_mutex_unlock(pthread_mutex_t *mutex) {
+    diagnose_guest_mutex("pthread_mutex_unlock",mutex,__builtin_return_address(0));
+    return pthread_mutex_unlock(mutex);
 }
 static int guest_cond_wait(pthread_cond_t *condition,pthread_mutex_t *mutex) {
     WAIT_TRACE_CALL("pthread_cond_wait",condition,pthread_cond_wait(condition,mutex));
@@ -794,6 +811,9 @@ static int guest_ulock_wait(uint32_t operation,void *address,uint64_t value,uint
 static void *hook(const char *name) {
 #define HOOK(n,f) if (!strcmp(name,n)) return (void *)&f
     HOOK("sigaction",guest_sigaction);
+    // Always probe direct guest mutex calls, even when deep tracing is off.
+    HOOK("pthread_mutex_lock",guest_mutex_lock);
+    HOOK("pthread_mutex_unlock",guest_mutex_unlock);
     HOOK("__ulock_wait",guest_ulock_wait);
     HOOK("CFBundleGetMainBundle",guest_cf_main_bundle);
     HOOK("_NSGetExecutablePath",guest_executable_path);
@@ -830,7 +850,6 @@ static void *hook(const char *name) {
         HOOK("strcmp",gsv_strcmp); HOOK("strncmp",gsv_strncmp);
         HOOK("memcmp",gsv_memcmp); HOOK("memchr",gsv_memchr); HOOK("strchr",gsv_strchr);
         if(trace_guest) {
-            HOOK("pthread_mutex_lock",guest_mutex_lock);
             HOOK("pthread_cond_wait",guest_cond_wait); HOOK("pthread_cond_timedwait",guest_cond_timedwait);
             HOOK("pthread_cond_timedwait_relative_np",guest_cond_relativewait);
             HOOK("pthread_rwlock_rdlock",guest_rwlock_read); HOOK("pthread_rwlock_wrlock",guest_rwlock_write);
