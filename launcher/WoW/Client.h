@@ -2,6 +2,10 @@
 #import "Manifest.h"
 
 NS_ASSUME_NONNULL_BEGIN
+ // File-backed diagnostic journal under Documents/WolkaraPatchRepair.log.
+ // Intended to survive a forced app exit during an experimental recovery.
+ FOUNDATION_EXPORT void TKWoWPatchTrace(NSString *message);
+
 // Synchronous, bounded requests: call on a worker queue, never UIKit's main thread.
 // A client performs one operation at a time. cancel is safe from another thread.
 @interface TKWoWClient : NSObject
