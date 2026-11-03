@@ -2,7 +2,25 @@
 #import "CASC.h"
 #include <sys/stat.h>
 #include <errno.h>
+#include <fcntl.h>
+#include <unistd.h>
 
+// Persist the last completed step even if iOS force-quits the process.
+// Small journal, no URLs, hashes, credentials, or game content.
+void TKWoWPatchTrace(NSString *message) {
+    @autoreleasepool {
+        NSString *documents=NSSearchPathForDirectoriesInDomains(NSDocumentDirectory,NSUserDomainMask,YES).firstObject;
+        NSString *path=[documents stringByAppendingPathComponent:@"WolkaraPatchRepair.log"];
+        NSString *entry=[NSString stringWithFormat:@"%@ %@\n",NSDate.date.description,message?:@"(null)"];
+        NSData *bytes=[entry dataUsingEncoding:NSUTF8StringEncoding];
+        int fd=open(path.fileSystemRepresentation,O_WRONLY|O_CREAT|O_APPEND|O_CLOEXEC,0600);
+        if(fd>=0) {
+            (void)write(fd,bytes.bytes,bytes.length);
+            (void)fsync(fd);close(fd);
+        }
+        NSLog(@"[patch-repair] %@",message);
+    }
+}
 // A client reuses one connection pool, with serial transfers and bounded buffers. No cookies,
 // credentials, redirects, HTTP fallback, or application-installation writes.
 @interface TKWoWTransfer : NSObject <NSURLSessionDataDelegate>
@@ -406,6 +424,7 @@ static BOOL TKWoWCDNIndexValid(NSData *data, NSString *hash) {
 }
 - (BOOL)restorePatchIndexesForPlan:(NSDictionary *)plan root:(NSString *)root
     progress:(void (^)(uint64_t,uint64_t))progress error:(NSError **)error {
+    TKWoWPatchTrace(@"repair entry: validating installed Forever plan");
     if(![plan[@"product"] isEqualToString:@"wowf"] || !root.length) {
         if(error)*error=TKWoWError(@"Patch index recovery is only for Forever.");return NO;
     }
@@ -415,8 +434,12 @@ static BOOL TKWoWCDNIndexValid(NSData *data, NSString *hash) {
        ![cdn hasSuffix:@"/tpr/wow"] || !TKWoWHashValid(key)) {
         if(error)*error=TKWoWError(@"Unrecognized Forever CDN configuration.");return NO;
     }
-    NSData *raw=[self configuration:key cdn:cdn error:error];if(!raw)return NO;
-    NSDictionary *config=TKWoWConfig(raw,error);if(!config)return NO;
+    TKWoWPatchTrace(@"fetching published CDN configuration");
+    NSData *raw=[self configuration:key cdn:cdn error:error];
+    if(!raw) { TKWoWPatchTrace(@"CDN configuration download failed"); return NO; }
+    TKWoWPatchTrace(@"CDN configuration fetched");
+    NSDictionary *config=TKWoWConfig(raw,error);
+    if(!config) { TKWoWPatchTrace(@"CDN configuration parsing failed"); return NO; }
     NSMutableArray<NSDictionary *> *entries=[NSMutableArray array];
     uint64_t estimated=0;
     for(NSString *field in @[@"patch-archives",@"patch-file-index"]) {
@@ -435,6 +458,8 @@ static BOOL TKWoWCDNIndexValid(NSData *data, NSString *hash) {
             [entries addObject:@{@"key":hash,@"size":@(length)}];
         }
     }
+    TKWoWPatchTrace([NSString stringWithFormat:@"catalogue valid: %lu patch indexes, total %.1f MiB",
+        (unsigned long)entries.count,estimated/1048576.0]);
     NSString *indices=[root stringByAppendingPathComponent:@"Data/indices"];
     BOOL dir=NO;
     if(![NSFileManager.defaultManager fileExistsAtPath:indices isDirectory:&dir] || !dir) {
@@ -447,6 +472,7 @@ static BOOL TKWoWCDNIndexValid(NSData *data, NSString *hash) {
             if(error)*error=TKWoWError(@"An installation directory is redirected or inaccessible.");return NO;
         }
     }
+    TKWoWPatchTrace(@"destination checks passed; patch index recovery starting");
     if(progress)progress(0,entries.count);
     NSUInteger added=0,existing=0;
     for(NSUInteger i=0;i<entries.count;i++) { @autoreleasepool {
@@ -455,6 +481,8 @@ static BOOL TKWoWCDNIndexValid(NSData *data, NSString *hash) {
         }
         NSString *hash=entries[i][@"key"];
         NSUInteger length=[entries[i][@"size"] unsignedIntegerValue];
+        TKWoWPatchTrace([NSString stringWithFormat:@"index %lu/%lu: inspecting (%.2f MiB)",
+            (unsigned long)(i+1),(unsigned long)entries.count,length/1048576.0]);
         NSString *path=[indices stringByAppendingPathComponent:[hash stringByAppendingString:@".index"]];
         struct stat st;
         if(!lstat(path.fileSystemRepresentation,&st)) {
@@ -470,18 +498,28 @@ static BOOL TKWoWCDNIndexValid(NSData *data, NSString *hash) {
             if(errno!=ENOENT) { if(error)*error=TKWoWError(@"Unable to inspect index destination.");return NO; }
             NSString *url=[NSString stringWithFormat:@"%@/patch/%@/%@/%@.index",cdn,
                           [hash substringToIndex:2],[hash substringWithRange:NSMakeRange(2,2)],hash];
+            TKWoWPatchTrace([NSString stringWithFormat:@"index %lu: downloading",(unsigned long)(i+1)]);
             NSData *body=[self fetch:[NSURL URLWithString:url] limit:length error:error];
-            if(!body)return NO;
+            if(!body) {
+                TKWoWPatchTrace([NSString stringWithFormat:@"index %lu: download returned an error",(unsigned long)(i+1)]);
+                return NO;
+            }
+            TKWoWPatchTrace([NSString stringWithFormat:@"index %lu: received %lu bytes; validating",
+                (unsigned long)(i+1),(unsigned long)body.length]);
             if(body.length!=length || !TKWoWCDNIndexValid(body,hash)) {
                 if(error)*error=TKWoWError(@"Downloaded patch index failed size or checksum.");return NO;
             }
-            if(![body writeToFile:path options:NSDataWritingAtomic error:error])return NO;
+            if(![body writeToFile:path options:NSDataWritingAtomic error:error]) {
+                TKWoWPatchTrace([NSString stringWithFormat:@"index %lu: disk write failed",(unsigned long)(i+1)]);
+                return NO;
+            }
             added++;
+            TKWoWPatchTrace([NSString stringWithFormat:@"index %lu: saved and verified",(unsigned long)(i+1)]);
         }
         if(progress)progress(i+1,entries.count);
     }}
-    NSLog(@"[patch-repair] success added=%lu existing=%lu published-bytes=%llu",
-          (unsigned long)added,(unsigned long)existing,estimated);
+    TKWoWPatchTrace([NSString stringWithFormat:@"completed: added=%lu existing=%lu published_bytes=%llu",
+        (unsigned long)added,(unsigned long)existing,estimated]);
     return YES;
 }
 
