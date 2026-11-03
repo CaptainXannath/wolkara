@@ -5,6 +5,8 @@ name: Build Wolkara unsigned IPA
 
 on:
   workflow_dispatch:
+  push:
+    branches: [fix/forever-ios-compat-diagnostics]
 
 permissions:
   contents: read
@@ -24,6 +26,13 @@ jobs:
         env:
           TOLKARA_SYSTEM_ROOTS: "NO"
         run: bash tools/package_ipa.sh Wolkara-unsigned.ipa
+
+      - name: Verify disk compatibility adapter was packaged
+        run: |
+          unzip -p Wolkara-unsigned.ipa 'Payload/TolkaraDiagnostics.app/Frameworks/akDiskArbitration.dylib' > /tmp/akDiskArbitration.dylib
+          test -s /tmp/akDiskArbitration.dylib
+          nm -gUj /tmp/akDiskArbitration.dylib | grep -qx '_DASessionCreate'
+          nm -gUj /tmp/akDiskArbitration.dylib | grep -qx '_DADiskCreateFromVolumePath'
 
       - name: Upload unsigned IPA
         uses: actions/upload-artifact@v4
