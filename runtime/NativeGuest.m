@@ -775,6 +775,25 @@ static void snapshot_invalid_mutex_caller(const void *callsite) {
             (unsigned long long)(address-guest.slide),displacement,
             (unsigned)instruction,displacement==0?" <return-address>":"");
     }
+    // These two return addresses are from Forever 1.60.1.70755's reported
+    // crashing TACT stack. Read only: inspect how the bad x0 entered the
+    // current function. New game builds may move these addresses.
+    const uint64_t parents[] = {0x102a0cc8cULL, 0x102a2a788ULL};
+    for (size_t frame=0; frame<sizeof parents/sizeof parents[0]; frame++) {
+        uintptr_t at=(uintptr_t)(parents[frame]+guest.slide);
+        if (!inside((const void *)at,sizeof(uint32_t))) continue;
+        LOG("[sync-probe] ancestor %zu ARM64 window preferred=%#llx (70755 only)\n",
+            frame+1,(unsigned long long)parents[frame]);
+        for (int displacement=-160; displacement<=24; displacement+=4) {
+            uintptr_t instruction_address=at+(intptr_t)displacement;
+            if (!inside((const void *)instruction_address,sizeof(uint32_t))) continue;
+            uint32_t instruction=0;
+            memcpy(&instruction,(const void *)instruction_address,sizeof instruction);
+            LOG("[sync-probe] ancestor %zu code preferred=%#llx relative=%+d opcode=%08x%s\n",
+                frame+1,(unsigned long long)(instruction_address-guest.slide),
+                displacement,(unsigned)instruction,displacement==0?" <return-address>":"");
+        }
+    }
 }
 // Diagnostic only: report a near-null mutex before libsystem_pthread faults.
 // Never turn a failing call into a fake success or modify guest memory.
