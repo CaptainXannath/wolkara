@@ -52,8 +52,17 @@ static bool da_detached(FILE *log) {
 #else
     if (log) fprintf(log, "[debugger] nothing here can ask a debugger to let go\n");
 #endif
+    // Detachment may become observable a moment after the breakpoint handler
+    // resumes this thread. Never bypass the P_TRACED check; give the kernel a
+    // bounded opportunity to report the completed detach.
     bool attached = da_debugger_present();
-    if (log) fprintf(log, "[debugger] asked to let go; %s attached\n", attached ? "still" : "no longer");
+    unsigned checks = 0;
+    while (attached && checks++ < 50) {
+        usleep(20 * 1000);
+        attached = da_debugger_present();
+    }
+    if (log) fprintf(log, "[debugger] asked to let go; %s attached (waited %u ms)\n",
+                     attached ? "still" : "no longer", checks * 20);
     return !attached;
 }
 
