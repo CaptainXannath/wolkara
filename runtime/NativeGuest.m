@@ -758,7 +758,7 @@ static void pump_shader_wait(void) { CFRunLoopRunInMode(kCFRunLoopDefaultMode,.0
 static void diagnose_guest_mutex(const char *operation, const void *mutex, const void *caller) {
     if ((uintptr_t)mutex >= 4096) return;
     uintptr_t at=(uintptr_t)caller;
-    LOG("[sync-probe] %s invalid pointer=%p caller=%p preferred=%#llx\\n",
+    LOG("[sync-probe] %s invalid pointer=%p caller=%p preferred=%#llx\n",
         operation,mutex,caller,
         (unsigned long long)(inside((void *)at,4)?at-guest.slide:0));
 }
