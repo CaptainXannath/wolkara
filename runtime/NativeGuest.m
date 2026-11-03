@@ -794,6 +794,26 @@ static void snapshot_invalid_mutex_caller(const void *callsite) {
                 displacement,(unsigned)instruction,displacement==0?" <return-address>":"");
         }
     }
+    // From the 70755 ARM64 parent frame, the call at 0x102a0cc88 branches
+    // to 0x102a2ea28, which is not yet in our read-only instruction dump.
+    // The second site is an upstream indirect-call helper. These addresses
+    // are preferred VM addresses for this exact game build only.
+    const uint64_t helper_sites[] = {0x102a2ea28ULL, 0x102a38670ULL};
+    for (size_t helper=0;helper<sizeof helper_sites/sizeof helper_sites[0];helper++) {
+        uintptr_t at=(uintptr_t)(helper_sites[helper]+guest.slide);
+        if (!inside((const void *)at,sizeof(uint32_t))) continue;
+        LOG("[sync-probe] helper %zu ARM64 window preferred=%#llx (70755 only)\n",
+            helper+1,(unsigned long long)helper_sites[helper]);
+        for (int delta=-160;delta<=160;delta+=4) {
+            uintptr_t cursor=at+(intptr_t)delta;
+            if (!inside((const void *)cursor,sizeof(uint32_t))) continue;
+            uint32_t opcode=0;
+            memcpy(&opcode,(const void *)cursor,sizeof opcode);
+            LOG("[sync-probe] helper %zu code preferred=%#llx relative=%+d opcode=%08x%s\n",
+                helper+1,(unsigned long long)(cursor-guest.slide),
+                delta,(unsigned)opcode,delta==0?" <call-target>":"");
+        }
+    }
 }
 // Diagnostic only: report a near-null mutex before libsystem_pthread faults.
 // Never turn a failing call into a fake success or modify guest memory.
