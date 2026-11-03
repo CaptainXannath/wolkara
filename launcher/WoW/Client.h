@@ -21,6 +21,10 @@ NS_ASSUME_NONNULL_BEGIN
 // Fetches and verifies the build configuration and install manifest. Does not install a game.
 - (nullable NSDictionary *)planForProduct:(NSString *)product region:(NSString *)region
     locale:(NSString *)locale error:(NSError **)error;
+// Experimental opt-in recovery of only missing patch CDN indexes.
+// Never redownloads game segments or overwrites existing index files.
+- (BOOL)restorePatchIndexesForPlan:(NSDictionary *)plan root:(NSString *)root
+    progress:(void (^)(uint64_t done, uint64_t total))progress error:(NSError **)error;
 // Experimental extraction of one original install file to an isolated staging directory.
 // Fetches the encoding manifest (can be large), with verified archive-range fallback.
 - (nullable NSString *)stageFile:(NSDictionary *)file plan:(NSDictionary *)plan
