@@ -1810,13 +1810,16 @@ static bool run_initializers(const GuestImage *image, uint64_t slide, const char
 // Use HEAD to avoid downloading the object or altering game installation.
 static void probe_forever_cdn_head(NSString *key, NSString *kind) {
     NSCharacterSet *nonHex=[[NSCharacterSet characterSetWithCharactersInString:@"0123456789abcdefABCDEF"] invertedSet];
-    if ((! [kind isEqualToString:@"config"] && ![kind isEqualToString:@"data"]) ||
+    if ((! [kind isEqualToString:@"config"] && ![kind isEqualToString:@"data"] &&
+         ![kind isEqualToString:@"index"]) ||
         key.length!=32 || [key rangeOfCharacterFromSet:nonHex].location!=NSNotFound) {
         LOG("[cdn-probe] HEAD skipped: invalid build-key hash format\n"); return;
     }
+    NSString *remoteKind=[kind isEqualToString:@"index"]?@"data":kind;
+    NSString *object=[kind isEqualToString:@"index"]?[key stringByAppendingString:@".index"]:key;
     NSString *url=[NSString stringWithFormat:@"https://level3.ssl.blizzard.com/tpr/wow/%@/%@/%@/%@",
-        kind,
-        [key substringToIndex:2],[key substringWithRange:NSMakeRange(2,2)],key];
+        remoteKind,
+        [key substringToIndex:2],[key substringWithRange:NSMakeRange(2,2)],object];
     NSURLSessionConfiguration *config=[NSURLSessionConfiguration ephemeralSessionConfiguration];
     config.timeoutIntervalForRequest=5;
     config.timeoutIntervalForResource=6;
@@ -1879,6 +1882,31 @@ static void probe_forever_patch_config(NSString *key) {
         NSArray<NSString *> *items=[[value componentsSeparatedByCharactersInSet:NSCharacterSet.whitespaceCharacterSet]
             filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"length > 0"]];
         if (field.length>64 || matched++>=24) continue;
+        if ([field isEqualToString:@"archives"] ||
+            [field isEqualToString:@"patch-archives"] ||
+            [field isEqualToString:@"patch-file-index"] ||
+            [field isEqualToString:@"file-index"]) {
+            NSString *indices=[[NSSearchPathForDirectoriesInDomains(NSDocumentDirectory,NSUserDomainMask,YES).firstObject
+                                stringByAppendingPathComponent:@"World of Warcraft/Data"]
+                                stringByAppendingPathComponent:@"indices"];
+            unsigned local=0,missing=0,invalid=0;
+            for (NSString *hash in items) {
+                BOOL valid=hash.length==32 &&
+                    [hash rangeOfCharacterFromSet:nonHex].location==NSNotFound;
+                if (!valid) { invalid++; continue; }
+                NSString *name=[hash stringByAppendingString:@".index"];
+                if ([NSFileManager.defaultManager fileExistsAtPath:[indices stringByAppendingPathComponent:name]]) local++;
+                else missing++;
+            }
+            LOG("[patch-index] field=%s local-present=%u local-missing=%u invalid-keys=%u\n",
+                field.UTF8String,local,missing,invalid);
+            if (([field isEqualToString:@"patch-archives"] ||
+                 [field isEqualToString:@"patch-file-index"]) && items.count) {
+                // Two remote HEAD requests total. The installer itself
+                // uses /data/<hash>.index for the archive-index format.
+                probe_forever_cdn_head(items.firstObject,@"index");
+            }
+        }
         LOG("[patch-config] field=%s values=%lu target-EKey-in-field=%s\n",
             field.UTF8String,(unsigned long)items.count,
             [value rangeOfString:target options:NSCaseInsensitiveSearch].location!=NSNotFound?"yes":"no");
