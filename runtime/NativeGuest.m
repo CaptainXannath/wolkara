@@ -1849,7 +1849,11 @@ bool ng_initialize(const char *path, const char *frameworks, const char *library
         void (*set_nibs)(const char *)=dlsym(RTLD_DEFAULT,"AKSetGuestNibDirectory");
         if(set_nibs) set_nibs([NSHomeDirectory() stringByAppendingPathComponent:@"Documents/GuestCompatibility/Nibs"].fileSystemRepresentation);
     }
-    trace_guest=[NSProcessInfo.processInfo.arguments containsObject:@"--trace-guest"];
+    // Temporary diagnostics for the Forever TACT near-null crash.
+    // This opt-in test branch captures failed file access, successful file
+    // lookup metadata, and network setup to distinguish data and host failures.
+    // The main branch retains the standard --trace-guest opt-in behavior.
+    trace_guest=YES;
     if (trace_guest) LOG("[native] tracing failed file access, created directories, getenv, sockets and the calls dlsym hands out (--trace-guest)\n");
     if (trace_guest) {
         struct sigaction crash_registers={0};
