@@ -864,7 +864,7 @@ static void tact_scan_field_xrefs(void) {
             if (tact_region) {
                 if (is_store) selected_stores++; else selected_loads++;
             }
-            LOG("[tact-xref] %s64 preferred=%#llx opcode=%08x rt=%u rn=%u%s\\n",
+            LOG("[tact-xref] %s64 preferred=%#llx opcode=%08x rt=%u rn=%u%s\n",
                 is_store?"STORE":"LOAD",
                 (unsigned long long)address,
                 (unsigned)op,(unsigned)(op&31u),(unsigned)((op>>5)&31u),
@@ -877,13 +877,13 @@ static void tact_scan_field_xrefs(void) {
                 if (relative<0 || (uint64_t)relative+4>amount) continue;
                 uint32_t code=0;
                 memcpy(&code,(const void *)(start+relative),sizeof code);
-                LOG("[tact-xref] context preferred=%#llx relative=%+d opcode=%08x\\n",
+                LOG("[tact-xref] context preferred=%#llx relative=%+d opcode=%08x\n",
                     (unsigned long long)(start+relative-guest.slide),
                     delta,(unsigned)code);
             }
         }
     }
-    LOG("[tact-xref] complete scanned=%zu bytes all-STORE64=%zu all-LOAD64=%zu TACT-region-STORE64=%zu TACT-region-LOAD64=%zu (direct unsigned-immediate only)\\n",
+    LOG("[tact-xref] complete scanned=%zu bytes all-STORE64=%zu all-LOAD64=%zu TACT-region-STORE64=%zu TACT-region-LOAD64=%zu (direct unsigned-immediate only)\n",
         scanned,stores,loads,selected_stores,selected_loads);
 }
 // Forever 70755's bad-mutex callee saves its caller's x19 at [x29-8].
