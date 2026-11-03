@@ -271,6 +271,65 @@ static UIStackView *Stack(NSArray<UIView *> *views, CGFloat spacing) {
     [NSUserDefaults.standardUserDefaults setBool:YES forKey:[@"WoWRepairRequested." stringByAppendingString:_product[@"id"]]];
     [self checkForUpdatesAndLaunch:NO install:YES];
 }
+// No full-game verification: repair only missing patch CDN indexes when
+// explicitly requested. Game segments, settings, and existing files remain.
+- (void)restorePatchIndexes {
+    if(_busy || _starting || _sessionUsed || !_installation.app ||
+       ![_product[@"id"] isEqualToString:@"wowf"] ||
+       _installation.state!=TKWoWInstallationReady || !_plan)return;
+    UIAlertController *confirm=[UIAlertController alertControllerWithTitle:@"Experimental patch-index repair"
+        message:@"Download and verify the missing Forever patch indexes without rechecking the full game. Existing files are not overwritten. This is a diagnostic experiment and may not resolve the crash."
+        preferredStyle:UIAlertControllerStyleAlert];
+    [confirm addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    [confirm addAction:[UIAlertAction actionWithTitle:@"Restore missing indexes" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+        (void)action;
+        NSError *pathError=nil;
+        NSString *directory=[self->_library workingDirectoryForApp:self->_installation.app error:&pathError];
+        if(!directory.length) {
+            UIAlertController *error=[UIAlertController alertControllerWithTitle:@"Repair unavailable"
+                message:pathError.localizedDescription?:@"Couldn't locate the existing installation."
+                preferredStyle:UIAlertControllerStyleAlert];
+            [error addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+            [self presentViewController:error animated:YES completion:nil];
+            return;
+        }
+        NSString *root=directory.stringByDeletingLastPathComponent;
+        NSDictionary *plan=self->_plan;
+        [self cancel];
+        self->_client=[TKWoWClient new];
+        TKWoWClient *client=self->_client;
+        NSUInteger generation=self->_generation;
+        self->_busy=YES;self->_updating=YES;self->_updatePhase=@"patch-indices";
+        self->_updateDone=0;self->_updateTotal=0;
+        [self render];
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0),^{
+            NSError *problem=nil;
+            BOOL complete=[client restorePatchIndexesForPlan:plan root:root
+                progress:^(uint64_t done,uint64_t total) {
+                    dispatch_async(dispatch_get_main_queue(),^{
+                        if(generation!=self->_generation)return;
+                        self->_updatePhase=@"patch-indices";
+                        self->_updateDone=done;self->_updateTotal=total;[self render];
+                    });
+                } error:&problem];
+            dispatch_async(dispatch_get_main_queue(),^{
+                if(generation!=self->_generation)return;
+                self->_busy=NO;self->_updating=NO;
+                self->_updateDone=0;self->_updateTotal=0;self->_updatePhase=nil;
+                [self render];
+                NSString *message=complete?
+                    @"The missing patch indexes were downloaded and validated. Try Play again with JIT enabled. This does not guarantee the TACT crash is fixed.":
+                    (problem.localizedDescription?:@"The download did not finish. Already installed files were not overwritten.");
+                UIAlertController *result=[UIAlertController alertControllerWithTitle:
+                    complete?@"Patch-index repair finished":@"Patch-index repair stopped"
+                    message:message preferredStyle:UIAlertControllerStyleAlert];
+                [result addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+                [self presentViewController:result animated:YES completion:nil];
+            });
+        });
+    }]];
+    [self presentViewController:confirm animated:YES completion:nil];
+}
 - (void)configureButton:(UIButton *)button title:(NSString *)title filled:(BOOL)filled {
     UIButtonConfiguration *configuration=filled?UIButtonConfiguration.filledButtonConfiguration:UIButtonConfiguration.plainButtonConfiguration;
     configuration.title=title; configuration.cornerStyle=UIButtonConfigurationCornerStyleMedium;
@@ -312,8 +371,9 @@ static UIStackView *Stack(NSArray<UIView *> *views, CGFloat spacing) {
         detail=@"Close the app from the app switcher before starting another session.";
         action=@"Session ended";
     } else if (_busy && _updating) {
-        title=@"Updating your game…";
-        NSDictionary *phases=@{@"snapshot":@"Preparing the installation",
+        title=[_updatePhase isEqualToString:@"patch-indices"]?@"Restoring patch indexes…":@"Updating your game…";
+        NSDictionary *phases=@{@"patch-indices":@"Downloading and validating only missing patch indexes",
+            @"snapshot":@"Preparing the installation",
             @"manifests":@"Reading the update",
             @"verify":@"Checking existing data",
             @"reuse":@"Comparing installed content",
@@ -418,6 +478,13 @@ static UIStackView *Stack(NSArray<UIView *> *views, CGFloat spacing) {
         [sheet addAction:[UIAlertAction actionWithTitle:@"Verify and repair game files" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
             (void)a; [self repairInstallation];
         }]];
+        if([_product[@"id"] isEqualToString:@"wowf"] &&
+           _installation.state==TKWoWInstallationReady && _plan) {
+            [sheet addAction:[UIAlertAction actionWithTitle:@"Restore missing patch indexes (experimental)"
+                style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+                    (void)a; [self restorePatchIndexes];
+                }]];
+        }
     }
     [sheet addAction:[UIAlertAction actionWithTitle:@"Diagnostics and logs" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
         (void)a; [self diagnostics];
