@@ -1843,6 +1843,48 @@ static void probe_forever_cdn_head(NSString *key, NSString *kind) {
     else LOG("[cdn-probe] CDN HTTPS HEAD kind=%s status=%ld error-domain=%s error-code=%ld\n",
         kind.UTF8String,(long)status,errorDomain.UTF8String,(long)errorCode);
 }
+// Inspect the installed CDN configuration read-only. The WoW TACT error
+// identifies a patch INDEX, not necessarily the same /data/ object whose
+// HEAD request succeeded. Report keys and counts, never the full manifest.
+static void probe_forever_patch_config(NSString *key) {
+    NSCharacterSet *nonHex=[[NSCharacterSet characterSetWithCharactersInString:@"0123456789abcdefABCDEF"] invertedSet];
+    if (key.length!=32 || [key rangeOfCharacterFromSet:nonHex].location!=NSNotFound) {
+        LOG("[patch-config] invalid CDN configuration key\n"); return;
+    }
+    NSString *base=[NSSearchPathForDirectoriesInDomains(NSDocumentDirectory,NSUserDomainMask,YES).firstObject
+                    stringByAppendingPathComponent:@"World of Warcraft/Data/config"];
+    NSString *relative=[NSString stringWithFormat:@"%@/%@/%@",[key substringToIndex:2],
+                         [key substringWithRange:NSMakeRange(2,2)],key];
+    NSString *path=[base stringByAppendingPathComponent:relative];
+    NSDictionary *attributes=[NSFileManager.defaultManager attributesOfItemAtPath:path error:NULL];
+    unsigned long long size=[attributes[NSFileSize] unsignedLongLongValue];
+    if (!attributes || size==0 || size>2*1024*1024) {
+        LOG("[patch-config] local CDN configuration absent or oversized bytes=%llu\n",size); return;
+    }
+    NSData *data=[NSData dataWithContentsOfFile:path options:0 error:NULL];
+    NSString *text=data?[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding]:nil;
+    if (!text) { LOG("[patch-config] CDN configuration could not be decoded\n"); return; }
+    NSString *target=@"46c3d32d04ba185323ebea70f24ce282";
+    BOOL present=[text rangeOfString:target options:NSCaseInsensitiveSearch].location!=NSNotFound;
+    LOG("[patch-config] CDN config bytes=%llu target-EKey-present=%s\n",size,present?"yes":"no");
+    unsigned matched=0;
+    for (NSString *raw in [text componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet]) {
+        NSRange split=[raw rangeOfString:@" = "];
+        if (split.location==NSNotFound || !split.location) continue;
+        NSString *field=[raw substringToIndex:split.location];
+        NSString *lower=field.lowercaseString;
+        if (![lower containsString:@"patch"] && ![lower containsString:@"index"] &&
+            ![lower containsString:@"archive"]) continue;
+        NSString *value=[raw substringFromIndex:NSMaxRange(split)];
+        NSArray<NSString *> *items=[[value componentsSeparatedByCharactersInSet:NSCharacterSet.whitespaceCharacterSet]
+            filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"length > 0"]];
+        if (field.length>64 || matched++>=24) continue;
+        LOG("[patch-config] field=%s values=%lu target-EKey-in-field=%s\n",
+            field.UTF8String,(unsigned long)items.count,
+            [value rangeOfString:target options:NSCaseInsensitiveSearch].location!=NSNotFound?"yes":"no");
+    }
+    LOG("[patch-config] inspected fields=%u\n",matched);
+}
 // Diagnostics only: Files on iPhone may hide the .build.info dotfile.
 // Report only public CDN routing metadata for the selected Forever product;
 // never log the build keys, CDN keys, install keys, or complete metadata file.
@@ -1874,6 +1916,7 @@ static void probe_forever_cdn_metadata(void) {
     NSUInteger cdnPath=[fields indexOfObject:@"CDN Path"];
     NSUInteger cdnHosts=[fields indexOfObject:@"CDN Hosts"];
     NSUInteger buildKey=[fields indexOfObject:@"Build Key"];
+    NSUInteger cdnKey=[fields indexOfObject:@"CDN Key"];
     if (product==NSNotFound || cdnPath==NSNotFound || cdnHosts==NSNotFound) {
         LOG("[cdn-probe] required routing columns not present\n"); return;
     }
@@ -1890,6 +1933,8 @@ static void probe_forever_cdn_metadata(void) {
         }
         LOG("[cdn-probe] product=wowf active=%s version=%s cdn_path=%s cdn_hosts=%s\n",
             isActive.UTF8String,build.UTF8String,route.UTF8String,host.UTF8String);
+        if ([isActive isEqualToString:@"1"] && cdnKey!=NSNotFound)
+            probe_forever_patch_config(values[cdnKey]);
         if ([isActive isEqualToString:@"1"] && [host isEqualToString:@"level3.ssl.blizzard.com"] &&
             [route isEqualToString:@"tpr/wow"] && buildKey!=NSNotFound)
             { probe_forever_cdn_head(values[buildKey],@"config");
