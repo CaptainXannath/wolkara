@@ -1805,6 +1805,56 @@ static bool run_initializers(const GuestImage *image, uint64_t slide, const char
     }
     return true;
 }
+// Diagnostics only: Files on iPhone may hide the .build.info dotfile.
+// Report only public CDN routing metadata for the selected Forever product;
+// never log the build keys, CDN keys, install keys, or complete metadata file.
+static void probe_forever_cdn_metadata(void) {
+    NSString *documents=NSSearchPathForDirectoriesInDomains(NSDocumentDirectory,NSUserDomainMask,YES).firstObject;
+    if (!documents.length) { LOG("[cdn-probe] Documents directory unavailable\n"); return; }
+    NSString *info=[[documents stringByAppendingPathComponent:@"World of Warcraft"]
+                    stringByAppendingPathComponent:@".build.info"];
+    NSDictionary *attributes=[NSFileManager.defaultManager attributesOfItemAtPath:info error:NULL];
+    unsigned long long bytes=[attributes[NSFileSize] unsignedLongLongValue];
+    if (!attributes || bytes==0 || bytes>2*1024*1024) {
+        LOG("[cdn-probe] metadata missing or invalid size=%llu\n",bytes); return;
+    }
+    NSData *data=[NSData dataWithContentsOfFile:info options:0 error:NULL];
+    NSString *text=data?[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding]:nil;
+    if (!text) { LOG("[cdn-probe] metadata unreadable or invalid UTF-8\n"); return; }
+    NSMutableArray<NSString *> *lines=[NSMutableArray array];
+    for (NSString *raw in [text componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet]) {
+        NSString *line=[raw stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+        if (line.length && ![line hasPrefix:@"#"]) [lines addObject:line];
+    }
+    if (lines.count<2) { LOG("[cdn-probe] metadata has no product rows\n"); return; }
+    NSMutableArray<NSString *> *fields=[NSMutableArray array];
+    for (NSString *entry in [lines[0] componentsSeparatedByString:@"|"])
+        [fields addObject:[entry componentsSeparatedByString:@"!"].firstObject ?: @""];
+    NSUInteger product=[fields indexOfObject:@"Product"];
+    NSUInteger active=[fields indexOfObject:@"Active"];
+    NSUInteger version=[fields indexOfObject:@"Version"];
+    NSUInteger cdnPath=[fields indexOfObject:@"CDN Path"];
+    NSUInteger cdnHosts=[fields indexOfObject:@"CDN Hosts"];
+    if (product==NSNotFound || cdnPath==NSNotFound || cdnHosts==NSNotFound) {
+        LOG("[cdn-probe] required routing columns not present\n"); return;
+    }
+    BOOL found=NO;
+    for (NSUInteger i=1;i<lines.count;i++) {
+        NSArray<NSString *> *values=[lines[i] componentsSeparatedByString:@"|"];
+        if (values.count!=fields.count || ![values[product] isEqualToString:@"wowf"]) continue;
+        NSString *host=values[cdnHosts], *route=values[cdnPath];
+        NSString *build=version!=NSNotFound?values[version]:@"(unknown)";
+        NSString *isActive=active!=NSNotFound?values[active]:@"(unknown)";
+        // Bound what a malformed file can contribute to a diagnostic log.
+        if (host.length>512 || route.length>256 || build.length>128) {
+            LOG("[cdn-probe] routing metadata fields exceed safe display length\n"); return;
+        }
+        LOG("[cdn-probe] product=wowf active=%s version=%s cdn_path=%s cdn_hosts=%s\n",
+            isActive.UTF8String,build.UTF8String,route.UTF8String,host.UTF8String);
+        found=YES;
+    }
+    if (!found) LOG("[cdn-probe] no Forever product row in metadata (rows=%lu)\n",(unsigned long)(lines.count-1));
+}
 bool ng_initialize(const char *path, const char *frameworks, const char *library_map, FILE *log, bool full_startup) {
     // Failure can leave installed Objective-C hooks and an uncertain helper.
     // Do not reinstall hooks recursively or attempt another attachment in this
@@ -1813,6 +1863,7 @@ bool ng_initialize(const char *path, const char *frameworks, const char *library
         fprintf(log,"[native] startup was already attempted; restart the app\n"); return false;
     }
     guest.log=log; guest.path=strdup(path);
+    probe_forever_cdn_metadata();
     gs_log(log); gw_log(log);
     startup_begin("loading the app's executable",0);
     NSMutableArray *process_arguments=[NSMutableArray arrayWithObject:@(path)];
