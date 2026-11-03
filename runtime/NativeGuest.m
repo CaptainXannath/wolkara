@@ -1811,12 +1811,12 @@ static bool run_initializers(const GuestImage *image, uint64_t slide, const char
 static void probe_forever_cdn_head(NSString *key, NSString *kind) {
     NSCharacterSet *nonHex=[[NSCharacterSet characterSetWithCharactersInString:@"0123456789abcdefABCDEF"] invertedSet];
     if ((! [kind isEqualToString:@"config"] && ![kind isEqualToString:@"data"] &&
-         ![kind isEqualToString:@"index"]) ||
+         ![kind isEqualToString:@"index"] && ![kind isEqualToString:@"patch-index"]) ||
         key.length!=32 || [key rangeOfCharacterFromSet:nonHex].location!=NSNotFound) {
         LOG("[cdn-probe] HEAD skipped: invalid build-key hash format\n"); return;
     }
-    NSString *remoteKind=[kind isEqualToString:@"index"]?@"data":kind;
-    NSString *object=[kind isEqualToString:@"index"]?[key stringByAppendingString:@".index"]:key;
+    NSString *remoteKind=[kind isEqualToString:@"patch-index"]?@"patch":([kind isEqualToString:@"index"]?@"data":kind);
+    NSString *object=([kind isEqualToString:@"index"] || [kind isEqualToString:@"patch-index"])?[key stringByAppendingString:@".index"]:key;
     NSString *url=[NSString stringWithFormat:@"https://level3.ssl.blizzard.com/tpr/wow/%@/%@/%@/%@",
         remoteKind,
         [key substringToIndex:2],[key substringWithRange:NSMakeRange(2,2)],object];
@@ -1900,11 +1900,15 @@ static void probe_forever_patch_config(NSString *key) {
             }
             LOG("[patch-index] field=%s local-present=%u local-missing=%u invalid-keys=%u\n",
                 field.UTF8String,local,missing,invalid);
-            if (([field isEqualToString:@"patch-archives"] ||
-                 [field isEqualToString:@"patch-file-index"]) && items.count) {
-                // Two remote HEAD requests total. The installer itself
-                // uses /data/<hash>.index for the archive-index format.
-                probe_forever_cdn_head(items.firstObject,@"index");
+            if (items.count && ([field isEqualToString:@"archives"] ||
+                                [field isEqualToString:@"file-index"] ||
+                                [field isEqualToString:@"patch-archives"] ||
+                                [field isEqualToString:@"patch-file-index"])) {
+                // Four HEAD requests total. TACT.Net distinguishes standard
+                // data indices (/data/) from patch indices (/patch/).
+                BOOL patch=[field isEqualToString:@"patch-archives"] ||
+                           [field isEqualToString:@"patch-file-index"];
+                probe_forever_cdn_head(items.firstObject,patch?@"patch-index":@"index");
             }
         }
         LOG("[patch-config] field=%s values=%lu target-EKey-in-field=%s\n",
