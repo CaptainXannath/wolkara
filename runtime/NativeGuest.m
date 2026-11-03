@@ -850,6 +850,23 @@ static void tact_probe_missing_owner(const void *caller, const void *frame) {
     LOG("[tact-owner] saved caller x19=%p owner+0x10=%p %s owner[+0x10]+0x700=%p %s\n",
         (void *)owner,(void *)root,valid_root?"read":"unreadable",
         (void *)child,valid_child?"read":"unreadable");
+    // One-time read-only snapshot of selected neighboring slots in the
+    // owner object. We do not assume they are pointers; some may be flags
+    // or integer data. This distinguishes an isolated missing TACT slot
+    // from a more broadly uninitialized structure, without guest writes.
+    if (valid_root) {
+        static const uint16_t slots[]={
+            0x000,0x008,0x010,0x018,
+            0x6d0,0x6d8,0x6e0,0x6e8,0x6f0,0x6f8,
+            0x700,0x708,0x710,0x718,0x720,0x728,0x730
+        };
+        for (size_t i=0;i<sizeof slots/sizeof slots[0];i++) {
+            uintptr_t raw=0,at=root+(uintptr_t)slots[i];
+            bool ok=at>=root && tact_read_pointer(at,&raw);
+            LOG("[tact-owner] root slot +%#x raw=%#llx %s\n",
+                (unsigned)slots[i],(unsigned long long)raw,ok?"read":"unreadable");
+        }
+    }
 }
 // Diagnostic only: report a near-null mutex before libsystem_pthread faults.
 // Never turn a failing call into a fake success or modify guest memory.
