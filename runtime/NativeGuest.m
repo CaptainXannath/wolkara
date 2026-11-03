@@ -32,6 +32,7 @@ static NativeCodeMemory local_quarantine;
 #include <sys/mman.h>
 #include <unistd.h>
 #include <mach/mach.h>
+#include <mach/mach_vm.h>
 #include <mach/arm/thread_status.h>
 #include <pthread.h>
 #include <signal.h>
@@ -815,6 +816,41 @@ static void snapshot_invalid_mutex_caller(const void *callsite) {
         }
     }
 }
+// Read our own process memory through the kernel so a diagnostic of a
+// potentially-invalid guest pointer does not itself dereference and crash.
+// This is read-only and only used after a known bad TACT mutex call.
+static bool tact_read_pointer(uintptr_t source, uintptr_t *result) {
+    if (source < 4096 || !result || source > UINTPTR_MAX - sizeof *result) return false;
+    mach_vm_size_t count=0;
+    kern_return_t status=mach_vm_read_overwrite(mach_task_self(),
+        (mach_vm_address_t)source,(mach_vm_size_t)sizeof *result,
+        (mach_vm_address_t)result,&count);
+    return status==KERN_SUCCESS && count==sizeof *result;
+}
+// Forever 70755's bad-mutex callee saves its caller's x19 at [x29-8].
+// The caller's x19 is the object whose +0x10 field points to the owner
+// with a +0x700 pointer. The next thunk adds 0x28 to that pointer.
+static void tact_probe_missing_owner(const void *caller, const void *frame) {
+    if ((uintptr_t)caller < guest.slide ||
+        (uintptr_t)caller-guest.slide != 0x102a3aa3cULL) return;
+    uintptr_t fp=(uintptr_t)frame, parent_fp=0, owner=0, root=0, child=0;
+    uintptr_t stack_end=(uintptr_t)pthread_get_stackaddr_np(pthread_self());
+    size_t stack_size=pthread_get_stacksize_np(pthread_self());
+    uintptr_t stack_start=stack_end>=stack_size?stack_end-stack_size:0;
+    if (fp<stack_start || fp>stack_end-16 ||
+        !tact_read_pointer(fp,&parent_fp) ||
+        parent_fp<stack_start+16 || parent_fp>stack_end-16) {
+        LOG("[tact-owner] cannot validate guest frame pointer\n"); return;
+    }
+    if (!tact_read_pointer(parent_fp-8,&owner)) {
+        LOG("[tact-owner] cannot read saved caller x19\n"); return;
+    }
+    bool valid_root=owner<=UINTPTR_MAX-0x10 && tact_read_pointer(owner+0x10,&root);
+    bool valid_child=valid_root && root<=UINTPTR_MAX-0x700 && tact_read_pointer(root+0x700,&child);
+    LOG("[tact-owner] saved caller x19=%p owner+0x10=%p %s owner[+0x10]+0x700=%p %s\n",
+        (void *)owner,(void *)root,valid_root?"read":"unreadable",
+        (void *)child,valid_child?"read":"unreadable");
+}
 // Diagnostic only: report a near-null mutex before libsystem_pthread faults.
 // Never turn a failing call into a fake success or modify guest memory.
 static void diagnose_guest_mutex(const char *operation, const void *mutex, const void *caller) {
@@ -825,6 +861,8 @@ static void diagnose_guest_mutex(const char *operation, const void *mutex, const
         (unsigned long long)(inside((void *)at,4)?at-guest.slide:0));
 }
 static int guest_mutex_lock(pthread_mutex_t *mutex) {
+    if ((uintptr_t)mutex==0x198)
+        tact_probe_missing_owner(__builtin_return_address(0),__builtin_frame_address(0));
     diagnose_guest_mutex("pthread_mutex_lock",mutex,__builtin_return_address(0));
     if ((uintptr_t)mutex < 4096)
         snapshot_invalid_mutex_caller(__builtin_return_address(0));
