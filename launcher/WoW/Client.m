@@ -1,5 +1,7 @@
 #import "Client.h"
 #import "CASC.h"
+#include <sys/stat.h>
+#include <errno.h>
 
 // A client reuses one connection pool, with serial transfers and bounded buffers. No cookies,
 // credentials, redirects, HTTP fallback, or application-installation writes.
@@ -391,6 +393,95 @@ static int CompareRanges(const void *a,const void *b) {
         i=last;
     }}
     } @finally { if(failure && error)*error=failure; }
+    return YES;
+}
+
+static BOOL TKWoWCDNIndexValid(NSData *data, NSString *hash) {
+    // TACT index names hash the last 28 bytes, not the entire index.
+    if(data.length<36 || !TKWoWHashValid(hash))return NO;
+    const uint8_t *bytes=data.bytes, *footer=bytes+data.length-20;
+    if(footer[0]!=1 || footer[3]==0 || footer[7]!=8)return NO;
+    NSData *tail=[NSData dataWithBytes:bytes+data.length-28 length:28];
+    return [TKWoWMD5(tail) isEqualToString:hash.lowercaseString];
+}
+- (BOOL)restorePatchIndexesForPlan:(NSDictionary *)plan root:(NSString *)root
+    progress:(void (^)(uint64_t,uint64_t))progress error:(NSError **)error {
+    if(![plan[@"product"] isEqualToString:@"wowf"] || !root.length) {
+        if(error)*error=TKWoWError(@"Patch index recovery is only for Forever.");return NO;
+    }
+    NSString *cdn=plan[@"cdn"], *key=plan[@"version"][@"CDNConfig"];
+    NSURL *base=[NSURL URLWithString:cdn];
+    if(![base.scheme isEqualToString:@"https"] || ![base.host.lowercaseString hasSuffix:@".blizzard.com"] ||
+       ![cdn hasSuffix:@"/tpr/wow"] || !TKWoWHashValid(key)) {
+        if(error)*error=TKWoWError(@"Unrecognized Forever CDN configuration.");return NO;
+    }
+    NSData *raw=[self configuration:key cdn:cdn error:error];if(!raw)return NO;
+    NSDictionary *config=TKWoWConfig(raw,error);if(!config)return NO;
+    NSMutableArray<NSDictionary *> *entries=[NSMutableArray array];
+    uint64_t estimated=0;
+    for(NSString *field in @[@"patch-archives",@"patch-file-index"]) {
+        NSString *sizesField=[field isEqualToString:@"patch-archives"]?@"patch-archives-index-size":@"patch-file-index-size";
+        NSArray<NSString *> *hashes=Words(config[field]), *sizes=Words(config[sizesField]);
+        if(!hashes.count || hashes.count!=sizes.count || hashes.count>200) {
+            if(error)*error=TKWoWError(@"Incomplete patch-index catalogue.");return NO;
+        }
+        for(NSUInteger i=0;i<hashes.count;i++) {
+            NSString *hash=hashes[i];NSUInteger length=ManifestSize(sizes[i]);
+            if(!TKWoWHashValid(hash) || !length || length>64*1024*1024 ||
+               estimated+length>512ULL*1024*1024) {
+                if(error)*error=TKWoWError(@"Patch-index download exceeds safe size limit.");return NO;
+            }
+            estimated+=length;
+            [entries addObject:@{@"key":hash,@"size":@(length)}];
+        }
+    }
+    NSString *indices=[root stringByAppendingPathComponent:@"Data/indices"];
+    BOOL dir=NO;
+    if(![NSFileManager.defaultManager fileExistsAtPath:indices isDirectory:&dir] || !dir) {
+        if(error)*error=TKWoWError(@"The installed Data/indices directory is missing.");return NO;
+    }
+    // Reject symlink directories without normalizing /var to /private/var.
+    for(NSString *name in @[root,[root stringByAppendingPathComponent:@"Data"],indices]) {
+        struct stat st;
+        if(lstat(name.fileSystemRepresentation,&st) || !S_ISDIR(st.st_mode)) {
+            if(error)*error=TKWoWError(@"An installation directory is redirected or inaccessible.");return NO;
+        }
+    }
+    if(progress)progress(0,entries.count);
+    NSUInteger added=0,existing=0;
+    for(NSUInteger i=0;i<entries.count;i++) { @autoreleasepool {
+        if(self.cancelled) {
+            if(error)*error=TKWoWError(@"Patch-index repair cancelled. Existing files preserved.");return NO;
+        }
+        NSString *hash=entries[i][@"key"];
+        NSUInteger length=[entries[i][@"size"] unsignedIntegerValue];
+        NSString *path=[indices stringByAppendingPathComponent:[hash stringByAppendingString:@".index"]];
+        struct stat st;
+        if(!lstat(path.fileSystemRepresentation,&st)) {
+            if(!S_ISREG(st.st_mode) || st.st_size!=(off_t)length) {
+                if(error)*error=TKWoWError(@"Existing index has unexpected type or size; not overwritten.");return NO;
+            }
+            NSData *old=[NSData dataWithContentsOfFile:path options:NSDataReadingMappedIfSafe error:NULL];
+            if(!TKWoWCDNIndexValid(old,hash)) {
+                if(error)*error=TKWoWError(@"Existing index checksum differs; not overwritten.");return NO;
+            }
+            existing++;
+        } else {
+            if(errno!=ENOENT) { if(error)*error=TKWoWError(@"Unable to inspect index destination.");return NO; }
+            NSString *url=[NSString stringWithFormat:@"%@/patch/%@/%@/%@.index",cdn,
+                          [hash substringToIndex:2],[hash substringWithRange:NSMakeRange(2,2)],hash];
+            NSData *body=[self fetch:[NSURL URLWithString:url] limit:length error:error];
+            if(!body)return NO;
+            if(body.length!=length || !TKWoWCDNIndexValid(body,hash)) {
+                if(error)*error=TKWoWError(@"Downloaded patch index failed size or checksum.");return NO;
+            }
+            if(![body writeToFile:path options:NSDataWritingAtomic error:error])return NO;
+            added++;
+        }
+        if(progress)progress(i+1,entries.count);
+    }}
+    NSLog(@"[patch-repair] success added=%lu existing=%lu published-bytes=%llu",
+          (unsigned long)added,(unsigned long)existing,estimated);
     return YES;
 }
 
