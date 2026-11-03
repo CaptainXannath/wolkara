@@ -1808,12 +1808,14 @@ static bool run_initializers(const GuestImage *image, uint64_t slide, const char
 // One safe connectivity check, only on this experimental Forever branch.
 // The content hash is a public CDN object identifier, not a credential.
 // Use HEAD to avoid downloading the object or altering game installation.
-static void probe_forever_cdn_head(NSString *key) {
+static void probe_forever_cdn_head(NSString *key, NSString *kind) {
     NSCharacterSet *nonHex=[[NSCharacterSet characterSetWithCharactersInString:@"0123456789abcdefABCDEF"] invertedSet];
-    if (key.length!=32 || [key rangeOfCharacterFromSet:nonHex].location!=NSNotFound) {
+    if ((! [kind isEqualToString:@"config"] && ![kind isEqualToString:@"data"]) ||
+        key.length!=32 || [key rangeOfCharacterFromSet:nonHex].location!=NSNotFound) {
         LOG("[cdn-probe] HEAD skipped: invalid build-key hash format\n"); return;
     }
-    NSString *url=[NSString stringWithFormat:@"https://level3.ssl.blizzard.com/tpr/wow/config/%@/%@/%@",
+    NSString *url=[NSString stringWithFormat:@"https://level3.ssl.blizzard.com/tpr/wow/%@/%@/%@/%@",
+        kind,
         [key substringToIndex:2],[key substringWithRange:NSMakeRange(2,2)],key];
     NSURLSessionConfiguration *config=[NSURLSessionConfiguration ephemeralSessionConfiguration];
     config.timeoutIntervalForRequest=5;
@@ -1837,9 +1839,9 @@ static void probe_forever_cdn_head(NSString *key) {
     long timedOut=dispatch_semaphore_wait(finished,dispatch_time(DISPATCH_TIME_NOW,8*NSEC_PER_SEC));
     if (timedOut) [task cancel];
     [session invalidateAndCancel];
-    if (timedOut) LOG("[cdn-probe] CDN HTTPS HEAD timed out after 8 seconds\n");
-    else LOG("[cdn-probe] CDN HTTPS HEAD status=%ld error-domain=%s error-code=%ld\n",
-        (long)status,errorDomain.UTF8String,(long)errorCode);
+    if (timedOut) LOG("[cdn-probe] CDN HTTPS HEAD kind=%s timed out after 8 seconds\n",kind.UTF8String);
+    else LOG("[cdn-probe] CDN HTTPS HEAD kind=%s status=%ld error-domain=%s error-code=%ld\n",
+        kind.UTF8String,(long)status,errorDomain.UTF8String,(long)errorCode);
 }
 // Diagnostics only: Files on iPhone may hide the .build.info dotfile.
 // Report only public CDN routing metadata for the selected Forever product;
@@ -1890,7 +1892,11 @@ static void probe_forever_cdn_metadata(void) {
             isActive.UTF8String,build.UTF8String,route.UTF8String,host.UTF8String);
         if ([isActive isEqualToString:@"1"] && [host isEqualToString:@"level3.ssl.blizzard.com"] &&
             [route isEqualToString:@"tpr/wow"] && buildKey!=NSNotFound)
-            probe_forever_cdn_head(values[buildKey]);
+            { probe_forever_cdn_head(values[buildKey],@"config");
+              // The content E-Key was reported in Tact.log for Forever 70755.
+              // Probe exactly this data object; never download or modify it.
+              if ([build isEqualToString:@"1.60.1.70755"])
+                  probe_forever_cdn_head(@"46c3d32d04ba185323ebea70f24ce282",@"data"); }
         found=YES;
     }
     if (!found) LOG("[cdn-probe] no Forever product row in metadata (rows=%lu)\n",(unsigned long)(lines.count-1));
