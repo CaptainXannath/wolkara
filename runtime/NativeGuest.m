@@ -753,6 +753,29 @@ static void pump_shader_wait(void) { CFRunLoopRunInMode(kCFRunLoopDefaultMode,.0
     unsigned tid=(trace_guest && gsv_enabled())?trace_tid():0; \
     GWWaitRecord previous=gwt_begin(tid,name,address); \
     int result=(expression); int code=errno; gwt_end(tid,previous); errno=code; return result
+// Capture a small, read-only ARM64 instruction window around the caller.
+// One snapshot per process to avoid flooding the log or touching guest data.
+// No guest code is patched, skipped, or altered.
+static void snapshot_invalid_mutex_caller(const void *callsite) {
+    static atomic_bool emitted;
+    if (atomic_exchange(&emitted, true)) return;
+    uintptr_t pc=(uintptr_t)callsite;
+    if (!inside(callsite, 4) || (pc & 3)) {
+        LOG("[sync-probe] unable to snapshot caller %p outside executable arena\n", callsite);
+        return;
+    }
+    LOG("[sync-probe] ARM64 caller window (read only), return=%p preferred=%#llx\n",
+        callsite,(unsigned long long)(pc-guest.slide));
+    for (int displacement=-96; displacement<=32; displacement+=4) {
+        uintptr_t address=pc+(intptr_t)displacement;
+        if (!inside((const void *)address,sizeof(uint32_t))) continue;
+        uint32_t instruction=0;
+        memcpy(&instruction,(const void *)address,sizeof instruction);
+        LOG("[sync-probe] code preferred=%#llx relative=%+d opcode=%08x%s\n",
+            (unsigned long long)(address-guest.slide),displacement,
+            (unsigned)instruction,displacement==0?" <return-address>":"");
+    }
+}
 // Diagnostic only: report a near-null mutex before libsystem_pthread faults.
 // Never turn a failing call into a fake success or modify guest memory.
 static void diagnose_guest_mutex(const char *operation, const void *mutex, const void *caller) {
@@ -764,6 +787,8 @@ static void diagnose_guest_mutex(const char *operation, const void *mutex, const
 }
 static int guest_mutex_lock(pthread_mutex_t *mutex) {
     diagnose_guest_mutex("pthread_mutex_lock",mutex,__builtin_return_address(0));
+    if ((uintptr_t)mutex < 4096)
+        snapshot_invalid_mutex_caller(__builtin_return_address(0));
     // Experimental crash-isolation guard for the invalid 0x198 pointer seen
     // in Forever build 70707. Return an actual pthread error, not success.
     // This does not initialize a missing game object or fix its lifetime.
