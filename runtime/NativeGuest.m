@@ -39,6 +39,7 @@ static NativeCodeMemory local_quarantine;
 #include <spawn.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
+#include <netdb.h>
 #include <poll.h>
 #include <sys/socket.h>
 #include <sys/sysctl.h>
@@ -720,6 +721,7 @@ static char *guest_getenv(const char *);
 static bool case_insensitive_files;
 static DIR *guest_opendir(const char *);
 static struct dirent *guest_readdir(DIR *);
+static int guest_getaddrinfo(const char *, const char *, const struct addrinfo *, struct addrinfo **);
 static int guest_socket(int, int, int);
 static int guest_connect(int, const struct sockaddr *, socklen_t);
 static int guest_getsockopt(int, int, int, void *, socklen_t *);
@@ -831,61 +833,6 @@ static bool tact_read_pointer(uintptr_t source, uintptr_t *result) {
 // already-mapped guest executable code. This reads instructions only; it does
 // not change permissions, trap writes, or assume every match uses this object.
 // Indirect/indexed writes and memset-style initialization will not match.
-static void tact_scan_field_xrefs(void) {
-    static atomic_bool emitted;
-    if (atomic_exchange(&emitted,true)) return;
-    size_t scanned=0,loads=0,stores=0;
-    size_t selected_loads=0,selected_stores=0;
-    // Addresses only describe the Forever 1.60.1.70755 executable.
-    // The known crashing TACT call chain lives around 0x102a0.... .
-    const uint64_t tact_low=0x102900000ULL,tact_high=0x102c00000ULL;
-    for (size_t s=0;s<guest.image.segment_count;s++) {
-        const GISegment *segment=&guest.image.segments[s];
-        if (!(segment->prot & VM_PROT_EXECUTE) ||
-            segment->address>UINTPTR_MAX-guest.slide) continue;
-        uintptr_t start=(uintptr_t)(segment->address+guest.slide);
-        uint64_t amount=segment->size<segment->file_size?segment->size:segment->file_size;
-        if (amount>128ULL*1024*1024) amount=128ULL*1024*1024;
-        amount&=~3ULL;
-        if (!amount || (start&3) || !inside((void *)start,(size_t)amount)) continue;
-        scanned+=(size_t)amount;
-        for (size_t offset=0;offset+4<=amount;offset+=4) {
-            uint32_t op=0;
-            memcpy(&op,(const void *)(start+offset),sizeof op);
-            bool is_store=(op & 0xffc00000u)==0xf9000000u;
-            bool is_load=(op & 0xffc00000u)==0xf9400000u;
-            if ((!is_store && !is_load) || ((op>>10)&0xfffu)!=0xe0u) continue;
-            if (is_store) stores++; else loads++;
-            uint64_t address=(uint64_t)(start+offset-guest.slide);
-            bool tact_region=address>=tact_low && address<tact_high;
-            // Record every direct store (the previous test only printed 24)
-            // and every candidate read/write near the TACT crash path.
-            if (!is_store && !tact_region) continue;
-            if (tact_region) {
-                if (is_store) selected_stores++; else selected_loads++;
-            }
-            LOG("[tact-xref] %s64 preferred=%#llx opcode=%08x rt=%u rn=%u%s\n",
-                is_store?"STORE":"LOAD",
-                (unsigned long long)address,
-                (unsigned)op,(unsigned)(op&31u),(unsigned)((op>>5)&31u),
-                tact_region?" TACT-region":"");
-            // Instructions are only candidate xrefs. They can use entirely
-            // different object types; we do not infer execution or causality.
-            if (!tact_region) continue;
-            for (int delta=-40;delta<=40;delta+=4) {
-                intptr_t relative=(intptr_t)offset+delta;
-                if (relative<0 || (uint64_t)relative+4>amount) continue;
-                uint32_t code=0;
-                memcpy(&code,(const void *)(start+relative),sizeof code);
-                LOG("[tact-xref] context preferred=%#llx relative=%+d opcode=%08x\n",
-                    (unsigned long long)(start+relative-guest.slide),
-                    delta,(unsigned)code);
-            }
-        }
-    }
-    LOG("[tact-xref] complete scanned=%zu bytes all-STORE64=%zu all-LOAD64=%zu TACT-region-STORE64=%zu TACT-region-LOAD64=%zu (direct unsigned-immediate only)\n",
-        scanned,stores,loads,selected_stores,selected_loads);
-}
 // Forever 70755's bad-mutex callee saves its caller's x19 at [x29-8].
 // The caller's x19 is the object whose +0x10 field points to the owner
 // with a +0x700 pointer. The next thunk adds 0x28 to that pointer.
@@ -926,7 +873,6 @@ static void tact_probe_missing_owner(const void *caller, const void *frame) {
                 (unsigned)slots[i],(unsigned long long)raw,ok?"read":"unreadable");
         }
     }
-    tact_scan_field_xrefs();
 }
 // Diagnostic only: report a near-null mutex before libsystem_pthread faults.
 // Never turn a failing call into a fake success or modify guest memory.
@@ -1022,6 +968,7 @@ static void *hook(const char *name) {
         if (trace_guest) HOOK("readdir",guest_readdir);
     }
     if (trace_guest) { HOOK("mkdir",guest_mkdir); HOOK("getenv",guest_getenv);
+        HOOK("getaddrinfo",guest_getaddrinfo);
         HOOK("socket",guest_socket); HOOK("connect",guest_connect);
         HOOK("getsockopt",guest_getsockopt); HOOK("setsockopt",guest_setsockopt);
         HOOK("shutdown",guest_shutdown); HOOK("poll",guest_poll);
@@ -1370,6 +1317,21 @@ static char *guest_realpath_extsn(const char *path, char *resolved) { return tra
 // Trace lines carry a small per-thread number; the first tracer is the main
 // thread, which starts the guest.
 static unsigned trace_tid(void);
+// DNS resolution precedes a socket connection. Observe guest calls only.
+// Preserve the resolver's result and errno, including failures.
+static int guest_getaddrinfo(const char *node,const char *service,
+                             const struct addrinfo *hints,struct addrinfo **result) {
+    char local_node[PATH_MAX],local_service[PATH_MAX];
+    const char *shown_node=node?gsv_string(node,local_node,sizeof local_node):NULL;
+    const char *shown_service=service?gsv_string(service,local_service,sizeof local_service):NULL;
+    int status=getaddrinfo(shown_node,shown_service,hints,result);
+    int saved_errno=errno;
+    if(trace_guest) log_once("[native] [t%u] getaddrinfo(%s,%s) -> %d errno=%d\n",
+        trace_tid(),shown_node?shown_node:"(null)",
+        shown_service?shown_service:"(null)",status,saved_errno);
+    errno=saved_errno;
+    return status;
+}
 // Sockets, under --trace-guest: who the guest tries to talk to (a Galaxy
 // client's local socket, an HTTPS endpoint) says what a failed sign-in needed.
 static int guest_socket(int domain, int type, int protocol) {
