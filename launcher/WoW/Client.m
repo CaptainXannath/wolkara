@@ -475,6 +475,7 @@ static BOOL TKWoWCDNIndexValid(NSData *data, NSString *hash) {
     TKWoWPatchTrace(@"destination checks passed; patch index recovery starting");
     if(progress)progress(0,entries.count);
     NSUInteger added=0,existing=0;
+    uint64_t actualTotal=0;
     // Keep autoreleased NSError values alive through the caller's strong
     // retain of the NSError** output. An inner autorelease pool could drain
     // an error before the dispatch worker has captured it (SIGBUS in
@@ -490,28 +491,48 @@ static BOOL TKWoWCDNIndexValid(NSData *data, NSString *hash) {
         NSString *path=[indices stringByAppendingPathComponent:[hash stringByAppendingString:@".index"]];
         struct stat st;
         if(!lstat(path.fileSystemRepresentation,&st)) {
-            if(!S_ISREG(st.st_mode) || st.st_size!=(off_t)length) {
+            if(!S_ISREG(st.st_mode) || st.st_size<36 || st.st_size>64*1024*1024) {
                 if(error)*error=TKWoWError(@"Existing index has unexpected type or size; not overwritten.");return NO;
             }
             NSData *old=[NSData dataWithContentsOfFile:path options:NSDataReadingMappedIfSafe error:NULL];
             if(!TKWoWCDNIndexValid(old,hash)) {
+                TKWoWPatchTrace([NSString stringWithFormat:@"index %lu: existing index invalid, actual=%lld published=%lu",
+                    (unsigned long)(i+1),(long long)st.st_size,(unsigned long)length]);
                 if(error)*error=TKWoWError(@"Existing index checksum differs; not overwritten.");return NO;
             }
+            actualTotal+=(uint64_t)st.st_size;
+            if(actualTotal>512ULL*1024*1024) {
+                if(error)*error=TKWoWError(@"Total verified patch-index bytes exceed safe limit.");return NO;
+            }
+            if((NSUInteger)st.st_size!=length)
+                TKWoWPatchTrace([NSString stringWithFormat:@"index %lu: existing checksum valid; published=%lu actual=%lld",
+                    (unsigned long)(i+1),(unsigned long)length,(long long)st.st_size]);
             existing++;
         } else {
             if(errno!=ENOENT) { if(error)*error=TKWoWError(@"Unable to inspect index destination.");return NO; }
             NSString *url=[NSString stringWithFormat:@"%@/patch/%@/%@/%@.index",cdn,
                           [hash substringToIndex:2],[hash substringWithRange:NSMakeRange(2,2)],hash];
             TKWoWPatchTrace([NSString stringWithFormat:@"index %lu: downloading",(unsigned long)(i+1)]);
-            NSData *body=[self fetch:[NSURL URLWithString:url] limit:length error:error];
+            // Published *-index-size can differ from the served index on
+            // historical CDN snapshots. Permit a bounded size difference ONLY
+            // if the content-addressed TACT footer digest matches the key.
+            NSUInteger cap=MIN((NSUInteger)64*1024*1024,length*2);
+            NSData *body=[self fetch:[NSURL URLWithString:url] limit:cap error:error];
             if(!body) {
                 TKWoWPatchTrace([NSString stringWithFormat:@"index %lu: download returned an error",(unsigned long)(i+1)]);
                 return NO;
             }
-            TKWoWPatchTrace([NSString stringWithFormat:@"index %lu: received %lu bytes; validating",
-                (unsigned long)(i+1),(unsigned long)body.length]);
-            if(body.length!=length || !TKWoWCDNIndexValid(body,hash)) {
-                if(error)*error=TKWoWError(@"Downloaded patch index failed size or checksum.");return NO;
+            BOOL verified=TKWoWCDNIndexValid(body,hash);
+            TKWoWPatchTrace([NSString stringWithFormat:@"index %lu: published=%lu actual=%lu checksum=%s",
+                (unsigned long)(i+1),(unsigned long)length,(unsigned long)body.length,
+                verified?"valid":"INVALID"]);
+            if(!verified) {
+                if(error)*error=TKWoWError(@"Downloaded patch index checksum does not match CDN catalogue.");
+                return NO;
+            }
+            actualTotal+=body.length;
+            if(actualTotal>512ULL*1024*1024) {
+                if(error)*error=TKWoWError(@"Total verified patch-index bytes exceed safe limit.");return NO;
             }
             if(![body writeToFile:path options:NSDataWritingAtomic error:error]) {
                 TKWoWPatchTrace([NSString stringWithFormat:@"index %lu: disk write failed",(unsigned long)(i+1)]);
@@ -522,8 +543,8 @@ static BOOL TKWoWCDNIndexValid(NSData *data, NSString *hash) {
         }
         if(progress)progress(i+1,entries.count);
     }
-    TKWoWPatchTrace([NSString stringWithFormat:@"completed: added=%lu existing=%lu published_bytes=%llu",
-        (unsigned long)added,(unsigned long)existing,estimated]);
+    TKWoWPatchTrace([NSString stringWithFormat:@"completed: added=%lu existing=%lu published_bytes=%llu verified_bytes=%llu",
+        (unsigned long)added,(unsigned long)existing,estimated,actualTotal]);
     return YES;
 }
 
