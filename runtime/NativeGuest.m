@@ -32,7 +32,7 @@ static NativeCodeMemory local_quarantine;
 #include <sys/mman.h>
 #include <unistd.h>
 #include <mach/mach.h>
-#include <mach/mach_vm.h>
+#include <mach/vm_map.h>
 #include <mach/arm/thread_status.h>
 #include <pthread.h>
 #include <signal.h>
@@ -821,10 +821,10 @@ static void snapshot_invalid_mutex_caller(const void *callsite) {
 // This is read-only and only used after a known bad TACT mutex call.
 static bool tact_read_pointer(uintptr_t source, uintptr_t *result) {
     if (source < 4096 || !result || source > UINTPTR_MAX - sizeof *result) return false;
-    mach_vm_size_t count=0;
-    kern_return_t status=mach_vm_read_overwrite(mach_task_self(),
-        (mach_vm_address_t)source,(mach_vm_size_t)sizeof *result,
-        (mach_vm_address_t)result,&count);
+    vm_size_t count=0;
+    kern_return_t status=vm_read_overwrite(mach_task_self(),
+        (vm_address_t)source,(vm_size_t)sizeof *result,
+        (vm_address_t)result,&count);
     return status==KERN_SUCCESS && count==sizeof *result;
 }
 // Forever 70755's bad-mutex callee saves its caller's x19 at [x29-8].
