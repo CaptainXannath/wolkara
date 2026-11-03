@@ -722,7 +722,12 @@ static bool case_insensitive_files;
 static DIR *guest_opendir(const char *);
 static struct dirent *guest_readdir(DIR *);
 static int guest_getaddrinfo(const char *, const char *, const struct addrinfo *, struct addrinfo **);
+static struct hostent *guest_gethostbyname(const char *);
 static int guest_socket(int, int, int);
+static int guest_connectx(int, const sa_endpoints_t *, sae_associd_t, unsigned int,
+                          const struct iovec *, unsigned int, size_t *, sae_connid_t *);
+static ssize_t guest_sendmsg(int, const struct msghdr *, int);
+static ssize_t guest_recvmsg(int, struct msghdr *, int);
 static int guest_connect(int, const struct sockaddr *, socklen_t);
 static int guest_getsockopt(int, int, int, void *, socklen_t *);
 static int guest_setsockopt(int, int, int, const void *, socklen_t);
@@ -968,8 +973,9 @@ static void *hook(const char *name) {
         if (trace_guest) HOOK("readdir",guest_readdir);
     }
     if (trace_guest) { HOOK("mkdir",guest_mkdir); HOOK("getenv",guest_getenv);
-        HOOK("getaddrinfo",guest_getaddrinfo);
-        HOOK("socket",guest_socket); HOOK("connect",guest_connect);
+        HOOK("getaddrinfo",guest_getaddrinfo); HOOK("gethostbyname",guest_gethostbyname);
+        HOOK("socket",guest_socket); HOOK("connect",guest_connect); HOOK("connectx",guest_connectx);
+        HOOK("sendmsg",guest_sendmsg); HOOK("recvmsg",guest_recvmsg);
         HOOK("getsockopt",guest_getsockopt); HOOK("setsockopt",guest_setsockopt);
         HOOK("shutdown",guest_shutdown); HOOK("poll",guest_poll);
         HOOK("sendto",guest_sendto); HOOK("recvfrom",guest_recvfrom);
@@ -1331,6 +1337,46 @@ static int guest_getaddrinfo(const char *node,const char *service,
         shown_service?shown_service:"(null)",status,saved_errno);
     errno=saved_errno;
     return status;
+}
+// These alternative socket entry points are used by some Darwin networking
+// stacks. Trace only; preserve all native return values and errno.
+static struct hostent *guest_gethostbyname(const char *name) {
+    struct hostent *result=gethostbyname(name);
+    int saved=errno;
+    if(trace_guest) log_once("[native] [t%u] gethostbyname(%s) -> %s errno=%d\n",
+        trace_tid(),name?name:"(null)",result?"ok":"NULL",saved);
+    errno=saved;
+    return result;
+}
+static int guest_connectx(int fd, const sa_endpoints_t *ends, sae_associd_t assoc,
+                          unsigned int flags, const struct iovec *iov,
+                          unsigned int iovcnt, size_t *len, sae_connid_t *connid) {
+    int result=connectx(fd,ends,assoc,flags,iov,iovcnt,len,connid);
+    int saved=errno;
+    if(trace_guest) log_once("[native] [t%u] connectx(fd=%d,flags=%#x) -> %d errno=%d\n",
+        trace_tid(),fd,flags,result,result?saved:0);
+    errno=saved;
+    return result;
+}
+static ssize_t guest_sendmsg(int fd, const struct msghdr *msg, int flags) {
+    ssize_t result=sendmsg(fd,msg,flags);
+    int saved=errno;
+    static atomic_uint seen;
+    if(trace_guest && (result<0 || atomic_fetch_add(&seen,1)<48))
+        LOG("[native] [t%u] sendmsg(fd=%d) -> %zd errno=%d\n",
+            trace_tid(),fd,result,result<0?saved:0);
+    errno=saved;
+    return result;
+}
+static ssize_t guest_recvmsg(int fd, struct msghdr *msg, int flags) {
+    ssize_t result=recvmsg(fd,msg,flags);
+    int saved=errno;
+    static atomic_uint seen;
+    if(trace_guest && (result<0 || atomic_fetch_add(&seen,1)<48))
+        LOG("[native] [t%u] recvmsg(fd=%d) -> %zd errno=%d\n",
+            trace_tid(),fd,result,result<0?saved:0);
+    errno=saved;
+    return result;
 }
 // Sockets, under --trace-guest: who the guest tries to talk to (a Galaxy
 // client's local socket, an HTTPS endpoint) says what a failed sign-in needed.
