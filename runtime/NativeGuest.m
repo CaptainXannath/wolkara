@@ -764,6 +764,13 @@ static void diagnose_guest_mutex(const char *operation, const void *mutex, const
 }
 static int guest_mutex_lock(pthread_mutex_t *mutex) {
     diagnose_guest_mutex("pthread_mutex_lock",mutex,__builtin_return_address(0));
+    // Experimental crash-isolation guard for the invalid 0x198 pointer seen
+    // in Forever build 70707. Return an actual pthread error, not success.
+    // This does not initialize a missing game object or fix its lifetime.
+    if ((uintptr_t)mutex < 4096) {
+        LOG("[sync-probe] rejected invalid pthread_mutex_lock(%p) with EINVAL\n", mutex);
+        return EINVAL;
+    }
     if (trace_guest && gsv_enabled()) {
         WAIT_TRACE_CALL("pthread_mutex_lock",mutex,pthread_mutex_lock(mutex));
     }
@@ -771,6 +778,10 @@ static int guest_mutex_lock(pthread_mutex_t *mutex) {
 }
 static int guest_mutex_unlock(pthread_mutex_t *mutex) {
     diagnose_guest_mutex("pthread_mutex_unlock",mutex,__builtin_return_address(0));
+    if ((uintptr_t)mutex < 4096) {
+        LOG("[sync-probe] rejected invalid pthread_mutex_unlock(%p) with EINVAL\n", mutex);
+        return EINVAL;
+    }
     return pthread_mutex_unlock(mutex);
 }
 static int guest_cond_wait(pthread_cond_t *condition,pthread_mutex_t *mutex) {
