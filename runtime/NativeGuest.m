@@ -835,7 +835,10 @@ static void tact_scan_field_xrefs(void) {
     static atomic_bool emitted;
     if (atomic_exchange(&emitted,true)) return;
     size_t scanned=0,loads=0,stores=0;
-    size_t detailed_loads=0,detailed_stores=0;
+    size_t selected_loads=0,selected_stores=0;
+    // Addresses only describe the Forever 1.60.1.70755 executable.
+    // The known crashing TACT call chain lives around 0x102a0.... .
+    const uint64_t tact_low=0x102900000ULL,tact_high=0x102c00000ULL;
     for (size_t s=0;s<guest.image.segment_count;s++) {
         const GISegment *segment=&guest.image.segments[s];
         if (!(segment->prot & VM_PROT_EXECUTE) ||
@@ -853,31 +856,35 @@ static void tact_scan_field_xrefs(void) {
             bool is_load=(op & 0xffc00000u)==0xf9400000u;
             if ((!is_store && !is_load) || ((op>>10)&0xfffu)!=0xe0u) continue;
             if (is_store) stores++; else loads++;
-            size_t *counter=is_store?&detailed_stores:&detailed_loads;
-            size_t limit=is_store?24:12;
-            if (*counter>=limit) continue;
-            (*counter)++;
-            LOG("[tact-xref] %s64 preferred=%#llx opcode=%08x rt=%u rn=%u\n",
+            uint64_t address=(uint64_t)(start+offset-guest.slide);
+            bool tact_region=address>=tact_low && address<tact_high;
+            // Record every direct store (the previous test only printed 24)
+            // and every candidate read/write near the TACT crash path.
+            if (!is_store && !tact_region) continue;
+            if (tact_region) {
+                if (is_store) selected_stores++; else selected_loads++;
+            }
+            LOG("[tact-xref] %s64 preferred=%#llx opcode=%08x rt=%u rn=%u%s\\n",
                 is_store?"STORE":"LOAD",
-                (unsigned long long)(start+offset-guest.slide),
-                (unsigned)op,(unsigned)(op&31u),(unsigned)((op>>5)&31u));
-            // Small instruction window for later decoding, capped to keep
-            // crash logging bounded if a large game has many field matches.
-            if (*counter<=12) {
-                for (int delta=-24;delta<=24;delta+=4) {
-                    intptr_t relative=(intptr_t)offset+delta;
-                    if (relative<0 || (uint64_t)relative+4>amount) continue;
-                    uint32_t code=0;
-                    memcpy(&code,(const void *)(start+relative),sizeof code);
-                    LOG("[tact-xref] code preferred=%#llx relative=%+d opcode=%08x\n",
-                        (unsigned long long)(start+relative-guest.slide),
-                        delta,(unsigned)code);
-                }
+                (unsigned long long)address,
+                (unsigned)op,(unsigned)(op&31u),(unsigned)((op>>5)&31u),
+                tact_region?" TACT-region":"");
+            // Instructions are only candidate xrefs. They can use entirely
+            // different object types; we do not infer execution or causality.
+            if (!tact_region) continue;
+            for (int delta=-40;delta<=40;delta+=4) {
+                intptr_t relative=(intptr_t)offset+delta;
+                if (relative<0 || (uint64_t)relative+4>amount) continue;
+                uint32_t code=0;
+                memcpy(&code,(const void *)(start+relative),sizeof code);
+                LOG("[tact-xref] context preferred=%#llx relative=%+d opcode=%08x\\n",
+                    (unsigned long long)(start+relative-guest.slide),
+                    delta,(unsigned)code);
             }
         }
     }
-    LOG("[tact-xref] complete scanned=%zu bytes direct-STORE64=%zu direct-LOAD64=%zu (other addressing forms not scanned)\n",
-        scanned,stores,loads);
+    LOG("[tact-xref] complete scanned=%zu bytes all-STORE64=%zu all-LOAD64=%zu TACT-region-STORE64=%zu TACT-region-LOAD64=%zu (direct unsigned-immediate only)\\n",
+        scanned,stores,loads,selected_stores,selected_loads);
 }
 // Forever 70755's bad-mutex callee saves its caller's x19 at [x29-8].
 // The caller's x19 is the object whose +0x10 field points to the owner
