@@ -283,6 +283,10 @@ static UIStackView *Stack(NSArray<UIView *> *views, CGFloat spacing) {
     [confirm addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
     [confirm addAction:[UIAlertAction actionWithTitle:@"Restore missing indexes" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
         (void)action;
+        TKWoWPatchTrace(@"confirmation accepted; scheduling repair after alert dismissal");
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(0.25*NSEC_PER_SEC)),
+                       dispatch_get_main_queue(),^{
+        TKWoWPatchTrace(@"repair UI callback entered");
         NSError *pathError=nil;
         NSString *directory=[self->_library workingDirectoryForApp:self->_installation.app error:&pathError];
         if(!directory.length) {
@@ -295,6 +299,7 @@ static UIStackView *Stack(NSArray<UIView *> *views, CGFloat spacing) {
         }
         NSString *root=directory.stringByDeletingLastPathComponent;
         NSDictionary *plan=self->_plan;
+        TKWoWPatchTrace(@"installation directory resolved; preparing worker");
         [self cancel];
         self->_client=[TKWoWClient new];
         TKWoWClient *client=self->_client;
@@ -302,9 +307,13 @@ static UIStackView *Stack(NSArray<UIView *> *views, CGFloat spacing) {
         self->_busy=YES;self->_updating=YES;self->_updatePhase=@"patch-indices";
         self->_updateDone=0;self->_updateTotal=0;
         [self render];
+        TKWoWPatchTrace(@"UI updated; patch-index worker dispatched");
         dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED,0),^{
+            TKWoWPatchTrace(@"worker started");
             NSError *problem=nil;
-            BOOL complete=[client restorePatchIndexesForPlan:plan root:root
+            BOOL complete=NO;
+            @try {
+                complete=[client restorePatchIndexesForPlan:plan root:root
                 progress:^(uint64_t done,uint64_t total) {
                     dispatch_async(dispatch_get_main_queue(),^{
                         if(generation!=self->_generation)return;
@@ -312,6 +321,13 @@ static UIStackView *Stack(NSArray<UIView *> *views, CGFloat spacing) {
                         self->_updateDone=done;self->_updateTotal=total;[self render];
                     });
                 } error:&problem];
+            } @catch(NSException *exception) {
+                TKWoWPatchTrace([NSString stringWithFormat:@"caught exception: %@ reason=%@",
+                    exception.name?:@"?",exception.reason?:@"?"]);
+                problem=TKWoWError(@"Unexpected exception during patch-index repair. See WolkaraPatchRepair.log.");
+            }
+            TKWoWPatchTrace([NSString stringWithFormat:@"worker ended: success=%@ error=%@",
+                complete?@"yes":@"no",problem.localizedDescription?:@"none"]);
             dispatch_async(dispatch_get_main_queue(),^{
                 if(generation!=self->_generation)return;
                 self->_busy=NO;self->_updating=NO;
@@ -327,7 +343,9 @@ static UIStackView *Stack(NSArray<UIView *> *views, CGFloat spacing) {
                 [self presentViewController:result animated:YES completion:nil];
             });
         });
+        }); // finish deferred confirmation callback
     }]];
+    TKWoWPatchTrace(@"opening repair confirmation alert");
     [self presentViewController:confirm animated:YES completion:nil];
 }
 - (void)configureButton:(UIButton *)button title:(NSString *)title filled:(BOOL)filled {
@@ -482,7 +500,10 @@ static UIStackView *Stack(NSArray<UIView *> *views, CGFloat spacing) {
            _installation.state==TKWoWInstallationReady && _plan) {
             [sheet addAction:[UIAlertAction actionWithTitle:@"Restore missing patch indexes (experimental)"
                 style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
-                    (void)a; [self restorePatchIndexes];
+                    (void)a;
+                    // Wait for the Settings action sheet to dismiss first.
+                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(0.25*NSEC_PER_SEC)),
+                                   dispatch_get_main_queue(),^{ [self restorePatchIndexes]; });
                 }]];
         }
     }
