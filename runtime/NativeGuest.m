@@ -1805,6 +1805,42 @@ static bool run_initializers(const GuestImage *image, uint64_t slide, const char
     }
     return true;
 }
+// One safe connectivity check, only on this experimental Forever branch.
+// The content hash is a public CDN object identifier, not a credential.
+// Use HEAD to avoid downloading the object or altering game installation.
+static void probe_forever_cdn_head(NSString *key) {
+    NSCharacterSet *nonHex=[[NSCharacterSet characterSetWithCharactersInString:@"0123456789abcdefABCDEF"] invertedSet];
+    if (key.length!=32 || [key rangeOfCharacterFromSet:nonHex].location!=NSNotFound) {
+        LOG("[cdn-probe] HEAD skipped: invalid build-key hash format\n"); return;
+    }
+    NSString *url=[NSString stringWithFormat:@"https://level3.ssl.blizzard.com/tpr/wow/config/%@/%@/%@",
+        [key substringToIndex:2],[key substringWithRange:NSMakeRange(2,2)],key];
+    NSURLSessionConfiguration *config=[NSURLSessionConfiguration ephemeralSessionConfiguration];
+    config.timeoutIntervalForRequest=5;
+    config.timeoutIntervalForResource=6;
+    config.requestCachePolicy=NSURLRequestReloadIgnoringLocalCacheData;
+    NSURLSession *session=[NSURLSession sessionWithConfiguration:config];
+    NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:[NSURL URLWithString:url]];
+    request.HTTPMethod=@"HEAD";
+    dispatch_semaphore_t finished=dispatch_semaphore_create(0);
+    __block NSInteger status=0, errorCode=0;
+    __block NSString *errorDomain=@"none";
+    NSURLSessionDataTask *task=[session dataTaskWithRequest:request completionHandler:
+        ^(NSData *data, NSURLResponse *response, NSError *error) {
+            (void)data;
+            if ([response isKindOfClass:NSHTTPURLResponse.class])
+                status=((NSHTTPURLResponse *)response).statusCode;
+            if (error) { errorDomain=error.domain; errorCode=error.code; }
+            dispatch_semaphore_signal(finished);
+        }];
+    [task resume];
+    long timedOut=dispatch_semaphore_wait(finished,dispatch_time(DISPATCH_TIME_NOW,8*NSEC_PER_SEC));
+    if (timedOut) [task cancel];
+    [session invalidateAndCancel];
+    if (timedOut) LOG("[cdn-probe] CDN HTTPS HEAD timed out after 8 seconds\n");
+    else LOG("[cdn-probe] CDN HTTPS HEAD status=%ld error-domain=%s error-code=%ld\n",
+        (long)status,errorDomain.UTF8String,(long)errorCode);
+}
 // Diagnostics only: Files on iPhone may hide the .build.info dotfile.
 // Report only public CDN routing metadata for the selected Forever product;
 // never log the build keys, CDN keys, install keys, or complete metadata file.
@@ -1835,6 +1871,7 @@ static void probe_forever_cdn_metadata(void) {
     NSUInteger version=[fields indexOfObject:@"Version"];
     NSUInteger cdnPath=[fields indexOfObject:@"CDN Path"];
     NSUInteger cdnHosts=[fields indexOfObject:@"CDN Hosts"];
+    NSUInteger buildKey=[fields indexOfObject:@"Build Key"];
     if (product==NSNotFound || cdnPath==NSNotFound || cdnHosts==NSNotFound) {
         LOG("[cdn-probe] required routing columns not present\n"); return;
     }
@@ -1851,6 +1888,9 @@ static void probe_forever_cdn_metadata(void) {
         }
         LOG("[cdn-probe] product=wowf active=%s version=%s cdn_path=%s cdn_hosts=%s\n",
             isActive.UTF8String,build.UTF8String,route.UTF8String,host.UTF8String);
+        if ([isActive isEqualToString:@"1"] && [host isEqualToString:@"level3.ssl.blizzard.com"] &&
+            [route isEqualToString:@"tpr/wow"] && buildKey!=NSNotFound)
+            probe_forever_cdn_head(values[buildKey]);
         found=YES;
     }
     if (!found) LOG("[cdn-probe] no Forever product row in metadata (rows=%lu)\n",(unsigned long)(lines.count-1));
