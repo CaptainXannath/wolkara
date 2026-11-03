@@ -475,7 +475,11 @@ static BOOL TKWoWCDNIndexValid(NSData *data, NSString *hash) {
     TKWoWPatchTrace(@"destination checks passed; patch index recovery starting");
     if(progress)progress(0,entries.count);
     NSUInteger added=0,existing=0;
-    for(NSUInteger i=0;i<entries.count;i++) { @autoreleasepool {
+    // Keep autoreleased NSError values alive through the caller's strong
+    // retain of the NSError** output. An inner autorelease pool could drain
+    // an error before the dispatch worker has captured it (SIGBUS in
+    // objc_retain_x8 on build #31).
+    for(NSUInteger i=0;i<entries.count;i++) {
         if(self.cancelled) {
             if(error)*error=TKWoWError(@"Patch-index repair cancelled. Existing files preserved.");return NO;
         }
@@ -517,7 +521,7 @@ static BOOL TKWoWCDNIndexValid(NSData *data, NSString *hash) {
             TKWoWPatchTrace([NSString stringWithFormat:@"index %lu: saved and verified",(unsigned long)(i+1)]);
         }
         if(progress)progress(i+1,entries.count);
-    }}
+    }
     TKWoWPatchTrace([NSString stringWithFormat:@"completed: added=%lu existing=%lu published_bytes=%llu",
         (unsigned long)added,(unsigned long)existing,estimated]);
     return YES;
