@@ -3,10 +3,14 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 mkdir -p build/emulation
 bash tools/test_tact_network.sh
+bash tools/test_tact_object.sh
+bash tools/test_tact_cache.sh
 bash tools/test_wow_launcher.sh
 bash tools/test_local_service_retry.sh
 CC=(xcrun clang -std=c11 -D_DARWIN_C_SOURCE -Wall -Wextra -Werror -O1 -g
     -fsanitize=address,undefined -fno-omit-frame-pointer -Iruntime)
+"${CC[@]}" runtime/GuestTactOwner.c tests/test_tact_owner.c -o build/emulation/test_tact_owner
+build/emulation/test_tact_owner
 "${CC[@]}" -Itranslation/AppKit translation/AppKit/TouchTrackpad.c tests/test_touch_trackpad.c -o build/emulation/test_touch_trackpad
 build/emulation/test_touch_trackpad
 "${CC[@]}" runtime/GuestWaitTrace.c tests/test_wait_trace.c -o build/emulation/test_wait_trace

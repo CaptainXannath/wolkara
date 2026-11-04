@@ -4,27 +4,38 @@ name: Build Wolkara Debug IPA
 on:
   workflow_dispatch:
   push:
-    branches: [investigate/tact-70755-network]
+    branches: [investigate/tact-70755-network, investigate/tact-70755-object]
 
 permissions:
   contents: read
 
 jobs:
   build:
-    runs-on: macos-26
+    # macos-26 jobs for this diagnostic revision were cancelled twice before
+    # runner assignment. Keep the IPA check runnable with an explicit Xcode.
+    runs-on: macos-15
     timeout-minutes: 60
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
 
     steps:
       - name: Checkout source
         uses: actions/checkout@v5
 
+      - name: Report selected Xcode
+        run: xcodebuild -version
+
       - name: Install XcodeGen
         run: brew install xcodegen
 
-      - name: Test bounded network diagnostics and metadata provenance
+      - name: Test bounded TACT retrieval and owner diagnostics
         run: |
           bash tools/test_tact_network.sh
+          bash tools/test_tact_object.sh
+          bash tools/test_tact_cache.sh
           python3 -m unittest discover -s tests -p 'test_tact_metadata.py' -v
+          xcrun clang -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -Iruntime runtime/GuestTactOwner.c tests/test_tact_owner.c -o /tmp/test_tact_owner
+          /tmp/test_tact_owner
           xcrun clang -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -Iruntime tests/test_guest_diagnostics.c -o /tmp/test_guest_diagnostics
           /tmp/test_guest_diagnostics
 

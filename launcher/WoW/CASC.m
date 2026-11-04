@@ -237,6 +237,9 @@ BOOL TKWoWCASCCloneVerification(NSDictionary *snapshot,NSString *source,NSString
     if(![NSFileManager.defaultManager fileExistsAtPath:destination])return YES;
     return WriteVerification(@{@"version":@1,@"segments":segments,@"buckets":buckets},destination,error);
 }}
+@interface TKWoWCASCStore ()
+- (instancetype)initWithDirectory:(NSString *)directory create:(BOOL)create error:(NSError **)error;
+@end
 @implementation TKWoWCASCStore {
     NSString *_directory;
     NSMutableArray<NSMutableData *> *_buckets;
@@ -249,8 +252,16 @@ BOOL TKWoWCASCCloneVerification(NSDictionary *snapshot,NSString *source,NSString
     int _fd; uint32_t _segment; uint64_t _offset;
 }
 - (instancetype)initWithDirectory:(NSString *)directory error:(NSError **)error {
+    return [self initWithDirectory:directory create:YES error:error];
+}
+- (instancetype)initWithDirectory:(NSString *)directory create:(BOOL)create error:(NSError **)error {
     if(!(self=[super init]))return nil; _fd=-1; _directory=directory; _buckets=[NSMutableArray new]; _added=[NSMutableDictionary new];
-    if(![NSFileManager.defaultManager createDirectoryAtPath:directory withIntermediateDirectories:YES attributes:nil error:error])return nil;
+    if(create) {
+        if(![NSFileManager.defaultManager createDirectoryAtPath:directory withIntermediateDirectories:YES attributes:nil error:error])return nil;
+    } else {
+        struct stat s;
+        if(lstat(directory.fileSystemRepresentation,&s) || !S_ISDIR(s.st_mode))return Fail(error,@"Diagnostic CASC directory absent or invalid.");
+    }
     NSArray *names=[NSFileManager.defaultManager contentsOfDirectoryAtPath:directory error:error]; if(!names)return nil;
     NSMutableDictionary *latest=[NSMutableDictionary new]; _segment=0;
     for(NSString *name in names) {
@@ -372,6 +383,18 @@ BOOL TKWoWCASCCloneVerification(NSDictionary *snapshot,NSString *source,NSString
     // Keep the parent allocation alive independently of the autorelease pool.
     return [NSData dataWithBytes:(const uint8_t *)raw.bytes+30 length:(NSUInteger)fullSize-30];
 }
+- (NSDictionary *)diagnosticExtentForKey:(NSString *)key error:(NSError **)error {
+    uint8_t hash[16];
+    if (!TKWoWUnhex(key,hash)) { Fail(error,@"Invalid diagnostic object key."); return nil; }
+    const uint8_t *entry=[self entryForKey:key hash:hash];
+    if (!entry) { Fail(error,@"Diagnostic object prefix absent from local index."); return nil; }
+    uint64_t packed=BE(entry+9,5),size=LE(entry+14,4),offset=packed&0x3fffffff;
+    if(size<39 || size>256*1024*1024+30 || offset>0x40000000-size) {
+        Fail(error,@"Invalid diagnostic object extent."); return nil;
+    }
+    return @{@"segment":@(packed>>30),@"offset":@(offset+30),@"encodedSize":@(size-30),
+        @"prefixOnly":@YES};
+}
 - (BOOL)addData:(NSData *)data key:(NSString *)key error:(NSError **)error {
     if(_verificationChanged) { Fail(error,@"CASC data changed during the update. Reopen to retry.");return NO; }
     uint8_t hash[16]; if(!TKWoWUnhex(key,hash) || !TKWoWEncodedValid(data,key,error))return NO;
@@ -472,3 +495,8 @@ BOOL TKWoWCASCCloneVerification(NSDictionary *snapshot,NSString *source,NSString
     return YES;
 }
 @end
+
+NSDictionary *TKWoWCASCDiagnosticExtent(NSString *directory,NSString *key,NSError **error) {
+    TKWoWCASCStore *store=[[TKWoWCASCStore alloc] initWithDirectory:directory create:NO error:error];
+    return store?[store diagnosticExtentForKey:key error:error]:nil;
+}
