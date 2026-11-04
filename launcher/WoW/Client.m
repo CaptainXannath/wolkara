@@ -442,8 +442,12 @@ static BOOL TKWoWCDNIndexValid(NSData *data, NSString *hash) {
     if(!config) { TKWoWPatchTrace(@"CDN configuration parsing failed"); return NO; }
     NSMutableArray<NSDictionary *> *entries=[NSMutableArray array];
     uint64_t estimated=0;
-    for(NSString *field in @[@"patch-archives",@"patch-file-index"]) {
-        NSString *sizesField=[field isEqualToString:@"patch-archives"]?@"patch-archives-index-size":@"patch-file-index-size";
+    // Repair all patch indexes plus the ordinary loose-file index when
+    // referenced by the current CDN configuration, without touching archives.
+    for(NSString *field in @[@"patch-archives",@"patch-file-index",@"file-index"]) {
+        BOOL isPatch=![field isEqualToString:@"file-index"];
+        NSString *sizesField=[field isEqualToString:@"patch-archives"]?@"patch-archives-index-size":
+            ([field isEqualToString:@"patch-file-index"]?@"patch-file-index-size":@"file-index-size");
         NSArray<NSString *> *hashes=Words(config[field]), *sizes=Words(config[sizesField]);
         if(!hashes.count || hashes.count!=sizes.count || hashes.count>200) {
             if(error)*error=TKWoWError(@"Incomplete patch-index catalogue.");return NO;
@@ -455,10 +459,10 @@ static BOOL TKWoWCDNIndexValid(NSData *data, NSString *hash) {
                 if(error)*error=TKWoWError(@"Patch-index download exceeds safe size limit.");return NO;
             }
             estimated+=length;
-            [entries addObject:@{@"key":hash,@"size":@(length)}];
+            [entries addObject:@{@"key":hash,@"size":@(length),@"field":field,@"kind":isPatch?@"patch":@"data"}];
         }
     }
-    TKWoWPatchTrace([NSString stringWithFormat:@"catalogue valid: %lu patch indexes, total %.1f MiB",
+    TKWoWPatchTrace([NSString stringWithFormat:@"catalogue valid: %lu CDN indexes (patch + loose), total %.1f MiB",
         (unsigned long)entries.count,estimated/1048576.0]);
     NSString *indices=[root stringByAppendingPathComponent:@"Data/indices"];
     BOOL dir=NO;
@@ -486,8 +490,8 @@ static BOOL TKWoWCDNIndexValid(NSData *data, NSString *hash) {
         }
         NSString *hash=entries[i][@"key"];
         NSUInteger length=[entries[i][@"size"] unsignedIntegerValue];
-        TKWoWPatchTrace([NSString stringWithFormat:@"index %lu/%lu: inspecting (%.2f MiB)",
-            (unsigned long)(i+1),(unsigned long)entries.count,length/1048576.0]);
+        TKWoWPatchTrace([NSString stringWithFormat:@"index %lu/%lu: inspecting %@ (%.2f MiB)",
+            (unsigned long)(i+1),(unsigned long)entries.count,entries[i][@"field"],length/1048576.0]);
         NSString *path=[indices stringByAppendingPathComponent:[hash stringByAppendingString:@".index"]];
         struct stat st;
         if(!lstat(path.fileSystemRepresentation,&st)) {
@@ -510,7 +514,8 @@ static BOOL TKWoWCDNIndexValid(NSData *data, NSString *hash) {
             existing++;
         } else {
             if(errno!=ENOENT) { if(error)*error=TKWoWError(@"Unable to inspect index destination.");return NO; }
-            NSString *url=[NSString stringWithFormat:@"%@/patch/%@/%@/%@.index",cdn,
+            NSString *kind=entries[i][@"kind"];
+            NSString *url=[NSString stringWithFormat:@"%@/%@/%@/%@/%@.index",cdn,kind,
                           [hash substringToIndex:2],[hash substringWithRange:NSMakeRange(2,2)],hash];
             TKWoWPatchTrace([NSString stringWithFormat:@"index %lu: downloading",(unsigned long)(i+1)]);
             // Published *-index-size can differ from the served index on
