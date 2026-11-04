@@ -516,10 +516,20 @@ static BOOL TKWoWCDNIndexValid(NSData *data, NSString *hash) {
             // Published *-index-size can differ from the served index on
             // historical CDN snapshots. Permit a bounded size difference ONLY
             // if the content-addressed TACT footer digest matches the key.
-            NSUInteger cap=MIN((NSUInteger)64*1024*1024,length*2);
+            // The CDN's published archive-index size can lag behind its
+            // hash-addressed index bytes. Earlier verified files differed in
+            // both directions, and one exceeded twice the published size.
+            // Allow up to 8 MiB minimum per index, scaled for large indices,
+            // capped at 64 MiB; still require the expected footer hash and
+            // the 512 MiB total verified-byte budget.
+            NSUInteger cap=MIN((NSUInteger)64*1024*1024,
+                               MAX((NSUInteger)8*1024*1024,length*4));
+            TKWoWPatchTrace([NSString stringWithFormat:@"index %lu: published=%lu transfer-limit=%lu",
+                (unsigned long)(i+1),(unsigned long)length,(unsigned long)cap]);
             NSData *body=[self fetch:[NSURL URLWithString:url] limit:cap error:error];
             if(!body) {
-                TKWoWPatchTrace([NSString stringWithFormat:@"index %lu: download returned an error",(unsigned long)(i+1)]);
+                TKWoWPatchTrace([NSString stringWithFormat:@"index %lu: download failed: %@",
+                    (unsigned long)(i+1),error&&*error?(*error).localizedDescription:@"unknown"]);
                 return NO;
             }
             BOOL verified=TKWoWCDNIndexValid(body,hash);
