@@ -130,7 +130,7 @@ int main(void) { @autoreleasepool {
     NSWindow *other = [[NSWindow alloc] initWithContentRect:CGRectMake(0, 0, 100, 50) styleMask:0 backing:2 defer:NO];
     other.contentView = plain; plain.layer.contentsScale = 1;
     [other ak_hostBoundsChanged:CGRectMake(0, 0, 200, 100)];
-    assert(other.backingScaleFactor > 1 && plain.layer.contentsScale == other.backingScaleFactor);
+    assert(other.backingScaleFactor == AKConfiguredGuestBackingScale() && plain.layer.contentsScale == other.backingScaleFactor);
 
     // Showing a window never calls back into a subclass's makeKeyAndOrderFront:.
     OrderingWindow *ordering = [[OrderingWindow alloc] initWithContentRect:rect styleMask:0 backing:2 defer:NO];
