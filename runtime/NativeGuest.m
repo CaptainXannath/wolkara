@@ -1890,6 +1890,30 @@ static void *placed_symbol(size_t index, const char *name, bool first) {
     }
     return NULL;
 }
+// Focused read-only audit: identify the network APIs imported by the guest
+// at dyld binding time, distinct from hooks that are actually invoked.
+// This neither changes symbol resolution nor intercepts transport data.
+static bool tact_network_import(const char *name) {
+    if(!name || strlen(name)>160)return false;
+    static const char *terms[]={
+        "getaddrinfo","gethostbyname","socket","connect","sendmsg","recvmsg",
+        "sendto","recvfrom","getnameinfo","getifaddrs",
+        "CFHTTP","CFNetwork","CFReadStream","CFWriteStream","CFSocket",
+        "CFStream","NSURLSession","NSURLConnection","NSURLRequest",
+        "NSHTTPURLResponse","nw_","NWConnection","NWEndpoint",
+        "SSL","TLS","SecTrust","curl_", "HTTPConnection"
+    };
+    for(size_t i=0;i<sizeof terms/sizeof terms[0];i++)
+        if(strstr(name,terms[i]))return true;
+    return false;
+}
+static void tact_log_network_bind(const char *name,int ordinal,const char *source,const void *address) {
+    if(!trace_guest || !tact_network_import(name))return;
+    static atomic_uint records;
+    if(atomic_fetch_add(&records,1)>=240)return;
+    LOG("[tact-net-bind] symbol=%s ordinal=%d source=%s value=%p\n",
+        name,ordinal,source,address);
+}
 // The image being fixed up. Ordinals index its own list.
 typedef struct { const GuestImage *image; const char *path; void *const *host; } GuestBinder;
 static bool resolve(const char *symbol, int ordinal, bool weak, bool lazy, uint64_t *value, void *context) {
@@ -1900,21 +1924,33 @@ static bool resolve(const char *symbol, int ordinal, bool weak, bool lazy, uint6
     // names) answers before the system does.
     uint64_t own_value=0;
     if (!pointer && binder && gl_lookup(&carried,binder->image,binder->path,ordinal,symbol,&own_value,NULL)) {
+        tact_log_network_bind(name,ordinal,"guest-image",(const void *)(uintptr_t)own_value);
         *value=own_value; return true;
     }
     bool named=binder && ordinal>0 && (size_t)ordinal<=binder->image->dylib_count;
     void *host=named && binder->host ? binder->host[ordinal-1] : NULL;
     // An absent library answers nothing, not even through what else is loaded.
     bool absent=host==ABSENT_LIBRARY;
-    if (!pointer && host && !absent) pointer=dlsym(host,name);
-    if (!pointer && !absent) pointer=dlsym(RTLD_DEFAULT,name);
+    const char *provider=pointer?"compatibility-hook":"unresolved";
+    if (!pointer && host && !absent) {
+        pointer=dlsym(host,name);
+        if(pointer)provider="declared-host-library";
+    }
+    if (!pointer && !absent) {
+        pointer=dlsym(RTLD_DEFAULT,name);
+        if(pointer)provider="host-default";
+    }
     // Nothing provides it: a stub where no build-time analysis covered it, or null when weak.
     if (!pointer && ng_may_stub(guest_generic,binder && binder->image!=&guest.image,weak)) {
         GSKind kind=gs_kind_bound(symbol,binder && binder->image->lazy_bind_size,lazy);
         pointer=gs_bind(symbol,kind);
-        if (pointer) LOG("[native] stub %s as %s ordinal=%d\n",symbol,stub_kinds[kind],ordinal);
+        if (pointer) {
+            provider="guest-compatibility-stub";
+            LOG("[native] stub %s as %s ordinal=%d\n",symbol,stub_kinds[kind],ordinal);
+        }
     }
     if (!pointer && !weak) LOG("[native] unresolved %s ordinal=%d\n",symbol,ordinal);
+    tact_log_network_bind(name,ordinal,pointer?provider:(weak?"unavailable-weak":"unresolved"),pointer);
     *value=(uintptr_t)pointer; return pointer || weak;
 }
 // Apple's ObjC SPI explicitly supports images created outside dyld.
