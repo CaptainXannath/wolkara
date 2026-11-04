@@ -879,6 +879,82 @@ static void tact_probe_missing_owner(const void *caller, const void *frame) {
         }
     }
 }
+// Experimental Forever-70755 object-lifetime observation. The crash-time
+// owner points at an object near the high end of Wolkara's 1-GiB reservation.
+// Do not patch or protect guest pages: search a bounded 9-MiB region through
+// vm_read_overwrite(), then sample one word after the unique debug sentinels
+// identify the object. This can distinguish never-initialized vs. later-cleared.
+static atomic_bool tact_lifetime_stop;
+static void tact_watch_owner_lifetime(void) {
+    @autoreleasepool {
+        uintptr_t base=(uintptr_t)guest.arena.executable;
+        if (!base || base>UINTPTR_MAX-0x40a00000UL) return;
+        const uintptr_t start=base+0x40100000UL;
+        const uintptr_t end=base+0x40a00000UL;
+        const size_t chunk=16384;
+        uint8_t *buffer=malloc(chunk);
+        if (!buffer) return;
+        uintptr_t root=0;
+        unsigned attempts=0;
+        LOG("[tact-lifetime] sampler started; searching near arena end, read-only\n");
+        // Bounded to 90 seconds; scan at most 9 MiB every 400 ms.
+        for (; attempts<225 && !atomic_load(&tact_lifetime_stop) && !root; attempts++) {
+            for (uintptr_t page=start;page<end;page+=chunk) {
+                vm_size_t read=0;
+                if (vm_read_overwrite(mach_task_self(),(vm_address_t)page,
+                    (vm_size_t)chunk,(vm_address_t)buffer,&read)!=KERN_SUCCESS ||
+                    read!=chunk) continue;
+                for (size_t offset=0;offset+8<=chunk;offset+=8) {
+                    uint64_t marker=0;memcpy(&marker,buffer+offset,8);
+                    if (marker!=UINT64_C(0x4d5554584d555458)) continue;
+                    uintptr_t at=page+offset;
+                    if(at<0x6d8)continue;
+                    uintptr_t candidate=at-0x6d8, self=0, sentinel=0;
+                    if (tact_read_pointer(candidate+0x6f0,&self) &&
+                        tact_read_pointer(candidate+0x708,&sentinel) &&
+                        self==candidate && sentinel==UINT64_C(0x4d55545a)) {
+                        root=candidate;break;
+                    }
+                }
+                if(root)break;
+            }
+            if (!root) usleep(400000);
+        }
+        free(buffer);
+        if (!root) {
+            LOG("[tact-lifetime] owner not found in bounded scan (%u attempts)\n",attempts);
+            return;
+        }
+        uintptr_t previous=0;
+        bool first=true;
+        LOG("[tact-lifetime] owner found offset-from-arena=%#llx after %u scans\n",
+            (unsigned long long)(root-base),attempts+1);
+        // Sample the actual null-producing field; report changes only.
+        // A read-only sampler cannot prove a value never changed between samples.
+        for(unsigned tick=0;tick<8000 && !atomic_load(&tact_lifetime_stop);tick++) {
+            uintptr_t current=0;
+            if (!tact_read_pointer(root+0x700,&current)) {
+                LOG("[tact-lifetime] field unreadable after %u samples\n",tick);
+                break;
+            }
+            if(first || current!=previous) {
+                LOG("[tact-lifetime] sample %u: root+0x700=%p%s\n",
+                    tick,(void *)current,first?" (initial observation)":" (changed)");
+                previous=current;first=false;
+            }
+            if (tick && tick%1000==0)
+                LOG("[tact-lifetime] sample %u: unchanged=%p\n",tick,(void *)current);
+            usleep(10000);
+        }
+    }
+}
+static void tact_start_owner_sampler(void) {
+    if (!guest.path || !strstr(guest.path,"/_forever_/"))return;
+    atomic_store(&tact_lifetime_stop,false);
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY,0),^{
+        tact_watch_owner_lifetime();
+    });
+}
 // Diagnostic only: report a near-null mutex before libsystem_pthread faults.
 // Never turn a failing call into a fake success or modify guest memory.
 static void diagnose_guest_mutex(const char *operation, const void *mutex, const void *caller) {
@@ -2402,9 +2478,11 @@ bool ng_initialize(const char *path, const char *frameworks, const char *library
                 startup_count(i+1);
             }
             LOG("[native] all %llu initializers returned; entering original main=%p\n",(unsigned long long)guest.image.initializer_count,(void *)(guest.image.entry+guest.slide));
+            tact_start_owner_sampler();
             if([NSProcessInfo.processInfo.arguments containsObject:@"--sample-native"]) schedule_native_sample(mach_thread_self(),1);
             startup_begin("the app is running its own startup",0);
             int result=((int (*)(int,const char **,const char **,const char **))(guest.image.entry+guest.slide))(argc,argv,env,apple);
+            atomic_store(&tact_lifetime_stop,true);
             LOG("[native] original main returned %d\n",result);
             ok=(result==0);
         }
