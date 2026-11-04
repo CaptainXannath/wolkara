@@ -12,6 +12,7 @@ static NativeCodeMemory local_quarantine;
 #include "GuestLink.h"
 #include "GuestPaths.h"
 #include "GuestDiagnostics.h"
+#include "GuestTactOwner.h"
 #include "GuestVMBudget.h"
 #include "GuestSoftwareVM.h"
 #include "NativeGuestPolicy.h"
@@ -24,6 +25,8 @@ static NativeCodeMemory local_quarantine;
 #include "GuestWait.h"
 #include "GuestWaitTrace.h"
 #include "GuestHTTPTrace.h"
+#include "GuestTactObject.h"
+#include "GuestTactCache.h"
 #include "SignedImage.h"
 #include <dlfcn.h>
 #include <mach-o/loader.h>
@@ -58,6 +61,9 @@ static NativeCodeMemory local_quarantine;
 #include <Security/SecureTransport.h>
 static atomic_bool initialization_attempted;
 static unsigned software_cpu_limit;
+// Retrieval observation is separate from the exact executable/layout gate.
+static GTCObserver *tact_cache;
+static bool tact_70755_metadata;
 // ng_startup_step: a new step restarts its clock; counting within it does not.
 static os_unfair_lock startup_lock=OS_UNFAIR_LOCK_INIT;
 static NGStartupStep startup_step;
@@ -642,7 +648,11 @@ static void *guest_mmap(void *address, size_t size, int prot, int flags, int fd,
             log_once("[native] reservation of %zu MB downsized to %zu MB (TOLKARA_VM_BUDGET_MB)\n",size>>20,granted>>20);
         errno=code;
     } else result=gv_map(&vm_budget,address,size,prot,flags,fd,offset);
-    LOG("[native] mmap -> %p errno=%d\n",result,result==MAP_FAILED?errno:0); return result;
+    int saved=errno;
+    if(fd>=0) gtc_io(tact_cache,fd,"mmap",offset,size,
+        result==MAP_FAILED?-1:(size>INT64_MAX?INT64_MAX:(int64_t)size),result==MAP_FAILED?saved:0);
+    LOG("[native] mmap -> %p errno=%d\n",result,result==MAP_FAILED?saved:0);
+    errno=saved;return result;
 }
 static void guest_jit_protect(int enabled) { LOG("[native] jit write protection=%d (separate RW/RX views)\n",enabled); }
 // compiler-rt's instruction cache flush, which iPadOS's libSystem does not
@@ -734,6 +744,9 @@ static OSStatus tact_ssl_write(SSLContextRef,const void *,size_t,size_t *);
 static OSStatus tact_ssl_close(SSLContextRef);
 static ssize_t tact_socket_read(int,void *,size_t);
 static ssize_t tact_socket_write(int,const void *,size_t);
+static ssize_t tact_cache_pread(int,void *,size_t,off_t);
+static size_t tact_cache_fread(void *,size_t,size_t,FILE *);
+static int tact_cache_fclose(FILE *);
 static int tact_socket_close(int);
 static int guest_getaddrinfo(const char *, const char *, const struct addrinfo *, struct addrinfo **);
 static struct hostent *guest_gethostbyname(const char *);
@@ -778,17 +791,51 @@ static void pump_shader_wait(void) { CFRunLoopRunInMode(kCFRunLoopDefaultMode,.0
 // Addresses and frame layouts below belong only to the exact 70755 image
 // identified by the supplied device log. A version string alone is insufficient.
 static bool tact_70755_image;
-static bool tact_known_image(const char *path) {
-    if (!path || !strstr(path,"/_forever_/")) return false;
-    NSData *data=[NSData dataWithContentsOfFile:@(path) options:NSDataReadingMappedIfSafe error:NULL];
-    if (!data || data.length>UINT32_MAX) return false;
-    unsigned char digest[CC_SHA256_DIGEST_LENGTH];
-    CC_SHA256(data.bytes,(CC_LONG)data.length,digest);
-    static const unsigned char expected[]={
-        0x29,0xb5,0xe1,0x06,0xf5,0xff,0x89,0xa9,0x1b,0x7e,0x1b,0xec,0x0d,0x47,0x5d,0xc8,
-        0xb3,0x1f,0xb6,0x84,0xf3,0x42,0x17,0xff,0xf5,0x71,0xd8,0xa0,0x88,0x85,0x19,0xd8
-    };
-    return !memcmp(digest,expected,sizeof expected);
+static bool tact_file_identity(const struct stat *a,const struct stat *b) {
+    return a->st_dev==b->st_dev && a->st_ino==b->st_ino && a->st_size==b->st_size &&
+        a->st_mtimespec.tv_sec==b->st_mtimespec.tv_sec && a->st_mtimespec.tv_nsec==b->st_mtimespec.tv_nsec &&
+        a->st_ctimespec.tv_sec==b->st_ctimespec.tv_sec && a->st_ctimespec.tv_nsec==b->st_ctimespec.tv_nsec;
+}
+static bool tact_known_image(const char *path,bool external) {
+    int saved=errno;
+    if (!external || !path) {
+        LOG("[tact-owner] identity gate disabled reason=%s\n",external?"missing-executable-path":gto_gate_reason(GTO_NOT_EXTERNAL));
+        errno=saved;return false;
+    }
+    // The launcher's [host] hash is a cached library record. Rehash the actual
+    // regular file through POSIX IO; do not trust a folder name or mapped NSData.
+    int fd=open(path,O_RDONLY|O_CLOEXEC|O_NOFOLLOW);
+    if (fd<0) {int code=errno;LOG("[tact-owner] identity gate disabled reason=source-open-failed errno=%d\n",code);errno=saved;return false;}
+    struct stat before={0},after={0},named={0};
+    bool valid=!fstat(fd,&before) && S_ISREG(before.st_mode) && before.st_size>0 &&
+        (uint64_t)before.st_size<=UINT64_C(1024)*1024*1024;
+    if (!valid) {close(fd);LOG("[tact-owner] identity gate disabled reason=source-not-bounded-regular-file\n");errno=saved;return false;}
+    unsigned char *buffer=malloc(65536),digest[CC_SHA256_DIGEST_LENGTH];
+    if (!buffer) {close(fd);LOG("[tact-owner] identity gate disabled reason=hash-buffer-allocation-failed\n");errno=saved;return false;}
+    CC_SHA256_CTX context;CC_SHA256_Init(&context);
+    uint64_t total=0;ssize_t count=0;int read_error=0;
+    while (total<(uint64_t)before.st_size) {
+        size_t wanted=(size_t)((uint64_t)before.st_size-total);if (wanted>65536) wanted=65536;
+        count=read(fd,buffer,wanted);
+        if (count<0 && errno==EINTR) continue;
+        if (count<=0) {read_error=count<0?errno:0;break;}
+        CC_SHA256_Update(&context,buffer,(CC_LONG)count);total+=(uint64_t)count;
+    }
+    valid=total==(uint64_t)before.st_size && !fstat(fd,&after) && !lstat(path,&named) &&
+        S_ISREG(named.st_mode) && tact_file_identity(&before,&after) && tact_file_identity(&after,&named);
+    close(fd);free(buffer);
+    if (!valid) {
+        LOG("[tact-owner] identity gate disabled reason=%s bytes-read=%llu expected-bytes=%llu errno=%d\n",
+            total!=(uint64_t)before.st_size?"source-read-incomplete":"source-changed-during-hash",
+            (unsigned long long)total,(unsigned long long)before.st_size,read_error);
+        errno=saved;return false;
+    }
+    CC_SHA256_Final(digest,&context);
+    char actual[65];for (unsigned i=0;i<sizeof digest;i++) snprintf(actual+i*2,3,"%02x",digest[i]);
+    GTOGate gate=gto_70755_gate(external,digest,sizeof digest);
+    LOG("[tact-owner] source=fresh-executable-file sha256=%s bytes=%llu gate=%s expected=%s (library-record hash is not used)\n",
+        actual,(unsigned long long)total,gto_gate_reason(gate),gto_70755_expected_sha256());
+    errno=saved;return gate==GTO_EXACT_70755;
 }
 // Prefer the writable alias: debugger-prepared executable pages may not be
 // readable. A failed kernel read skips the observation without another fault.
@@ -799,6 +846,22 @@ static bool tact_read_instruction(uintptr_t address,uint32_t *word) {
     vm_size_t got=0;
     return vm_read_overwrite(mach_task_self(),(vm_address_t)source,sizeof *word,
         (vm_address_t)word,&got)==KERN_SUCCESS && got==sizeof *word;
+}
+static bool tact_code_words(uintptr_t preferred,uint32_t *words,size_t count) {
+    if (guest.slide>UINTPTR_MAX-preferred || count>(UINTPTR_MAX-preferred-guest.slide)/4) return false;
+    for (size_t i=0;i<count;i++)
+        if (!tact_read_instruction(preferred+(uintptr_t)guest.slide+i*4,&words[i])) return false;
+    return true;
+}
+static bool tact_validate_owner_layout(void) {
+    if (!tact_70755_image) return false;
+    uint32_t frame[10],origin[3],thunk[3];
+    bool read=tact_code_words(0x102a3aa14ULL,frame,10) &&
+        tact_code_words(0x102a0cc60ULL,origin,3) && tact_code_words(0x102a2ea28ULL,thunk,3);
+    bool valid=read && gto_70755_layout(frame,origin,thunk);
+    if (!valid) LOG("[tact-owner] layout gate disabled reason=%s; no saved-register or object-offset reads\n",
+        read?"70755-instruction-contract-mismatch":"70755-instruction-read-unavailable");
+    return valid;
 }
 // Capture a small, read-only ARM64 instruction window around the caller.
 // One snapshot per process to avoid flooding the log or touching guest data.
@@ -871,24 +934,26 @@ static bool tact_read_pointer(uintptr_t source, uintptr_t *result) {
         (vm_address_t)result,&count);
     return status==KERN_SUCCESS && count==sizeof *result;
 }
-// Locate direct ARM64 loads/stores of the TACT object's +0x700 field in
-// already-mapped guest executable code. This reads instructions only; it does
-// not change permissions, trap writes, or assume every match uses this object.
-// Indirect/indexed writes and memset-style initialization will not match.
-// Forever 70755's bad-mutex callee saves its caller's x19 at [x29-8].
-// The caller's x19 is the object whose +0x10 field points to the owner
-// with a +0x700 pointer. The next thunk adds 0x28 to that pointer.
+// Read the current failure chain only after freshly validating 70755's frame,
+// owner loads and thunk arithmetic in the post-unpack writable code alias.
 static void tact_probe_missing_owner(const void *caller, const void *frame) {
     if (!tact_70755_image || (uintptr_t)caller < guest.slide ||
         (uintptr_t)caller-guest.slide != 0x102a3aa3cULL) return;
+    if (!tact_validate_owner_layout()) return;
     uintptr_t fp=(uintptr_t)frame, parent_fp=0, owner=0, root=0, child=0;
     uintptr_t stack_end=(uintptr_t)pthread_get_stackaddr_np(pthread_self());
     size_t stack_size=pthread_get_stacksize_np(pthread_self());
     uintptr_t stack_start=stack_end>=stack_size?stack_end-stack_size:0;
-    if (stack_end<16 || stack_start>UINTPTR_MAX-16 || fp<stack_start || fp>stack_end-16 ||
+    if (!gto_stack_frame(fp,stack_start,stack_end) ||
         !tact_read_pointer(fp,&parent_fp) ||
-        parent_fp<=fp || (parent_fp&15) || parent_fp<stack_start+16 || parent_fp>stack_end-16) {
+        !gto_parent_frame(fp,parent_fp,stack_start,stack_end)) {
         LOG("[tact-owner] cannot validate guest frame pointer\n"); return;
+    }
+    uintptr_t upstream=0;
+    if (!tact_read_pointer(parent_fp+8,&upstream) ||
+        (upstream&UINT64_C(0x0000ffffffffffff))<(uintptr_t)guest.slide ||
+        ((upstream&UINT64_C(0x0000ffffffffffff))-(uintptr_t)guest.slide)!=UINT64_C(0x102a0cc8c)) {
+        LOG("[tact-owner] saved upstream return does not match validated 70755 chain; field reads skipped\n");return;
     }
     if (!tact_read_pointer(parent_fp-8,&owner)) {
         LOG("[tact-owner] cannot read saved caller x19\n"); return;
@@ -898,6 +963,11 @@ static void tact_probe_missing_owner(const void *caller, const void *frame) {
     LOG("[tact-owner] saved caller x19=%p owner+0x10=%p %s owner[+0x10]+0x700=%p %s\n",
         (void *)owner,(void *)root,valid_root?"read":"unreadable",
         (void *)child,valid_child?"read":"unreadable");
+    if (valid_child) {
+        uintptr_t derived=0;bool matches=gto_mutex_derived(child,0x198,&derived);
+        LOG("[tact-owner] validated chain child=%p plus=0x28+0x170 derived-mutex=%p actual-mutex=0x198 match=%s; initialization cause remains unknown\n",
+            (void *)child,(void *)derived,matches?"yes":"no");
+    }
     // One-time read-only snapshot of selected neighboring slots in the
     // owner object. We do not assume they are pointers; some may be flags
     // or integer data. This distinguishes an isolated missing TACT slot
@@ -920,7 +990,7 @@ static void tact_probe_missing_owner(const void *caller, const void *frame) {
 // owner points at an object near the high end of Wolkara's 1-GiB reservation.
 // Do not patch or protect guest pages: search a bounded 9-MiB region through
 // vm_read_overwrite(), then sample one word after the unique debug sentinels
-// identify the object. This can distinguish never-initialized vs. later-cleared.
+// identify the object. Observed transitions do not prove every write or lifetime.
 static atomic_bool tact_lifetime_stop;
 static bool tact_owner_signature(uintptr_t candidate) {
     uintptr_t marker=0, self=0, sentinel=0;
@@ -1052,7 +1122,7 @@ static void tact_watch_owner_lifetime(void) {
     }
 }
 static void tact_start_owner_sampler(void) {
-    if (!tact_70755_image)return;
+    if (!tact_70755_image || !tact_validate_owner_layout())return;
     atomic_store(&tact_lifetime_stop,false);
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY,0),^{
         tact_watch_owner_lifetime();
@@ -1154,6 +1224,8 @@ static void *hook(const char *name) {
         HOOK("SSLClose",tact_ssl_close);
         if (!gsv_enabled()) {
             HOOK("read",tact_socket_read); HOOK("write",tact_socket_write);
+            HOOK("pread",tact_cache_pread); HOOK("fread",tact_cache_fread);
+            HOOK("fclose",tact_cache_fclose);
             HOOK("close",tact_socket_close);
         }
         HOOK("getaddrinfo",guest_getaddrinfo); HOOK("gethostbyname",guest_gethostbyname);
@@ -1389,8 +1461,12 @@ static int guest_open(const char *path, int flags, ...) {
     int fd=open(path,flags,mode);
     char found[PATH_MAX];
     if (fd<0 && !(flags&O_CREAT) && case_variant(path,found,sizeof found) && (fd=open(found,flags,mode))>=0) case_found(path,found);
+    int saved=errno;
+    gtc_lookup(tact_cache,path,"open",fd,fd<0?saved:0);
+    gtc_opened(tact_cache,path,fd,flags,fd<0?saved:0);
     if (fd<0) trace_failure("open",path);
     else if (trace_guest && !(flags&O_CREAT)) { struct stat s; trace_success("open",path,!fstat(fd,&s)?(long long)s.st_size:-1); }
+    errno=saved;
     return fd;
 }
 static int guest_openat(int directory, const char *path, int flags, ...) {
@@ -1402,8 +1478,12 @@ static int guest_openat(int directory, const char *path, int flags, ...) {
     char found[PATH_MAX];
     if (fd<0 && !(flags&O_CREAT) && case_variant_at(directory,path,found,sizeof found) &&
         (fd=openat(directory,found,flags,mode))>=0) case_found(path,found);
+    int saved=errno;
+    gtc_lookup(tact_cache,path,"openat",fd,fd<0?saved:0);
+    gtc_opened(tact_cache,path,fd,flags,fd<0?saved:0);
     if (fd<0) trace_failure("openat",path);
     else if (trace_guest && !(flags&O_CREAT)) { struct stat s; trace_success("openat",path,!fstat(fd,&s)?(long long)s.st_size:-1); }
+    errno=saved;
     return fd;
 }
 static int guest_stat(const char *path, struct stat *buffer) {
@@ -1414,9 +1494,12 @@ static int guest_stat(const char *path, struct stat *buffer) {
     int result=stat(path,buffer);
     char found[PATH_MAX];
     if (result && case_variant(path,found,sizeof found) && !(result=stat(found,buffer))) case_found(path,found);
+    int saved=errno;
+    gtc_lookup(tact_cache,path,"stat",result,result?saved:0);
     if (result) trace_failure("stat",path);
     else trace_success("stat",path,(long long)buffer->st_size);
     if(!result && output!=buffer && gsv_copy(output,buffer,sizeof *buffer)!=GM_OK) { errno=EFAULT; return -1; }
+    errno=saved;
     return result;
 }
 static int guest_fstatat(int directory, const char *path, struct stat *buffer, int flags) {
@@ -1424,7 +1507,10 @@ static int guest_fstatat(int directory, const char *path, struct stat *buffer, i
     char found[PATH_MAX];
     if (result && case_variant_at(directory,path,found,sizeof found) && !(result=fstatat(directory,found,buffer,flags)))
         case_found(path,found);
+    int saved=errno;
+    gtc_lookup(tact_cache,path,"fstatat",result,result?saved:0);
     if (result) trace_failure("fstatat",path);
+    errno=saved;
     return result;
 }
 static int guest_lstat(const char *path, struct stat *buffer) {
@@ -1435,9 +1521,12 @@ static int guest_lstat(const char *path, struct stat *buffer) {
     int result=lstat(path,buffer);
     char found[PATH_MAX];
     if (result && case_variant(path,found,sizeof found) && !(result=lstat(found,buffer))) case_found(path,found);
+    int saved=errno;
+    gtc_lookup(tact_cache,path,"lstat",result,result?saved:0);
     if (result) trace_failure("lstat",path);
     else trace_success("lstat",path,(long long)buffer->st_size);
     if(!result && output!=buffer && gsv_copy(output,buffer,sizeof *buffer)!=GM_OK) { errno=EFAULT; return -1; }
+    errno=saved;
     return result;
 }
 static int guest_fstat(int fd, struct stat *buffer) {
@@ -1453,8 +1542,11 @@ static int guest_access(const char *path, int mode) {
     int result=access(path,mode);
     char found[PATH_MAX];
     if (result && case_variant(path,found,sizeof found) && !(result=access(found,mode))) case_found(path,found);
+    int saved=errno;
+    gtc_lookup(tact_cache,path,"access",result,result?saved:0);
     if (result) trace_failure("access",path);
     else trace_success("access",path,-1);
+    errno=saved;
     return result;
 }
 // A guest imports fopen and realpath plainly or as $DARWIN_EXTSN (the name
@@ -1469,8 +1561,12 @@ static FILE *traced_fopen(FILE *(*real)(const char *, const char *), const char 
     char found[PATH_MAX];
     bool creates=mode && (strchr(mode,'w') || strchr(mode,'a'));
     if (!file && !creates && case_variant(path,found,sizeof found) && (file=real(found,mode))) case_found(path,found);
+    int saved=errno;
+    gtc_lookup(tact_cache,path,"fopen",file?0:-1,file?0:saved);
+    gtc_opened(tact_cache,path,file?fileno(file):-1,0,file?0:saved);
     if (!file) trace_failure("fopen",path);
     else trace_success("fopen",path,-1);
+    errno=saved;
     return file;
 }
 static FILE *guest_fopen(const char *path, const char *mode) { return traced_fopen(plain_fopen,path,mode); }
@@ -1514,9 +1610,46 @@ static unsigned trace_tid(void);
 // are never allocated by inspecting process memory or by retaining TLS objects.
 // The lock protects metadata, and is never held across a transport operation.
 static os_unfair_lock tact_http_lock=OS_UNFAIR_LOCK_INIT;
-static struct { uintptr_t key; bool used,tls; GHTTPTrace trace; } tact_http_connections[64];
+typedef struct {
+    uintptr_t key;
+    bool used,tls;
+    GHTTPTrace trace;
+    GTOCapture *capture;
+    size_t observed;
+    uint64_t request;
+} TactHTTPConnection;
+static TactHTTPConnection tact_http_connections[64];
 static uint64_t tact_http_sequence;
 static void tact_http_emit(const char *line,void *context) { (void)context;LOG("%s",line); }
+static void tact_http_object(const GHTTPObjectEvent *event,void *context) {
+    TactHTTPConnection *connection=context;
+    if(event->kind==GHTTP_OBJECT_DATA) {
+        if(connection->capture && connection->request==event->request) {
+            gto_append(connection->capture,event->bytes,event->length,connection->observed);
+            connection->observed+=event->length;
+        }
+        return;
+    }
+    LOG("[tact-object] source=guest-http-observer connection=%llu request=%llu event=%u method=%s url=%s status=%u code=%d errno=%d bytes=%llu reason=%s\n",
+        (unsigned long long)event->connection,(unsigned long long)event->request,(unsigned)event->kind,
+        event->method?:"unavailable",event->url?:"unavailable",event->status,event->code,event->error_number,
+        (unsigned long long)event->total,event->reason?:"none");
+    if(event->kind==GHTTP_OBJECT_RESPONSE && event->eligible) {
+        gto_destroy(connection->capture);
+        connection->capture=gto_create(&gto_patch_index_70755);
+        connection->observed=0;connection->request=event->request;
+        if(!connection->capture)LOG("[tact-object] observer capture unavailable (allocation failed)\n");
+    }
+    if(event->kind==GHTTP_OBJECT_COMPLETE || event->kind==GHTTP_OBJECT_ABORT) {
+        if(connection->capture && connection->request==event->request) {
+            GTOResult result={0};gto_finish(connection->capture,&result);
+            LOG("[tact-object] source=guest-http-observer request=%llu verification=%s encoded-bytes=%zu decoded-bytes=%zu encoded-verified=%d decoded-verified=%d transport-complete=%d guest-decoder=unobserved\n",
+                (unsigned long long)event->request,gto_status_name(result.status),result.observed_size,result.decoded_size,
+                result.encoded_verified,result.decoded_verified,event->kind==GHTTP_OBJECT_COMPLETE);
+            gto_destroy(connection->capture);connection->capture=NULL;
+        }
+    }
+}
 static void tact_http_open(uintptr_t key,bool tls) {
     if(!trace_guest)return;
     os_unfair_lock_lock(&tact_http_lock);
@@ -1526,8 +1659,12 @@ static void tact_http_open(uintptr_t key,bool tls) {
         if(!tact_http_connections[i].used && slot==64)slot=i;
     }
     if(slot<64) {
+        if(tact_http_connections[slot].used)
+            gh_http_finish(&tact_http_connections[slot].trace,"transport-reused",tact_http_emit,NULL);
+        gto_destroy(tact_http_connections[slot].capture);tact_http_connections[slot].capture=NULL;
         tact_http_connections[slot].key=key;tact_http_connections[slot].tls=tls;tact_http_connections[slot].used=true;
         gh_http_init(&tact_http_connections[slot].trace,++tact_http_sequence,tls);
+        gh_http_observe_object(&tact_http_connections[slot].trace,tact_http_object,&tact_http_connections[slot]);
     }
     os_unfair_lock_unlock(&tact_http_lock);
 }
@@ -1539,7 +1676,11 @@ static void tact_http_observe(uintptr_t key,bool tls,bool outbound,const void *b
         GHTTPTrace *trace=&tact_http_connections[i].trace;
         if(size)gh_http_feed(trace,outbound,bytes,size,tact_http_emit,NULL);
         if(code)gh_http_error(trace,operation,code,saved_errno,tact_http_emit,NULL);
-        if(close_entry) {memset(trace,0,sizeof *trace);tact_http_connections[i].used=false;}
+        if(close_entry) {
+            gh_http_finish(trace,code?"transport-error":!strcmp(operation,"eof")?"eof":"transport-closed",tact_http_emit,NULL);
+            gto_destroy(tact_http_connections[i].capture);tact_http_connections[i].capture=NULL;
+            memset(trace,0,sizeof *trace);tact_http_connections[i].used=false;
+        }
         break;
     }
     os_unfair_lock_unlock(&tact_http_lock);
@@ -1552,8 +1693,11 @@ static void tact_http_peer(SSLContextRef ctx,const char *hostname,size_t length)
     os_unfair_lock_unlock(&tact_http_lock);
 }
 static ssize_t tact_socket_read(int fd,void *bytes,size_t size) {
+    int incoming=errno;off_t offset=lseek(fd,0,SEEK_CUR);errno=incoming;
     ssize_t result=read(fd,bytes,size);int saved=errno;
+    gtc_io(tact_cache,fd,"read",offset,size,result,result<0?saved:0);
     tact_http_observe((uintptr_t)fd,false,false,bytes,result>0?(size_t)result:0,"read",result<0?-1:0,result<0?saved:0,false);
+    if(!result && size)tact_http_observe((uintptr_t)fd,false,false,NULL,0,"eof",0,0,true);
     errno=saved;return result;
 }
 static ssize_t tact_socket_write(int fd,const void *bytes,size_t size) {
@@ -1563,7 +1707,26 @@ static ssize_t tact_socket_write(int fd,const void *bytes,size_t size) {
 }
 static int tact_socket_close(int fd) {
     int result=close(fd),saved=errno;
+    gtc_closed(tact_cache,fd,result,result?saved:0);
     tact_http_observe((uintptr_t)fd,false,false,NULL,0,"close",result<0?-1:0,result<0?saved:0,!result);
+    errno=saved;return result;
+}
+static ssize_t tact_cache_pread(int fd,void *bytes,size_t size,off_t offset) {
+    ssize_t result=pread(fd,bytes,size,offset);int saved=errno;
+    gtc_io(tact_cache,fd,"pread",offset,size,result,result<0?saved:0);
+    errno=saved;return result;
+}
+static size_t tact_cache_fread(void *bytes,size_t size,size_t count,FILE *file) {
+    int incoming=errno;off_t offset=ftello(file);int fd=fileno(file);errno=incoming;
+    size_t result=fread(bytes,size,count,file);int saved=errno;
+    uint64_t requested=size && count>UINT64_MAX/size?UINT64_MAX:(uint64_t)size*count;
+    int64_t got=size && result>INT64_MAX/size?INT64_MAX:(int64_t)(result*size);
+    gtc_io(tact_cache,fd,"fread",offset,requested,got,ferror(file)?saved:0);
+    errno=saved;return result;
+}
+static int tact_cache_fclose(FILE *file) {
+    int incoming=errno;int fd=fileno(file);errno=incoming;
+    int result=fclose(file),saved=errno;gtc_closed(tact_cache,fd,result,result?saved:0);
     errno=saved;return result;
 }
 static OSStatus tact_ssl_read(SSLContextRef ctx,void *bytes,size_t size,size_t *processed) {
@@ -1574,6 +1737,8 @@ static OSStatus tact_ssl_read(SSLContextRef ctx,void *bytes,size_t size,size_t *
     OSStatus result=real?real(ctx,bytes,size,processed):errSSLInternal;int saved=errno;
     size_t count=real && processed && (!result || result==errSSLWouldBlock)?*processed:0;
     tact_http_observe((uintptr_t)ctx,true,false,bytes,count<=size?count:0,"SSLRead",result==errSSLWouldBlock?0:result,0,false);
+    if(result==errSSLClosedGraceful)
+        tact_http_observe((uintptr_t)ctx,true,false,NULL,0,"eof",0,0,true);
     errno=saved;return result;
 }
 static OSStatus tact_ssl_write(SSLContextRef ctx,const void *bytes,size_t size,size_t *processed) {
@@ -1718,6 +1883,7 @@ static ssize_t guest_recvmsg(int fd, struct msghdr *msg, int flags) {
         tact_http_observe((uintptr_t)fd,false,false,msg->msg_iov[i].iov_base,n,"recvmsg",0,0,false);remaining-=n;
     }
     if(result<0)tact_http_observe((uintptr_t)fd,false,false,NULL,0,"recvmsg",-1,saved,false);
+    if(!result && !(flags&MSG_PEEK))tact_http_observe((uintptr_t)fd,false,false,NULL,0,"eof",0,0,true);
     static atomic_uint seen;
     if(trace_guest && (result<0 || atomic_fetch_add(&seen,1)<48))
         LOG("[native] [t%u] recvmsg(fd=%d) -> %zd errno=%d\n",
@@ -1887,6 +2053,7 @@ static ssize_t guest_recvfrom(int fd, void *bytes, size_t length, int flags, str
     int code=errno;
     size_t count=result>0?(size_t)result:0;if(count>length)count=length;
     if(!(flags&MSG_PEEK))tact_http_observe((uintptr_t)fd,false,false,bytes,count,"recvfrom",result<0?-1:0,result<0?code:0,false);
+    if(!result && length && !(flags&MSG_PEEK))tact_http_observe((uintptr_t)fd,false,false,NULL,0,"eof",0,0,true);
     if (trace_guest) log_once("[native] [t%u] recvfrom(%d,%zu) -> %zd errno=%d\n",trace_tid(),fd,length,result,result<0?code:0);
     errno=code;return result;
 }
@@ -2334,6 +2501,7 @@ static void probe_forever_cdn_metadata(void) {
     NSString *build=selected[[fields indexOfObject:@"Version"]];
     NSCharacterSet *badVersion=[[NSCharacterSet characterSetWithCharactersInString:@"0123456789."] invertedSet];
     if (!build.length || build.length>64 || [build rangeOfCharacterFromSet:badVersion].location!=NSNotFound) return;
+    tact_70755_metadata=[build isEqualToString:@"1.60.1.70755"];
     LOG("[tact-metadata] product=wowf active=1 version=%s (local metadata; no HTTP probes)\n",build.UTF8String);
     probe_forever_build_config(selected[buildKey]);
     probe_forever_patch_config(selected[cdnKey]);
@@ -2427,7 +2595,7 @@ bool ng_initialize(const char *path, const char *frameworks, const char *library
     external=!signed_backend && !local && (atomic_load(&use_external_authorization) ||
         [NSProcessInfo.processInfo.arguments containsObject:@"--external-authorization"]);
 #endif
-    tact_70755_image=external && tact_known_image(path);
+    tact_70755_image=tact_known_image(path,external);
     LOG("[tact-owner] exact 70755 image probes=%s (SHA-256 match required)\n",
         tact_70755_image?"enabled":"disabled");
     if (!signed_backend) {
@@ -2533,8 +2701,19 @@ bool ng_initialize(const char *path, const char *frameworks, const char *library
     // This opt-in test branch captures failed file access, successful file
     // lookup metadata, and network setup to distinguish data and host failures.
     // The main branch retains the standard --trace-guest opt-in behavior.
-    trace_guest=tact_70755_image || [NSProcessInfo.processInfo.arguments containsObject:@"--trace-guest"];
-    if (trace_guest) LOG("[native] tracing file access, socket/TLS operations and symbol resolution (70755 diagnostics or --trace-guest)\n");
+    bool tact_70755_route=external && tact_70755_metadata && path &&
+        strstr(path,"/_forever_/World of Warcraft.app/");
+    trace_guest=tact_70755_route || tact_70755_image ||
+        [NSProcessInfo.processInfo.arguments containsObject:@"--trace-guest"];
+    if (trace_guest) LOG("[native] tracing file access, socket/TLS operations and symbol resolution (70755 metadata route, exact image or --trace-guest); owner offsets require fresh file SHA-256 and live instruction validation\n");
+    if(tact_70755_route || tact_70755_image) {
+        NSString *documents=NSSearchPathForDirectoriesInDomains(NSDocumentDirectory,NSUserDomainMask,YES).firstObject;
+        NSString *directory=[documents stringByAppendingPathComponent:@"World of Warcraft/Data/data"];
+        tact_cache=gtc_create(directory.fileSystemRepresentation,&gto_patch_index_70755,log);
+        LOG("[tact-cache] observer=%s target-encoded-bytes=%u target-decoded-bytes=%u\n",
+            tact_cache?"active":"unavailable",gto_patch_index_70755.encoded_size,
+            gto_patch_index_70755.decoded_size);
+    }
     if (trace_guest) {
         struct sigaction crash_registers={0};
         crash_registers.sa_sigaction=guest_crash_registers;

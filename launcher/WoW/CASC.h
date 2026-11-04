@@ -10,6 +10,9 @@ NSData * _Nullable TKWoWArchiveEntries(NSData *data, uint32_t archive, NSError *
 BOOL TKWoWEncodedValid(NSData *data, NSString *key, NSError **error);
 NSString *TKWoWHex(const uint8_t *bytes, NSUInteger count);
 BOOL TKWoWUnhex(NSString *text, uint8_t *key);
+// Read-only diagnostic lookup. A local index stores only nine key bytes;
+// callers must verify the complete encoded object before trusting the candidate.
+NSDictionary * _Nullable TKWoWCASCDiagnosticExtent(NSString *directory, NSString *key, NSError **error);
 uint32_t TKWoWJenkins(const void *bytes, size_t length, uint32_t * _Nullable low, uint32_t seed);
 // Capture before an APFS clone, then rebind only receipts whose source stayed
 // unchanged throughout cloning. Missing/invalid receipts simply disable reuse.
