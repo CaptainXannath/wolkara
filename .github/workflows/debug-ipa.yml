@@ -3,6 +3,8 @@ name: Build Wolkara Debug IPA
 
 on:
   workflow_dispatch:
+  push:
+    branches: [investigate/tact-70755-network]
 
 permissions:
   contents: read
@@ -10,6 +12,7 @@ permissions:
 jobs:
   build:
     runs-on: macos-26
+    timeout-minutes: 60
 
     steps:
       - name: Checkout source
@@ -18,10 +21,22 @@ jobs:
       - name: Install XcodeGen
         run: brew install xcodegen
 
+      - name: Test bounded network diagnostics and metadata provenance
+        run: |
+          bash tools/test_tact_network.sh
+          python3 -m unittest discover -s tests -p 'test_tact_metadata.py' -v
+          xcrun clang -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -Iruntime tests/test_guest_diagnostics.c -o /tmp/test_guest_diagnostics
+          /tmp/test_guest_diagnostics
+
       - name: Build experimental IPA
         run: |
           TOLKARA_SYSTEM_ROOTS=NO \
           tools/package_ipa.sh Wolkara-debug.ipa
+
+      - name: Verify original sideload bundle identifier
+        run: |
+          unzip -p Wolkara-debug.ipa 'Payload/TolkaraDiagnostics.app/Info.plist' > /tmp/Wolkara-Info.plist
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' /tmp/Wolkara-Info.plist)" = local.tolkara.app
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
@@ -35,3 +50,30 @@ jobs:
         with:
           name: Wolkara-Build-Logs
           path: logs/
+
+  regression:
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - name: Run required sanitizer regression suite
+        run: bash tools/test_emulation.sh
+      - name: Upload regression logs if failed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Wolkara-Regression-Logs
+          path: logs/
+          if-no-files-found: ignore
+
+  baseline-signing:
+    # Reproduce the unchanged Local Signing failures on the same runner image.
+    # Keep these checks visible; do not skip integrity assertions to get green CI.
+    runs-on: macos-26
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: 65b412d16b72f02b341016f2d1e3c7ca8551f0fc
+      - name: Test unchanged baseline signing behavior
+        run: python3 -m unittest tests.test_sign_guest_local -v
