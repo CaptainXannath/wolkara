@@ -11,12 +11,19 @@ permissions:
 
 jobs:
   build:
-    runs-on: macos-26
+    # macos-26 jobs for this diagnostic revision were cancelled twice before
+    # runner assignment. Keep the IPA check runnable with an explicit Xcode.
+    runs-on: macos-15
     timeout-minutes: 60
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
 
     steps:
       - name: Checkout source
         uses: actions/checkout@v5
+
+      - name: Report selected Xcode
+        run: xcodebuild -version
 
       - name: Install XcodeGen
         run: brew install xcodegen

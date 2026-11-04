@@ -117,4 +117,8 @@ job on that commit ran the full suite and failed only the same three Local
 Signing assertions reproduced from the pinned unchanged base: `test_macos_dlopen`,
 `test_macos_executable_runs`, and `test_matches_codesign_byte_for_byte`.
 Neither result is a 70755 device launch. The follow-up observer safety and
-retry changes still require a new IPA build.
+retry changes still require a new IPA build. Two macOS 26 Actions attempts for
+that revision were cancelled before a runner started. The debug IPA build job
+now selects the macOS 15 ARM runner with its installed Xcode 26.3; the
+regression and pinned baseline jobs remain on macOS 26. A build on the fallback
+runner must be reported with that toolchain distinction.
