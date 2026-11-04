@@ -1,5 +1,7 @@
 // Isolated UIKit fixture: our synthetic installation, no network or guest execution.
 #import <UIKit/UIKit.h>
+#import <QuartzCore/QuartzCore.h>
+#include <math.h>
 #import <objc/runtime.h>
 #include <stdatomic.h>
 #import "../launcher/WoW/WoWViewController.h"
@@ -41,10 +43,16 @@ static UIView *Find(UIView *view, NSString *identifier) {
     for (UIView *child in view.subviews) { UIView *match=Find(child,identifier); if (match) return match; }
     return nil;
 }
+static CALayer *ActivityLayer(CALayer *layer) {
+    if ([layer.name isEqual:@"startup.activity"]) return layer;
+    for (CALayer *child in layer.sublayers) { CALayer *found=ActivityLayer(child); if (found) return found; }
+    return nil;
+}
 @interface TKWoWFixtureDelegate : UIResponder <UIWindowSceneDelegate>
 @property(nonatomic) UIWindow *window;
 @property(nonatomic) TKWoWViewController *controller;
 @property(nonatomic) NSUInteger launches, setups;
+@property(nonatomic) CGFloat activityPosition;
 @end
 @implementation TKWoWFixtureDelegate
 - (UIButton *)primary { return (id)Find(self.controller.view,@"wow.primary"); }
@@ -63,6 +71,10 @@ static UIView *Find(UIView *view, NSString *identifier) {
         fprintf(stderr,"WoW UIKit TIMEOUT\n"); _Exit(1);
     });
     fixture=[TKFixtureLibrary new];
+    NSString *retired=[fixture.directory stringByAppendingPathComponent:@"Interface/AddOns/WolkaraTouch"];
+    assert([NSFileManager.defaultManager createDirectoryAtPath:retired withIntermediateDirectories:YES attributes:nil error:NULL]);
+    assert([@"synthetic addon" writeToFile:[retired stringByAppendingPathComponent:@"Fixture.lua"] atomically:YES encoding:NSUTF8StringEncoding error:NULL]);
+    [NSUserDefaults.standardUserDefaults removeObjectForKey:@"WolkaraTouchHintShown"];
     self.window=[[UIWindow alloc] initWithWindowScene:(UIWindowScene *)scene];
     self.controller=[[TKWoWViewController alloc] initWithLibrary:(id)fixture];
     __weak TKWoWFixtureDelegate *weakSelf=self;
@@ -84,6 +96,8 @@ static UIView *Find(UIView *view, NSString *identifier) {
     [self performSelector:@selector(checkReady) withObject:nil afterDelay:0.3];
 }
 - (void)checkReady {
+    assert(!self.controller.presentedViewController);
+    assert(![NSFileManager.defaultManager fileExistsAtPath:[fixture.directory stringByAppendingPathComponent:@"Interface/AddOns/WolkaraTouch"]]);
     assert([self primary].enabled);
     assert([[self status] isEqual:@"Ready to play"] && self.controller.title.length==0);
     assert([[(UILabel *)Find(self.controller.view,@"wow.title") text] isEqual:@"WOLKARA"]);
@@ -120,11 +134,25 @@ static UIView *Find(UIView *view, NSString *identifier) {
     assert([self primary].enabled);
     atomic_store(&slow,true); [self tap];
     [NSNotificationCenter.defaultCenter postNotificationName:UIApplicationWillResignActiveNotification object:nil];
+    assert(![self primary].enabled && UIApplication.sharedApplication.idleTimerDisabled);
+    [NSNotificationCenter.defaultCenter postNotificationName:UIApplicationDidEnterBackgroundNotification object:nil];
+    assert([[self status] isEqual:@"Check paused"] && [self primary].enabled);
+    assert(!UIApplication.sharedApplication.idleTimerDisabled);
     [self performSelector:@selector(checkCancellation) withObject:nil afterDelay:0.7];
 }
 - (void)checkCancellation {
-    assert(self.launches==0); atomic_store(&slow,false); [self.controller refresh];
-    [self performSelector:@selector(captureAndLaunch) withObject:nil afterDelay:0.3];
+    assert(self.launches==0 && [[self status] isEqual:@"Check paused"]); atomic_store(&slow,false);
+    [NSNotificationCenter.defaultCenter postNotificationName:UIApplicationDidBecomeActiveNotification object:nil];
+    [NSNotificationCenter.defaultCenter postNotificationName:UIApplicationDidBecomeActiveNotification object:nil];
+    [self performSelector:@selector(checkResumed) withObject:nil afterDelay:0.3];
+}
+- (void)checkResumed {
+    assert(self.launches==0 && [[self status] isEqual:@"Ready to play"]);
+    assert(!UIApplication.sharedApplication.idleTimerDisabled);
+    unsigned before=atomic_load(&requests);
+    [NSNotificationCenter.defaultCenter postNotificationName:UIApplicationDidBecomeActiveNotification object:nil];
+    assert(atomic_load(&requests)==before);
+    [self captureAndLaunch];
 }
 - (void)captureAndLaunch {
     assert([self primary].enabled);
@@ -173,6 +201,31 @@ static UIView *Find(UIView *view, NSString *identifier) {
     assert(![self primary].enabled && !self.controller.launchProgress.hidden);
     assert([[self status] isEqual:@"Starting…"]);
     assert(self.controller.navigationController.viewControllers.count==1);
+    TKLaunchProgressView *progress=self.controller.launchProgress;
+    assert([progress.accessibilityLabel isEqual:@"Startup progress"]);
+    [progress showPhase:TKLaunchPhaseMemory];
+    [progress showPhase:TKLaunchPhaseConnection]; // A duplicate start cannot undo completed work.
+    assert([progress.accessibilityValue containsString:@"1 of 3"]);
+    [self.window layoutIfNeeded];
+    CALayer *activity=ActivityLayer(progress.layer); assert(activity);
+    [activity removeAllAnimations]; // The OS can do this during an app handoff.
+    [NSNotificationCenter.defaultCenter postNotificationName:UIApplicationDidBecomeActiveNotification object:nil];
+    assert([progress.accessibilityValue containsString:@"1 of 3"]);
+    if (!UIAccessibilityIsReduceMotionEnabled()) assert([activity animationForKey:@"activity"]);
+    [self performSelector:@selector(checkProgressFirstFrame) withObject:nil afterDelay:0.15];
+}
+- (void)checkProgressFirstFrame {
+    CALayer *activity=ActivityLayer(self.controller.launchProgress.layer);
+    self.activityPosition=activity.presentationLayer.position.x;
+    [self performSelector:@selector(checkLaunchAfterProgress) withObject:nil afterDelay:0.30];
+}
+- (void)checkLaunchAfterProgress {
+    TKLaunchProgressView *progress=self.controller.launchProgress;
+    CALayer *activity=ActivityLayer(progress.layer);
+    if (!UIAccessibilityIsReduceMotionEnabled())
+        assert(fabs(activity.presentationLayer.position.x-self.activityPosition)>1);
+    [progress showPhase:TKLaunchPhaseGame];
+    assert([progress.accessibilityValue containsString:@"2 of 3"]);
     unsigned before=atomic_load(&requests);
     [self.controller refresh]; [self tap];
     [NSNotificationCenter.defaultCenter postNotificationName:UIApplicationDidBecomeActiveNotification object:nil];
@@ -181,12 +234,15 @@ static UIView *Find(UIView *view, NSString *identifier) {
     [self.controller finishStartupWithMessage:@"Synthetic startup failure" failed:YES];
     assert([[self status] isEqual:@"Could not start"] && ![self primary].enabled);
     assert(self.controller.launchProgress.hidden && !self.controller.diagnosticsButton.hidden);
+    [NSNotificationCenter.defaultCenter postNotificationName:UIApplicationDidBecomeActiveNotification object:nil];
+    assert(![activity animationForKey:@"activity"]); // Returning after failure must stay stopped.
     [self capture:@"wow-startup-failed.png"];
     [self.controller finishStartupWithMessage:@"Session ended" failed:NO];
     assert(![self primary].enabled && self.controller.diagnosticsButton.hidden);
     // A recoverable preflight error must leave another attempt possible.
     self.controller.sessionUsed=NO;
     [self.controller beginStartup];
+    assert([progress.accessibilityValue containsString:@"0 of 3"]);
     [self.controller finishStartupWithMessage:@"Synthetic missing container" failed:YES];
     assert([self primary].enabled);
     [self.controller about];

@@ -59,3 +59,40 @@ void AKMouseSetCaptured(bool captured) {
     if(atomic_exchange(&mouseCaptured,captured)!=captured)
         [NSNotificationCenter.defaultCenter postNotificationName:@"AKMouseCaptureDidChange" object:nil];
 }
+
+// Keep AppKit and CoreGraphics on exactly the same scale, including fractional
+// performance scales. The launcher writes its selection before guest startup.
+CGFloat AKConfiguredGuestBackingScale(void) {
+    static CGFloat scale;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        const char *environment=getenv("TOLKARA_BACKING_SCALE");
+        id stored=[NSUserDefaults.standardUserDefaults objectForKey:@"WolkaraBackingScale"];
+        CGFloat requested=environment && *environment ? atof(environment)
+            : [stored respondsToSelector:@selector(doubleValue)] ? [stored doubleValue] : 2.0;
+        scale=isfinite(requested) && requested>=0.5 && requested<=3.0 ? requested : 2.0;
+    });
+    return scale;
+}
+
+static CGSize guestDisplaySize;
+static double guestDisplayRefresh;
+BOOL AKGetGuestDisplayGeometry(CGSize *size, double *refresh) {
+    @synchronized(AKStubObject.class) {
+        if (guestDisplaySize.width<=0 || guestDisplaySize.height<=0) return NO;
+        if (size) *size=guestDisplaySize;
+        if (refresh) *refresh=guestDisplayRefresh;
+        return YES;
+    }
+}
+void AKSetGuestDisplayGeometry(CGSize size, double refresh) {
+    if (!isfinite(size.width) || !isfinite(size.height) || size.width<=0 || size.height<=0
+        || !isfinite(refresh) || refresh<=0) return;
+    BOOL changed;
+    @synchronized(AKStubObject.class) {
+        changed=!CGSizeEqualToSize(size,guestDisplaySize) || refresh!=guestDisplayRefresh;
+        guestDisplaySize=size; guestDisplayRefresh=refresh;
+    }
+    // Publish after releasing the lock: guest callbacks may query the new mode.
+    if (changed) [NSNotificationCenter.defaultCenter postNotificationName:@"AKGuestDisplayDidChange" object:nil];
+}

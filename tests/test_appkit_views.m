@@ -4,6 +4,26 @@
 #import "AppKit.h"
 #import "TouchControls.h"
 #include <assert.h>
+@interface NSScreen (FixtureBackingCoordinates)
+- (CGRect)convertRectToBacking:(CGRect)rect;
+- (CGRect)convertRectFromBacking:(CGRect)rect;
+@end
+
+// Synthetic native settings: no scene, imported code or gameplay is involved.
+@interface FixtureTrackingWindow : NSWindow
+@end
+@implementation FixtureTrackingWindow
+- (BOOL)ak_nativeControlsActive { return YES; }
+@end
+@interface NSApplication (FixturePump)
+- (void)ak_pumpUIKitFor:(NSTimeInterval)seconds returnAfterSource:(BOOL)once;
+@end
+@interface FixtureTrackingApplication : NSApplication
+@property NSWindow *fixtureWindow;
+@end
+@implementation FixtureTrackingApplication
+- (NSWindow *)keyWindow { return self.fixtureWindow; }
+@end
 
 // Draws by updating its layer, as Wine's Mac driver does.
 @interface LayerView : NSView
@@ -110,7 +130,7 @@ int main(void) { @autoreleasepool {
     NSWindow *other = [[NSWindow alloc] initWithContentRect:CGRectMake(0, 0, 100, 50) styleMask:0 backing:2 defer:NO];
     other.contentView = plain; plain.layer.contentsScale = 1;
     [other ak_hostBoundsChanged:CGRectMake(0, 0, 200, 100)];
-    assert(other.backingScaleFactor > 1 && plain.layer.contentsScale == other.backingScaleFactor);
+    assert(other.backingScaleFactor == AKConfiguredGuestBackingScale() && plain.layer.contentsScale == other.backingScaleFactor);
 
     // Showing a window never calls back into a subclass's makeKeyAndOrderFront:.
     OrderingWindow *ordering = [[OrderingWindow alloc] initWithContentRect:rect styleMask:0 backing:2 defer:NO];
@@ -278,5 +298,38 @@ int main(void) { @autoreleasepool {
            (NSEventModifierFlagShift | LeftShift | NSEventModifierFlagCapsLock));
     assert(AKModifiersReconciled(held, 0) == 0);
     assert(AKModifiersReconciled(AKModifiersAfterKey(0, 0xE6, YES), NSEventModifierFlagOption) == (NSEventModifierFlagOption | RightOption));
+    // Logical coordinates stay in points at every phone size and backing scale.
+    const CGSize phoneSizes[]={ {852,393},{956,440},{678,466},{951,669},{669,951} };
+    for (NSUInteger i=0;i<sizeof(phoneSizes)/sizeof(phoneSizes[0]);i++) {
+        AKSetGuestDisplayGeometry(phoneSizes[i],120);
+        NSScreen *screen=NSScreen.mainScreen;
+        UIViewController *host=[NSClassFromString(@"AKHostViewController") new];
+        assert(host && CGSizeEqualToSize(host.view.bounds.size,phoneSizes[i]));
+        assert(host.view.contentScaleFactor==screen.backingScaleFactor);
+        assert(CGSizeEqualToSize(screen.frame.size,phoneSizes[i]));
+        assert(screen.backingScaleFactor==other.backingScaleFactor);
+        CGRect points=CGRectMake(12,24,100,60);
+        CGRect pixels=[screen convertRectToBacking:points];
+        assert(pixels.size.width==100*other.backingScaleFactor);
+        assert(CGRectEqualToRect([screen convertRectFromBacking:pixels],points));
+        [other ak_hostBoundsChanged:(CGRect){CGPointZero,phoneSizes[i]}];
+        assert(CGSizeEqualToSize(plain.frame.size,phoneSizes[i]));
+        assert(plain.layer.contentsScale==screen.backingScaleFactor);
+    }
+    // Tracking must reach deferred UIKit completion, not just run ready sources.
+    __block BOOL trackingCompleted=NO;
+    CFRunLoopObserverRef observer=CFRunLoopObserverCreateWithHandler(NULL,kCFRunLoopBeforeWaiting,true,0,
+        ^(__unused CFRunLoopObserverRef o,__unused CFRunLoopActivity activity) { trackingCompleted=YES; });
+    CFRunLoopAddObserver(CFRunLoopGetCurrent(),observer,(__bridge CFStringRef)UITrackingRunLoopMode);
+    // This headless fixture has no UIKit event source to keep tracking alive.
+    CFRunLoopTimerRef keepAlive=CFRunLoopTimerCreateWithHandler(NULL,CFAbsoluteTimeGetCurrent()+60,0,0,0,
+        ^(__unused CFRunLoopTimerRef timer) {});
+    CFRunLoopAddTimer(CFRunLoopGetCurrent(),keepAlive,(__bridge CFStringRef)UITrackingRunLoopMode);
+    FixtureTrackingApplication *tracking=[FixtureTrackingApplication new];
+    tracking.fixtureWindow=[FixtureTrackingWindow new];
+    [tracking ak_pumpUIKitFor:0 returnAfterSource:NO];
+    assert(trackingCompleted);
+    CFRunLoopObserverInvalidate(observer); CFRelease(observer);
+    CFRunLoopTimerInvalidate(keepAlive); CFRelease(keepAlive);
     puts("display pass, frame rects, panels, tracking areas, layer placement, contents scale, window ordering, Quartz events, window numbers and modifier keys: PASS");
 } }

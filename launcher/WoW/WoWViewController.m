@@ -2,6 +2,7 @@
 #import "Client.h"
 #import "Installation.h"
 #import "Updater.h"
+#import "AddonCleanup.h"
 #import "../App/LaunchProgressView.h"
 
 static UIColor *Gold(void) { return [UIColor colorWithRed:0.88 green:0.73 blue:0.43 alpha:1]; }
@@ -28,6 +29,7 @@ static UIStackView *Stack(NSArray<UIView *> *views, CGFloat spacing) {
     NSDate *_checkedAt;
     NSUInteger _generation;
     BOOL _busy, _updating, _updateError, _starting;
+    BOOL _checkedThisLaunch, _resumeCheck, _launchWhenReady, _checkOwnsIdleTimer, _previousIdleTimerDisabled;
     NSString *_startupFailure;
     UILabel *_updatesLabel;
     NSString *_updatePhase;
@@ -104,7 +106,8 @@ static UIStackView *Stack(NSArray<UIView *> *views, CGFloat spacing) {
     _progressBar=[[UIProgressView alloc] initWithProgressViewStyle:UIProgressViewStyleDefault];
     _progressBar.progressTintColor=Gold(); _progressBar.accessibilityIdentifier=@"wow.progress";
     _launchProgress=[TKLaunchProgressView new];
-    _launchProgress.accessibilityIdentifier=@"wow.elapsed";
+    _launchProgress.accessibilityIdentifier=@"wow.startupProgress";
+    _launchProgress.tintColor=Gold();
     _diagnosticsButton=[self button:@"wow.diagnostics" action:@selector(diagnostics)];
     [_diagnosticsButton setTitle:@"Diagnostics and logs" forState:UIControlStateNormal];
     _diagnosticsButton.tintColor=Gold(); _diagnosticsButton.hidden=YES;
@@ -139,8 +142,10 @@ static UIStackView *Stack(NSArray<UIView *> *views, CGFloat spacing) {
     ]];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(foreground:)
         name:UIApplicationDidBecomeActiveNotification object:nil];
-    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(background:)
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(inactive:)
         name:UIApplicationWillResignActiveNotification object:nil];
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(background:)
+        name:UIApplicationDidEnterBackgroundNotification object:nil];
     [self render];
 }
 - (void)viewWillAppear:(BOOL)animated {
@@ -163,14 +168,34 @@ static UIStackView *Stack(NSArray<UIView *> *views, CGFloat spacing) {
     _columns.axis=horizontal?UILayoutConstraintAxisHorizontal:UILayoutConstraintAxisVertical;
     _columns.alignment=horizontal?UIStackViewAlignmentTop:UIStackViewAlignmentFill;
 }
-- (void)viewDidAppear:(BOOL)animated { [super viewDidAppear:animated]; if (!_busy && !_sessionUsed && !_starting) [self refresh]; }
-- (void)viewDidDisappear:(BOOL)animated { [super viewDidDisappear:animated]; [self cancel]; }
-- (void)foreground:(NSNotification *)note {
-    (void)note;
-    if (self.isViewLoaded && self.view.window && self.navigationController.topViewController==self && !_busy && !_sessionUsed && !_starting) [self refresh];
+- (void)viewDidAppear:(BOOL)animated {
+    [super viewDidAppear:animated];
+    if (_resumeCheck) { [self resumeCheckIfVisible]; return; }
+    if (!_checkedThisLaunch && !_busy && !_sessionUsed && !_starting) [self refresh];
 }
-- (void)background:(NSNotification *)note { (void)note; [self cancel]; }
-- (void)cancel { [_client cancel]; _client=nil; _generation++; _busy=NO; }
+- (void)viewDidDisappear:(BOOL)animated { [super viewDidDisappear:animated]; [self pauseCheck]; }
+- (void)foreground:(NSNotification *)note { (void)note; [self resumeCheckIfVisible]; }
+- (void)inactive:(NSNotification *)note { (void)note; _launchWhenReady=NO; }
+- (void)background:(NSNotification *)note { (void)note; [self pauseCheck]; }
+- (void)releaseCheckIdleTimer {
+    if (!_checkOwnsIdleTimer) return;
+    UIApplication.sharedApplication.idleTimerDisabled=_previousIdleTimerDisabled;
+    _checkOwnsIdleTimer=NO;
+}
+- (void)cancel {
+    [_client cancel]; _client=nil; _generation++; _busy=NO; _updating=NO; _launchWhenReady=NO;
+    [self releaseCheckIdleTimer];
+}
+- (void)pauseCheck {
+    if (!_busy) return;
+    [self cancel]; _resumeCheck=YES; [self render];
+}
+- (void)resumeCheckIfVisible {
+    if (!_resumeCheck || _busy || _starting || _sessionUsed ||
+        UIApplication.sharedApplication.applicationState!=UIApplicationStateActive ||
+        !self.view.window || self.navigationController.topViewController!=self || self.presentedViewController) return;
+    [self checkForUpdatesAndLaunch:NO];
+}
 - (void)setExecutionMode:(TKExecutionMode)mode { _executionMode=mode; if (self.isViewLoaded) [self render]; }
 - (void)setSessionUsed:(BOOL)used { _sessionUsed=used; if (used) [self cancel]; if (self.isViewLoaded) [self render]; }
 - (void)selectProduct:(NSDictionary *)product {
@@ -192,6 +217,9 @@ static UIStackView *Stack(NSArray<UIView *> *views, CGFloat spacing) {
     install=install || [NSUserDefaults.standardUserDefaults boolForKey:installKey];
     BOOL repair=[NSUserDefaults.standardUserDefaults boolForKey:repairKey];
     [self cancel]; _plan=nil; _installation=nil; _error=nil; _checkedAt=nil; _startupFailure=nil;
+    _checkedThisLaunch=YES; _resumeCheck=NO; _launchWhenReady=launch;
+    _previousIdleTimerDisabled=UIApplication.sharedApplication.idleTimerDisabled;
+    _checkOwnsIdleTimer=YES; UIApplication.sharedApplication.idleTimerDisabled=YES;
     _updating=NO; _updateError=NO; _updatePhase=nil; _updateDone=0; _updateTotal=0;
     _client=[TKWoWClient new]; _busy=YES; [self render];
     TKWoWClient *client=_client; NSUInteger generation=_generation;
@@ -245,18 +273,24 @@ static UIStackView *Stack(NSArray<UIView *> *views, CGFloat spacing) {
             NSLog(@"[wow-update] Verification bytes read=%llu reused=%llu",updater.verificationBytesRead,updater.verificationBytesReused);
         }
 
+        if (!error && !client.cancelled && installation.state==TKWoWInstallationReady && installation.app) {
+            NSString *directory = [self->_library workingDirectoryForApp:installation.app error:&error];
+            if (directory && !error) TKWoWRetireTouchAddon(directory,&error);
+        }
         dispatch_async(dispatch_get_main_queue(),^{
             if (generation!=self->_generation) return;
             self->_plan=plan; self->_installation=installation; self->_error=error;
+            [self releaseCheckIdleTimer];
             self->_checkedAt=plan?NSDate.date:nil; self->_busy=NO; self->_updating=NO; self->_updateError=updateAttempted && error; [self render];
             // Returning from the background or changing edition invalidates this request.
-            if (launch && !error && !client.cancelled && installation.state==TKWoWInstallationReady && installation.app && !self->_sessionUsed &&
+            if (launch && self->_launchWhenReady && UIApplication.sharedApplication.applicationState==UIApplicationStateActive && !error && !client.cancelled && installation.state==TKWoWInstallationReady && installation.app && !self->_sessionUsed &&
                 self.view.window && self.navigationController.topViewController==self && self.startApp) self.startApp(installation.app);
         });
     });
 }
 - (void)primaryAction {
     if (_busy || _sessionUsed || _starting) return;
+    if (_resumeCheck) { [self refresh]; return; }
     if (_startupFailure) { _startupFailure=nil; [self render]; }
     if (_error || !_plan) { [self refresh]; return; }
     if (_installation.state==TKWoWInstallationMissing || _installation.state==TKWoWInstallationNeedsRepair) {
@@ -311,6 +345,9 @@ static UIStackView *Stack(NSArray<UIView *> *views, CGFloat spacing) {
         title=@"Reopen to start again";
         detail=@"Close the app from the app switcher before starting another session.";
         action=@"Session ended";
+    } else if (_resumeCheck) {
+        title=@"Check paused"; detail=@"Return to the app or tap Resume to continue checking your files.";
+        action=@"Resume"; enabled=YES;
     } else if (_busy && _updating) {
         title=@"Updating your game…";
         NSDictionary *phases=@{@"snapshot":@"Preparing the installation",
@@ -376,7 +413,11 @@ static UIStackView *Stack(NSArray<UIView *> *views, CGFloat spacing) {
     case TKExecutionModeLocalSigning:
         _startupLabel.text=@"Startup requires a signed container matching this version."; break;
     case TKExecutionModeExternalJIT:
+#if TOLKARA_EXTERNAL_JIT_PROTOTYPE
+        _startupLabel.text=@"Play opens StikDebug to prepare this session. Keep LocalDevVPN connected."; break;
+#else
         _startupLabel.text=@"Enable JIT before starting a new session."; break;
+#endif
     case TKExecutionModeNone:
         _startupLabel.text=@"This build cannot start the game. See Diagnostics and logs."; break;
     }
@@ -411,9 +452,26 @@ static UIStackView *Stack(NSArray<UIView *> *views, CGFloat spacing) {
     [sheet addAction:[UIAlertAction actionWithTitle:@"Language" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) { (void)a; [self choosePreference:NO]; }]];
     [self presentSheet:sheet anchor:_preferencesButton];
 }
+- (void)chooseRenderScale {
+    UIAlertController *sheet=[UIAlertController alertControllerWithTitle:@"Rendering quality"
+        message:@"Balanced draws two pixels per point. Performance draws one and uses less graphics memory. Takes effect the next time you start the game."
+        preferredStyle:UIAlertControllerStyleActionSheet];
+    for (NSNumber *scale in @[@2,@1]) {
+        NSString *title=scale.intValue==2?@"Balanced (2×)":@"Performance (1×)";
+        [sheet addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+            (void)action; [NSUserDefaults.standardUserDefaults setObject:scale forKey:@"WolkaraBackingScale"];
+        }]];
+    }
+    [self presentSheet:sheet anchor:nil];
+}
 - (void)settings {
     UIAlertController *sheet=[UIAlertController alertControllerWithTitle:@"Settings"
         message:@"Updates install automatically while this app is open. Settings and addons are preserved. Startup preparation is separate from downloading updates." preferredStyle:UIAlertControllerStyleActionSheet];
+    if (UIDevice.currentDevice.userInterfaceIdiom==UIUserInterfaceIdiomPhone) {
+        [sheet addAction:[UIAlertAction actionWithTitle:@"Rendering quality" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+            (void)action; [self chooseRenderScale];
+        }]];
+    }
     if(!_busy && !_starting && !_sessionUsed && _installation.app) {
         [sheet addAction:[UIAlertAction actionWithTitle:@"Verify and repair game files" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
             (void)a; [self repairInstallation];

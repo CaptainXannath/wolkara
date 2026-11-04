@@ -150,6 +150,17 @@ After enrolment the Mac is no longer needed: launches, relaunches and reboots
 work on the iPad alone. You need to repeat steps 3 and 4 only when your
 provisioning profile expires or you change the bundle ID or Keychain group.
 
+Deleting the app for a clean-install test also deletes its enrolled-device
+reference in preferences, even when its device-only Keychain record survives.
+For the same device, bundle ID and Keychain group, a development launch with
+`--restore-authorization-reference --expected-device <trusted USB device ID>`
+restores that reference from the exact existing record. It rejects missing,
+locked or corrupt records and conflicting references; it never enumerates the
+Keychain or replaces a trust pin. The result is written to
+`Documents/authorization-reference-result.txt`. Reopen normally after recovery
+and verify the authenticated local tunnel. Writing the preferences plist from
+the Mac alone is insufficient when iOS still caches the old values.
+
 > `tools/enroll.sh` packages the procedure used during development into one
 > command. If it fails, the individual steps are readable in the script and
 > each prints its own diagnosis.
@@ -346,13 +357,16 @@ for apps started from the library:
 
 ### Preparation status
 
-Developer-service launches show connection, memory preparation, and app-loading
-messages with an elapsed clock. The clock and activity indicator use Core
-Animation so they keep moving while the service pauses the host process. There
-is no measured completion percentage during that pause. Preparation failures
-stop the indicator and expose the existing diagnostics action.
+Launches show a three-phase bar: Connection, Memory, Game. Completed phases
+fill only on real startup transitions; the current phase shows indeterminate
+activity. Neither the external JIT protocol nor the integrated preparation
+service supplies a reliable whole-launch percentage. Core Animation renders
+the activity while app threads are paused, and returning from StikDebug
+recreates the animation without resetting completed phases. Failure stops the
+bar and exposes the existing diagnostics action. The old elapsed counter has
+been removed.
 
-Below the clock, every launch mode shows what startup is doing until the app's
+Below the bar, diagnostic launches show what startup is doing until the app's
 own window appears: the runtime's current step (loading, linking, the app's
 startup code with a count of its initializers, the check against the page
 container, then the app's own startup) with its duration, and the file the app
@@ -361,11 +375,18 @@ redrawn from a background queue, so they keep changing while application code
 holds the main thread; a long wait while the app writes, say, a crash report
 into `Errors/` shows as such.
 
-To check the display without loading application code, boot an iPad simulator
+The normal WoW home keeps only the phase bar and its current status message.
+To check the display without loading application code, boot an iPhone/iPad simulator
 and run `tools/test_launch_progress.sh` (or pass a simulator ID and `--dark`).
+For a multi-screen simulator, set `SIMULATOR_DISPLAY` to the active display
+listed by `xcrun simctl io booted enumerate`.
 This installs only our standalone UIKit fixture, holds its main thread for six
 seconds while a stand-in step counts and a file grows, then pauses it for three
 seconds and resumes it, saving screenshots in `build/launch-progress/`. Verify
 that the activity lines advance between `busy-1` and `busy-2`, and that the
-clock advances during suspension. The fixture uses a separate bundle ID and
+current phase stays visible during suspension. The fixture uses a separate bundle ID and
 does not start authorization or run a guest.
+
+`tools/test_wow_launcher_ui.sh` also verifies phase transitions, visible
+animation movement after simulated animation removal/app reactivation,
+retention of completed phases, and stopping on failure.

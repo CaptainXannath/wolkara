@@ -29,6 +29,12 @@ This is a source release for people comfortable with Xcode. There is no tested
 public Wolkara IPA, App Store/TestFlight release or AltStore PAL install path.
 A successful build alone does not prove that a signing profile permits startup.
 
+This branch also includes an [External JIT prototype](docs/EXTERNAL_JIT.md)
+(`WolkaraExternalJIT` scheme). It uses separately installed StikDebug and
+LocalDevVPN without Wolkara's integrated tunnel or special memory entitlements.
+Its synthetic execution test passes on iPhone; Personal Team provisioning and
+WoW gameplay under this capability set remain untested.
+
 ## Features
 
 - A single WoW home screen with edition, region and language selection.
@@ -39,7 +45,8 @@ A successful build alone does not prove that a signing profile permits startup.
 - An iOS keyboard with dictation and an editable draft that replaces the focused
   game field, plus a touch trackpad with two-finger scrolling.
 - Physical controller support and an on-screen controller when none is connected.
-- Movable touch controls, opacity and size settings, an alignment grid and haptics.
+- Movable touch controls, opacity and size settings, shoulder-position swapping,
+  an alignment grid and haptics. Compact settings require no scrolling.
 
 ## What has been tested
 

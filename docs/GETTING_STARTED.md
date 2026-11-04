@@ -6,6 +6,11 @@ on the iPhone/iPad. WoW and Battle.net do not need to be installed on your Mac.
 
 ## Requirements
 
+For the isolated, experimental Personal Team candidate, see
+[External JIT setup](EXTERNAL_JIT.md). Its `WolkaraExternalJIT` scheme has a
+separate app container and requires StikDebug plus LocalDevVPN. The instructions
+below remain the validated integrated route.
+
 - An Apple silicon Mac, Xcode with support for your device's iOS version,
   XcodeGen and Python 3. Install Xcode's requested platform components first.
 - Your own Apple developer signing. The integrated app and its tunnel need
@@ -91,7 +96,8 @@ updates before enabling Play. If interrupted, reopen and retry to resume.
 
 After **Ready to play**, press **Play** and allow memory preparation to finish.
 Log in manually using your eligible account. Touch controls appear without a
-physical controller; the upper toolbar opens the keyboard, trackpad and settings.
+physical controller and disappear when one connects. The upper toolbar opens the
+keyboard and settings; touches outside controls always use the trackpad.
 
 The full first-download flow is still under physical-device validation. If it
 fails, record Settings → Technical details; do not delete the app or its data as

@@ -17,8 +17,8 @@ The app opens directly into a native WoW home screen with edition selection,
 automatic updates and one primary action. `feature/wow-home` continues from
 `feature/keyboard-dictation` at `e5ecdb6` and makes this the only normal launcher:
 all interface copy is English, with one game heading and no adventure slogans.
-Download language remains independently selectable. Startup preparation, elapsed
-time, failure and session end stay in the same home card; no separate loading
+Download language remains independently selectable. Startup preparation, a
+three-phase progress bar, failure and session end stay in the same home card; no separate loading
 screen or general application library is exposed. Settings retains diagnostics;
 there is no startup-mode picker. About includes the bundled MIT copyright/license and
 third-party notices, plus an independent-project attribution.
@@ -39,7 +39,9 @@ or memory requirements; see [the distribution plan](WOLKARA_DISTRIBUTION.md).
 - Checks at opening, foregrounding and before Play. An outdated installed copy
   **starts updating automatically**. A missing edition offers Install; an
   unverifiable installation offers Repair. Interrupted explicit installations
-  are remembered and resumed, including after reopening the process.
+  are remembered and resumed, including after reopening the process. A complete,
+  current client imported over USB satisfies a stale installation request without
+  replaying its partial download; an explicit Repair still runs.
 - Shows preparation, existing-data verification, downloading, file installation
   and activation progress. Play stays disabled until the current published build
   and its original executable pass verification. A failed check never counts as
@@ -79,7 +81,33 @@ credentials or game code are supplied by Tolkara.
 `Client.m` uses Blizzard's public HTTPS services, bounded responses and verified
 Range requests. It reuses a connection pool and groups adjacent archive objects
 into requests of up to 16 MiB (larger individual objects remain bounded at
-256 MiB). Every selected object is checked before being passed to storage.
+256 MiB). It downloads up to four ranges concurrently, with independent response
+buffers, bounds and errors. Each window retains at most 64 MiB of payload; an
+individual object above that limit runs alone. Checksum verification, storage
+writes and progress callbacks remain serial. Completed ranges are consumed as
+they become ready and their slots refilled, rather than waiting for a batch of
+four to finish. The memory reservation lasts until consumption completes; it
+includes in-flight, completed and currently consumed responses. Cancellation or a transport failure
+cancels pending tasks and waits for their completion before returning; failed
+updates never activate an installation. A checksum or consumer failure also
+cancels and drains still-running siblings before returning. This improves throughput without changing
+the foreground-only download lifecycle or durable resume semantics. Every
+selected object is checked before being passed to storage.
+
+A synthetic HTTPS-transport test with fourteen 80 ms latency-bound requests took
+1.184 s serially and 0.344 s with four concurrent requests (3.44×). It uses original
+synthetic fixtures and no live CDN. This demonstrates reduced request-latency
+cost, not an expected speedup on every connection or a measured full-game download.
+The same suite covers interleaved responses, wrong/short ranges, corrupted payloads,
+consumer failure, cancellation, retry, the 64 MiB window and oversized objects.
+The 2026-10-12 rolling-window regression holds the first range until all seven
+other objects have reached the consumer, proving that one stalled range cannot
+block completed work. Additional transport tests fail a consumer while a slow
+sibling is active and require cancellation, cleanup and a nonempty error. The
+previous batch implementation fails the stalled-range test. These are synthetic
+results; the improvement's throughput on a physical iPhone remains unmeasured.
+The displayed byte count still represents verified, stored payload, so individual
+large objects and index checkpoints can produce visible pauses and jumps.
 Metadata caches are content-addressed and reverified. Protocol sources and
 licences from TACTSharp, CascLib and lookup3 are recorded in `NOTICE.md`;
 no .NET runtime is embedded.
@@ -382,3 +410,28 @@ compressing a roughly 27.5-point line and clipping descenders in “Ready to pla
 The row now centers its arranged views and labels resist vertical compression.
 The UIKit fixture checks text bounds at default and maximum accessibility sizes;
 large content remains scrollable. This changes neither update nor launch logic.
+
+
+## November 2026 maintenance
+
+Verification now consumes the manifest's binary keys directly. A warm check reuses
+receipts only for unchanged files and matching keys/extents; it does not skip integrity
+checks. Long cold scans save progress every 1 GiB so an interrupted process can resume.
+Transient interruptions keep verification running; entering the background pauses it,
+and returning resumes unfinished work without starting a game. Completed checks are
+not repeated when dismissing a sheet. Auto-Lock is restored after checking finishes.
+An old pending download request is completed through the verified updater rather than
+being cleared solely because a USB import's executable and metadata look current.
+
+The renderer uses the active window scene at its first attachment and follows resizing
+and rotation, including iPhone Pro, Pro Max and Duo windows. AppKit and CoreGraphics
+share a backing scale and immutable display-mode snapshots. Phones default to Balanced
+(2 pixels per point); Settings → Rendering quality also offers Performance (1 pixel per
+point), effective on the next game launch. The game still owns its drawable allocation
+and graphics settings. iPads keep their usual 2× scale. A larger surface costs graphics
+memory and GPU time; the setting is not a frame-rate guarantee.
+
+Native control tracking receives a complete UIKit turn while settings or the native
+editor is open. Existing saved trigger arrangements are preserved, while new/reset
+layouts default to inner triggers. The separately selected External JIT target remains
+an experimental opt-in; it does not change the normal Wolkara startup path.

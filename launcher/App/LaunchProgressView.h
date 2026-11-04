@@ -1,9 +1,14 @@
 #pragma once
 #import <UIKit/UIKit.h>
 
-// Elapsed time and indeterminate activity are rendered by Core Animation so
-// they keep moving while the developer service pauses the app's threads.
+typedef NS_ENUM(NSUInteger, TKLaunchPhase) {
+    TKLaunchPhaseConnection, TKLaunchPhaseMemory, TKLaunchPhaseGame
+};
+
+// Milestones, not a guessed percentage or elapsed-time animation. Activity in
+// the current phase is rendered by Core Animation while app threads are paused.
 @interface TKLaunchProgressView : UIView
 - (void)start;
+- (void)showPhase:(TKLaunchPhase)phase;
 - (void)stop;
 @end

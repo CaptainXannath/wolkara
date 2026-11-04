@@ -4,6 +4,7 @@ cd "$(dirname "$0")/.."
 mkdir -p build/emulation
 bash tools/test_wow_launcher.sh
 bash tools/test_local_service_retry.sh
+bash tools/test_external_jit.sh
 CC=(xcrun clang -std=c11 -D_DARWIN_C_SOURCE -Wall -Wextra -Werror -O1 -g
     -fsanitize=address,undefined -fno-omit-frame-pointer -Iruntime)
 "${CC[@]}" -Itranslation/AppKit translation/AppKit/TouchTrackpad.c tests/test_touch_trackpad.c -o build/emulation/test_touch_trackpad
@@ -48,7 +49,7 @@ xcrun swiftc -module-cache-path build/swift-module-cache -warnings-as-errors \
 build/emulation/test_pairing
 xcrun swiftc -module-cache-path build/swift-module-cache -warnings-as-errors \
     -g -sanitize=address authorization/Pairing/PairingWire.swift \
-    authorization/Pairing/PairingIdentity.swift authorization/Storage/*.swift \
+    authorization/Pairing/PairingIdentity.swift authorization/Storage/*.swift authorization/App/EnrollmentImport.swift \
     tests/test_pairing_storage.swift -o build/emulation/test_pairing_storage
 build/emulation/test_pairing_storage
 xcrun swiftc -module-cache-path build/swift-module-cache -warnings-as-errors \

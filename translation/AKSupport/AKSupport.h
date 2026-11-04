@@ -34,3 +34,11 @@ void AKCursorHide(void);
 void AKCursorUnhide(void);
 bool AKMouseIsCaptured(void);
 void AKMouseSetCaptured(bool captured);
+
+#ifdef __OBJC__
+// A shared virtual display for every adapter. Geometry is published by the host
+// window on the main thread; readers never synchronously hop onto that thread.
+CGFloat AKConfiguredGuestBackingScale(void);
+BOOL AKGetGuestDisplayGeometry(CGSize *size, double *refresh);
+void AKSetGuestDisplayGeometry(CGSize size, double refresh);
+#endif

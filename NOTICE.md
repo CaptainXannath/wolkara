@@ -15,7 +15,10 @@ protocols and formats. No code was copied or translated from these projects.
   (jkcoxson.com/blog/rppairing-spec)
 - pymobiledevice3 (GPL-3.0), consulted for RemoteXPC and service-discovery
   message layouts
-- StikJIT integration notes (executable-region preparation protocol)
+- [StikJIT integration notes](https://github.com/StikDebug/StikJIT/blob/main/INTEGRATION.md)
+  (executable-region preparation/detachment protocol and StikDebug URL handoff).
+  The External JIT prototype invokes a separately installed StikDebug; its
+  implementation and bundled scripts are not copied or distributed here.
 - Apple HomeKit ADK (Apache-2.0), Pair Verify reference
 - Apple open-source objc4 headers, for the Objective-C image registration SPI
 - Apple open-source dyld `MachOAnalyzer.cpp`, for rebase stream termination

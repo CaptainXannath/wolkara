@@ -132,6 +132,10 @@ static NativeCodeMemory external_quarantine;
 // Prepared before the launch, while a debugger was there.
 static NativeCodeMemory reserved_arena;
 bool ng_arena_reserved(void) { return reserved_arena.published; }
+bool ng_external_arena_ready(void) {
+    return reserved_arena.published && !da_debugger_present() &&
+           hd_is_executable(reserved_arena.executable);
+}
 bool ng_reserve_arena(FILE *log) {
     if (reserved_arena.published) return true;
     if (atomic_load(&initialization_attempted) || !da_debugger_present()) return false;

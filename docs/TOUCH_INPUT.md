@@ -1,33 +1,33 @@
 # Experimental touch input
 
-The AppKit adapter provides four translucent toolbar buttons: pointer, keyboard,
-automatic touch controller and control settings (gear). The toolbar always stays
-at the top center inside the safe area, including with a physical controller,
-with the keyboard open or with touch controls hidden. The keyboard button opens
-and closes the iOS keyboard and a visible draft editor immediately above it;
-the guest's rendering size stays unchanged. The accessory row provides Escape,
-Tab, left/right arrows, game backspace, Return and a close button.
-The control-transparency slider also fades all four toolbar buttons, updates
-them live and restores the saved value at launch. It does not fade the native
-keyboard or the settings panel. The pointer icon is optically centered with a
-small rightward offset, without moving its touch target.
+The AppKit adapter provides two translucent toolbar buttons: keyboard and control
+settings (gear). They remain fixed at the top center inside the safe area, including
+with a physical controller or the keyboard open. The keyboard opens a visible draft
+editor above it; the guest's rendering size stays unchanged. The accessory row
+provides Escape, Tab, left/right arrows, game backspace, Return and a close button.
+The transparency setting also fades both toolbar buttons, but not the keyboard
+or settings panel.
 
-The gamepad button enables automatic touch controls when no physical controller
-is connected, or turns them off. The custom layout provides two sticks, D-pad,
-ABXY, LB/LT/RB/RT and `+`; it hides and releases held input while the keyboard is
-open. See [touch controller details and validation](TOUCH_CONTROLLER_PROPOSAL.md).
+Controller mode is always active: touch controls appear automatically without a
+physical controller, disappear when one connects, and return on disconnection.
+The layout provides two sticks, D-pad, ABXY, LB/LT/RB/RT and `+`. Opening the
+keyboard hides the touch controller and releases held inputs. Touches outside
+controls always use the trackpad, including with a physical controller; there
+are no mode toggles. Old mode preferences are ignored.
+See [touch controller details](TOUCH_CONTROLLER_PROPOSAL.md).
 
-The pointer button toggles trackpad mode and appears cyan when enabled. The
-initial default is on for iPhone, off for iPad; a user's choice is saved
-locally. Switching it off restores direct touch input. Long-press the pointer
-button for a menu with left, right and middle clicks.
+The experimental touch adventure mode and bundled WolkaraTouch addon have been
+removed following reported Lua errors. The launcher moves an existing copy from
+`Interface/AddOns/WolkaraTouch` to `Interface/DisabledAddOns/WolkaraTouch-<unique ID>`
+before play. It preserves all files and other addons; WoW does not load the retired
+folder. There is no first-launch touch tutorial popup.
 
 | Finger action in trackpad mode | Mouse input |
 | --- | --- |
 | Slide one finger | Relative cursor movement; lifting/repositioning does not move the cursor. |
 | Tap once / twice | Left click / double click. |
 | Tap with two fingers | Right click. |
-| Tap with three fingers | Middle click. The pointer button's menu provides an alternative. |
+| Tap with three fingers | Middle click. |
 | Slide two fingers | Vertical or horizontal wheel scrolling, with accumulated partial steps. |
 | Hold one finger still for about half a second, then slide | Left-button drag until release. |
 | Hold two fingers still for about half a second, then slide | Right-button drag, including relative camera motion when the guest captures the mouse. |

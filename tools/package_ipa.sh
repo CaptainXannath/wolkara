@@ -16,7 +16,7 @@ export DEVELOPER_DIR=${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer
 mkdir -p logs build
 LOG=logs/ipa-$(date +%Y%m%d-%H%M%S).log
 tools/generate.sh
-# No extension: a free Apple ID cannot sign one.
+# No integrated packet-tunnel extension: Personal Teams lack that capability.
 # GENERIC: one adapter per framework, no executable.
 # Its one way to run code, chosen already.
 # By target: schemes need a destination the SDK alone lacks.

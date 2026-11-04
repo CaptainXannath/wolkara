@@ -14,7 +14,51 @@ pull request; say what you tested, on what hardware, with which execution mode
 | Heroes of Might and Magic III: Horn of the Abyss (GOG, Windows x86, with the HD mod) | HotA 1.8.1, HD mod 5.8 | iPad Pro M5, iPadOS 27 | Developer service | New games on scenario maps: adventure map, towns, battles, AI turns with up to eight players over several days, saving and loading, music and sound, mouse and keyboard. Runs through Tolkara's builds of Wine and FEX, with the HD mod's GDI renderer. | Local signing cannot run it (FEX translates the game's code while it runs). About 33 s of memory preparation per launch. A double click is not recognised (Enter opens a selected town). Light grey margins when the HD mod letterboxes the game. Saving fails if launched with the development option `--case-insensitive-files`. Performance not measured. | [`heroes3-hota`](profiles/heroes3-hota) |
 | Cyberpunk 2077 (GOG, macOS arm64) | 2.3.x (buildId 59052989568257053) | iPad Pro M5, iPadOS 27 | Developer service | Experimental software-memory mode completes all 6,540 initializers, main, GOG initialization, archives, scripts and shader caches, creates the game window, and visibly renders the opening cinematic with a Space-to-continue prompt. | Menu content and gameplay unverified. Early presentation samples are about 5 FPS, then settle near 1 FPS in the cinematic, with long pauses. Manual Space presses reach the adapter queue but have not visibly continued the game; routing 4 GiB pools to software passes the earlier Foundation allocation failure and reaches further loading. Loader and call-wrapper unwind support clears the GOG rich-presence abort on the iPad: the call reports its service error and returns, and loading continues. The merged-main run logs a main-menu presence state; visual menu and gameplay validation remain pending. Tests use a 3600-second watchdog timeout and a two-CPU query cap. See [VM investigation](docs/CYBERPUNK_VM.md) and [software-memory experiment](docs/SOFTWARE_MEMORY.md). | [`cyberpunk-2077`](profiles/cyberpunk-2077) |
 
+## External JIT prototype (2026-10-07)
+
+The isolated `WolkaraExternalJIT` target builds and installs on iPhone 16 Pro Max,
+iOS 27, as **Wolkara JIT**. Its signed app has `get-task-allow` and no integrated
+tunnel extension, Network Extension, special memory or shared Keychain
+capabilities. The existing development identity was used; **actual free Personal
+Team provisioning remains untested**.
+
+With separately built StikDebug 3.1.13, iloader 2.3.6 pairing and LocalDevVPN,
+the URL handoff prepared one 16 KiB page. After debugger detachment, our own
+sample returned `42`; rewriting our sample then returned `1337`. The log and
+the user-visible result both report PASS. The initial detach flag was briefly
+still set when the script resumed the process; the prototype now waits up to
+two seconds for confirmed detachment before its readiness decision. The final
+build was reinstalled and the device probe passed again.
+
+This is host-authored code only. No game was loaded, signed or modified, and
+the existing Wolkara game container was not written. Full-game memory capacity,
+startup duration, gameplay, cellular-only operation, reboot and free-profile
+renewal are not established by this test. Normal integrated Wolkara also still
+builds. See [setup, commands and acceptance gates](docs/EXTERNAL_JIT.md).
+
 ## Latest Wolkara gameplay report (2026-10-07)
+
+### Downloader and Mac import check (2026-10-12)
+
+A reported slow 50 GB update was a full download into staging: the normal
+Wolkara app had no active `World of Warcraft` directory. The installed Mac beta,
+1.60.1.70338, matched Blizzard's published EU build. Its 54,232,001,788 bytes of
+shared Data were copied to the empty iPhone library while Wolkara was closed.
+All 1,628 Data paths and sizes matched; after a transfer connection interruption,
+the nine incomplete files were recopied and SHA-256 checked by readback. All 56
+bundle/metadata/initial-configuration files were also SHA-256 checked, including
+the unchanged original executable. No Mac account settings were imported.
+
+The normal Wolkara target was rebuilt and updated in place with the rolling
+download scheduler described in [the launcher notes](docs/WOW_LAUNCHER.md).
+The sanitizer launcher suite passes, and the old scheduler fails the new
+blocked-range regression. The signed iOS build succeeds. All 1,684 imported game
+files retained their sizes and modification dates across app installation;
+executable and configuration hashes were unchanged. No game was launched during
+these checks. Download throughput on the physical iPhone and gameplay of this
+new client build remain unmeasured. Existing partial download staging was retained.
+
+### User-reported gameplay
 
 The developer reports **60 FPS at graphics quality 4 on an iPhone 16 Pro Max**
 in WoW Forever. Render scale, exact client build and a repeatable benchmark were
@@ -217,3 +261,14 @@ The experiment and instruction limitations are in
 An entry records what one person observed. It is not a promise that the
 application will keep working, and it says nothing about whether its publisher
 permits it: read "Online games and account risk" in the [README](README.md).
+
+## Controller-only follow-up (2026-10-07)
+
+The user confirmed that Forever starts after restoring the enrollment reference.
+They reported Lua errors with the experimental WolkaraTouch addon, so the addon
+and touch-adventure mode were withdrawn. Controller mode now stays active: the
+touch controller appears without physical hardware and hides when it connects.
+The native trackpad remains available and the first-launch touch tutorial is gone.
+Existing WolkaraTouch files are retired outside AddOns without deleting other
+addons. Settings gain saved shoulder-position swapping and a compact layout.
+Runtime validation of this revised controller layout on the iPhone is pending.

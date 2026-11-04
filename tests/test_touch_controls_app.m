@@ -199,6 +199,9 @@ static void AKFixtureInputSource(void *context) {
 }
 - (void)scene:(UIScene *)scene willConnectToSession:(UISceneSession *)session options:(UISceneConnectionOptions *)options {
     (void)session; (void)options;
+    // Ignore retired mode choices from the experimental addon build.
+    [NSUserDefaults.standardUserDefaults setBool:NO forKey:@"TKTouchGamepadEnabled"];
+    [NSUserDefaults.standardUserDefaults setBool:NO forKey:@"TKTouchTrackpadEnabled"];
     [NSApplication sharedApplication];
     self.guest = [[NSWindow alloc] initWithContentRect:((UIWindowScene *)scene).screen.bounds styleMask:0 backing:2 defer:NO];
     self.guest.contentView = [[AKInputFixtureView alloc] initWithFrame:self.guest.frame];
@@ -273,6 +276,10 @@ static void AKFixtureInputSource(void *context) {
                 assert(host.keyboardLayoutGuide.layoutFrame.size.height > 100);
                 assert(CGRectGetMaxY(controls.frame) <= CGRectGetMinY(host.keyboardLayoutGuide.layoutFrame));
                 assert(CGRectGetMinY(controls.frame) >= 0);
+                assert(controls.trackpadEnabled);
+                assert(((AKTouchGamepad *)[host valueForKey:@"_touchGamepad"]).enabled);
+                assert(!AKFindInputView(controls,@"tolkara.gamepad") && !AKFindInputView(controls,@"tolkara.trackpad"));
+                assert(controls.bounds.size.width==96);
                 CGRect toolbarFrame = controls.frame;
                 assert(fabs(CGRectGetMidX(toolbarFrame) - CGRectGetMidX(host.safeAreaLayoutGuide.layoutFrame)) < 1);
                 assert(fabs(CGRectGetMinY(toolbarFrame) - CGRectGetMinY(host.safeAreaLayoutGuide.layoutFrame) - 8) < 1);
@@ -392,7 +399,7 @@ static void AKFixtureInputSource(void *context) {
                 [input insertText:@" background result"];
                 [host layoutIfNeeded];
                 assert(CGRectEqualToRect(toolbarFrame, controls.frame));
-                [controls setGamepadVisible:NO]; [host layoutIfNeeded];
+                [host layoutIfNeeded];
                 assert(CGRectEqualToRect(toolbarFrame, controls.frame));
                 [NSTimer scheduledTimerWithTimeInterval:1 repeats:NO block:^(NSTimer *timer) {
                     (void)timer;

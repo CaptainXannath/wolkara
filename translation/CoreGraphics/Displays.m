@@ -12,7 +12,30 @@ CGError CGWarpMouseCursorPosition(CGPoint point) {
 typedef uint32_t CGDirectDisplayID;
 typedef CFDictionaryRef CGDisplayModeRef;
 typedef void (*DisplayCallback)(CGDirectDisplayID, uint32_t, void *);
-static NSDictionary *mode(void) { UIScreen *s=UIScreen.mainScreen; return @{@"width":@(s.bounds.size.width),@"height":@(s.bounds.size.height),@"pixelWidth":@(s.bounds.size.width*s.nativeScale),@"pixelHeight":@(s.bounds.size.height*s.nativeScale),@"refresh":@(s.maximumFramesPerSecond)}; }
+static NSDictionary *displayMode;
+static CGRect guestDisplayBounds(void) {
+    CGSize size;
+    return AKGetGuestDisplayGeometry(&size,NULL) ? (CGRect){CGPointZero,size} : UIScreen.mainScreen.bounds;
+}
+static NSDictionary *mode(void) {
+    CGSize size; double refresh;
+    if (!AKGetGuestDisplayGeometry(&size,&refresh)) {
+        UIScreen *screen=UIScreen.mainScreen;
+        size=screen.bounds.size; refresh=screen.maximumFramesPerSecond;
+    }
+    CGFloat scale=AKConfiguredGuestBackingScale();
+    @synchronized(UIScreen.class) {
+        // A fold, rotation or window resize need not send UIScreenModeDidChange.
+        // Validate the cache against current geometry on every query. Retained
+        // old dictionaries remain immutable snapshots, as CGDisplayMode requires.
+        if (!displayMode || [displayMode[@"width"] doubleValue]!=size.width
+            || [displayMode[@"height"] doubleValue]!=size.height
+            || [displayMode[@"refresh"] doubleValue]!=refresh)
+            displayMode=@{@"width":@(size.width),@"height":@(size.height),
+                @"pixelWidth":@(round(size.width*scale)),@"pixelHeight":@(round(size.height*scale)),@"refresh":@(refresh)};
+        return displayMode;
+    }
+}
 CGDirectDisplayID CGMainDisplayID(void) { return 1; }
 CGError CGGetActiveDisplayList(uint32_t capacity,CGDirectDisplayID *displays,uint32_t *count) {
     if (!count || (capacity && !displays)) return kCGErrorIllegalArgument;
@@ -20,11 +43,11 @@ CGError CGGetActiveDisplayList(uint32_t capacity,CGDirectDisplayID *displays,uin
 }
 // Every display there is is online, and there is one.
 CGError CGGetOnlineDisplayList(uint32_t capacity,CGDirectDisplayID *displays,uint32_t *count) { return CGGetActiveDisplayList(capacity,displays,count); }
-CGRect CGDisplayBounds(CGDirectDisplayID d) { return d==1 ? UIScreen.mainScreen.bounds : CGRectZero; }
+CGRect CGDisplayBounds(CGDirectDisplayID d) { return d==1 ? guestDisplayBounds() : CGRectZero; }
 // In millimetres, at the 132 points per inch of an iPad's screen.
 CGSize CGDisplayScreenSize(CGDirectDisplayID d) {
     if(d!=1) return CGSizeZero;
-    CGSize points=UIScreen.mainScreen.bounds.size;
+    CGSize points=guestDisplayBounds().size;
     return CGSizeMake(points.width*25.4/132.0,points.height*25.4/132.0);
 }
 double CGDisplayRotation(CGDirectDisplayID d) { (void)d; return 0; }
@@ -60,11 +83,20 @@ CGError CGDisplayRegisterReconfigurationCallback(DisplayCallback callback,void *
     if(!callback) return kCGErrorIllegalArgument;
     @synchronized(UIScreen.class) {
         if(!observers) observers=[NSMutableDictionary new]; NSString *key=callbackKey(callback,context);
-        if(!observers[key]) observers[key]=[NSNotificationCenter.defaultCenter addObserverForName:UIScreenModeDidChangeNotification object:UIScreen.mainScreen queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *n) { (void)n; callback(1,1<<4,context); }];
+        if (!observers[key]) {
+            NSMutableArray *tokens=[NSMutableArray new];
+            for (NSString *name in @[UIScreenModeDidChangeNotification,@"AKGuestDisplayDidChange"])
+                [tokens addObject:[NSNotificationCenter.defaultCenter addObserverForName:name object:nil
+                    queue:NSOperationQueue.mainQueue usingBlock:^(__unused NSNotification *n) {
+                    @synchronized(UIScreen.class) { displayMode=nil; }
+                    callback(1,(1<<4)|(1<<12),context);
+                }]];
+            observers[key]=tokens;
+        }
     }
     return kCGErrorSuccess;
 }
 CGError CGDisplayRemoveReconfigurationCallback(DisplayCallback callback,void *context) {
-    @synchronized(UIScreen.class) { NSString *key=callbackKey(callback,context); id observer=observers[key]; if(observer) [NSNotificationCenter.defaultCenter removeObserver:observer]; [observers removeObjectForKey:key]; }
+    @synchronized(UIScreen.class) { NSString *key=callbackKey(callback,context); NSArray *tokens=observers[key]; for (id token in tokens) [NSNotificationCenter.defaultCenter removeObserver:token]; [observers removeObjectForKey:key]; }
     return kCGErrorSuccess;
 }

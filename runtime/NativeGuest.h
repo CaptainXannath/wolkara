@@ -42,3 +42,5 @@ bool ng_use_external_authorization(void);
 bool ng_reserve_arena(FILE *log);
 // Whether an arena is already prepared for the launch.
 bool ng_arena_reserved(void);
+// Read only, after the preparation worker finishes: mapping plus detachment.
+bool ng_external_arena_ready(void);
