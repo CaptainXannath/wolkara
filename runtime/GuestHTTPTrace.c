@@ -12,8 +12,32 @@ static bool equal(const char *a, const char *b) {
 }
 static bool safe_host(const char *host, size_t length) {
     if (!length || length>=256) return false;
-    for (size_t i=0;i<length;i++)
-        if (!isalnum((unsigned char)host[i]) && !strchr(".:-[]",host[i])) return false;
+    size_t end=0;
+    while(end<length && host[end]!=':')end++;
+    if(!end || end>253)return false;
+    size_t label=0;
+    for(size_t i=0;i<end;i++) {
+        unsigned char c=(unsigned char)host[i];
+        if(c=='.') {
+            if(!label || host[i-1]=='-')return false;
+            label=0;
+        } else {
+            bool alphanumeric=(c>='a' && c<='z') || (c>='A' && c<='Z') || (c>='0' && c<='9');
+            if((!alphanumeric && c!='-') || (!label && c=='-') || ++label>63)return false;
+        }
+    }
+    if(!label || host[end-1]=='-')return false;
+    if(end<length) {
+        unsigned port=0;
+        if(end+1==length)return false;
+        for(size_t i=end+1;i<length;i++) {
+            unsigned char c=(unsigned char)host[i];
+            if(c<'0' || c>'9')return false;
+            port=port*10+(unsigned)(c-'0');
+            if(port>65535)return false;
+        }
+        if(!port)return false;
+    }
     return true;
 }
 static bool public_host(const char *host) {

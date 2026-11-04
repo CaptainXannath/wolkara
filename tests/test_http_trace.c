@@ -29,6 +29,24 @@ int main(void) {
     assert(!strcmp(safe,"https://wow.download.prd.cdn.blizzard.com/tpr/wow/data/46/c3/46c3d32d04ba185323ebea70f24ce282"));
     gh_http_url("/session/SECRET/download",NULL,true,safe,sizeof safe);assert(strstr(safe,"[redacted-path]"));assert(!strstr(safe,"SECRET"));
     gh_http_url("https://bad\nhost/SECRET",NULL,true,safe,sizeof safe);assert(strstr(safe,"[redacted-host]"));
+    static const char *invalid_authorities[]={
+        "wow.download.prd.cdn.blizzard.com:SECRET","wow.download.prd.cdn.blizzard.com:CREDENTIAL",
+        "wow.download.prd.cdn.blizzard.com:443:SECRET","wow.download.prd.cdn.blizzard.com:",
+        "wow.download.prd.cdn.blizzard.com:0","wow.download.prd.cdn.blizzard.com:65536",
+        "wow.download.prd.cdn.blizzard.com:+443","wow..blizzard.com","-wow.blizzard.com",
+        "wow-.blizzard.com","[wow.blizzard.com]"
+    };
+    for(size_t i=0;i<sizeof invalid_authorities/sizeof invalid_authorities[0];i++) {
+        char url[1024];
+        snprintf(url,sizeof url,"https://%s/tpr/wow/data/46/c3/46c3d32d04ba185323ebea70f24ce282",invalid_authorities[i]);
+        gh_http_url(url,NULL,true,safe,sizeof safe);
+        assert(strstr(safe,"[redacted-host]"));assert(!strstr(safe,"SECRET"));assert(!strstr(safe,"CREDENTIAL"));
+    }
+    gh_http_url("https://wow.download.prd.cdn.blizzard.com:443/tpr/wow/data/46/c3/46c3d32d04ba185323ebea70f24ce282",NULL,true,safe,sizeof safe);
+    assert(strstr(safe,"https://wow.download.prd.cdn.blizzard.com:443/tpr/wow/data/"));
+    reset(&trace);
+    feed(&trace,true,"GET /tpr/wow/data/46/c3/46c3d32d04ba185323ebea70f24ce282 HTTP/1.1\r\nHost: wow.download.prd.cdn.blizzard.com:CREDENTIAL\r\n\r\n",true);
+    assert(strstr(captured,"method=GET"));assert(strstr(captured,"[unavailable]"));no_secrets();
     gh_http_url("/tpr/wow/data/46/c3/46c3d32d04ba185323ebea70f24ce282",NULL,true,safe,1);assert(!safe[0]);
     gh_http_url("/tpr/wow/data/00/c3/46c3d32d04ba185323ebea70f24ce282",NULL,true,safe,sizeof safe);assert(strstr(safe,"[redacted-path]"));
 
