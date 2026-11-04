@@ -894,6 +894,39 @@ static bool tact_owner_signature(uintptr_t candidate) {
         tact_read_pointer(candidate+0x708,&sentinel) &&
         sentinel==UINT64_C(0x4d55545a);
 }
+// Bounded read-only locator: use 256-KiB VM reads when memory is
+// contiguous, then retry sparse regions at 16 KiB. No guest writes or
+// page-permission changes; all matches are checked against three sentinels.
+static uintptr_t tact_locate_owner(uintptr_t start, uintptr_t end, uint8_t *buffer) {
+    const size_t large=256*1024;
+    const size_t small=16*1024;
+    for (uintptr_t page=start; page<end; page+=large) {
+        vm_size_t got=0;
+        bool bulk=vm_read_overwrite(mach_task_self(),(vm_address_t)page,
+            (vm_size_t)large,(vm_address_t)buffer,&got)==KERN_SUCCESS && got==large;
+        size_t stride=bulk?large:small;
+        for(size_t sub=0;sub<large;sub+=stride) {
+            uintptr_t address=page+sub;
+            if(!bulk) {
+                got=0;
+                if(vm_read_overwrite(mach_task_self(),(vm_address_t)address,
+                    (vm_size_t)small,(vm_address_t)buffer,&got)!=KERN_SUCCESS ||
+                    got!=small)continue;
+            }
+            const uint8_t *bytes=bulk?buffer+sub:buffer;
+            for(size_t off=0;off+8<=stride;off+=8) {
+                uint64_t marker=0;
+                memcpy(&marker,bytes+off,8);
+                if(marker!=UINT64_C(0x4d5554584d555458))continue;
+                uintptr_t at=address+off;
+                if(at<0x6d8)continue;
+                uintptr_t candidate=at-0x6d8;
+                if(tact_owner_signature(candidate))return candidate;
+            }
+        }
+    }
+    return 0;
+}
 static void tact_watch_owner_lifetime(void) {
     @autoreleasepool {
         uintptr_t base=(uintptr_t)guest.arena.executable;
@@ -902,41 +935,23 @@ static void tact_watch_owner_lifetime(void) {
         const uintptr_t end=base+0x40a00000UL;
         const uintptr_t previousOffsets[]={
             0x402d80a0UL, 0x402c00a0UL, 0x402a80a0UL,
-            0x402740a0UL, 0x406980a0UL
+            0x402740a0UL, 0x406980a0UL, 0x406d80a0UL
         };
-        const size_t chunk=16384;
-        uint8_t *buffer=malloc(chunk);
+        uint8_t *buffer=malloc(256*1024);
         if (!buffer)return;
         uintptr_t root=0;
         unsigned tick=0;
-        // Fast-path observed allocations before falling back to the broader
-        // marker scan. This starts before the guest's main is entered and
-        // probes only mapped, read-only memory: never modify guest state.
-        LOG("[tact-lifetime] fast sampler started before guest main; five observed offsets; read-only\n");
+        uint64_t began=mach_absolute_time();
+        LOG("[tact-lifetime] fast sampler started before guest main; periodic 9-MiB VM snapshot; read-only\n");
+        // Five-ms direct probes plus a broad scan every fifth tick.
+        // A broad scan may itself take longer than 25 ms.
         for (;tick<18000 && !atomic_load(&tact_lifetime_stop) && !root;tick++) {
             for(size_t k=0;k<sizeof previousOffsets/sizeof previousOffsets[0];k++) {
                 uintptr_t candidate=base+previousOffsets[k];
-                if(tact_owner_signature(candidate)) { root=candidate;break; }
+                if(tact_owner_signature(candidate)) {root=candidate;break;}
             }
-            // Avoid scanning 9 MiB on every tick: 500 ms fallback cadence.
-            if (!root && tick && tick%100==0) {
-                for (uintptr_t page=start;page<end && !root;page+=chunk) {
-                    vm_size_t read=0;
-                    if (vm_read_overwrite(mach_task_self(),(vm_address_t)page,
-                        (vm_size_t)chunk,(vm_address_t)buffer,&read)!=KERN_SUCCESS ||
-                        read!=chunk)continue;
-                    for (size_t off=0;off+8<=chunk;off+=8) {
-                        uint64_t marker=0;memcpy(&marker,buffer+off,8);
-                        if(marker!=UINT64_C(0x4d5554584d555458))continue;
-                        uintptr_t at=page+off;
-                        if(at<0x6d8)continue;
-                        uintptr_t candidate=at-0x6d8;
-                        if(tact_owner_signature(candidate)) {
-                            root=candidate;break;
-                        }
-                    }
-                }
-            }
+            if (!root && tick%5==0)
+                root=tact_locate_owner(start,end,buffer);
             if(!root)usleep(5000);
         }
         free(buffer);
@@ -944,12 +959,16 @@ static void tact_watch_owner_lifetime(void) {
             LOG("[tact-lifetime] owner not found in fast/periodic scan (ticks=%u)\n",tick);
             return;
         }
-        LOG("[tact-lifetime] owner found offset-from-arena=%#llx after ~%u ms (fast/periodic)\n",
-            (unsigned long long)(root-base),tick*5);
+        uint64_t elapsed=mach_absolute_time()-began;
+        mach_timebase_info_data_t timebase={0};
+        uint64_t elapsedNs=0;
+        if(mach_timebase_info(&timebase)==KERN_SUCCESS && timebase.denom)
+            elapsedNs=elapsed/timebase.denom*timebase.numer;
+        LOG("[tact-lifetime] owner found offset-from-arena=%#llx elapsed=%llu ms (fast/periodic)\n",
+            (unsigned long long)(root-base),(unsigned long long)(elapsedNs/1000000));
         uintptr_t previous=0;
         bool first=true;
-        // Sample every 2 ms, log only changes and occasional heartbeats.
-        // Polling is observational and cannot rule out sub-millisecond writes.
+        // Read-only 2-ms samples; a transient sub-2-ms change could be missed.
         for(unsigned sample=0;sample<40000 && !atomic_load(&tact_lifetime_stop);sample++) {
             uintptr_t current=0;
             if (!tact_read_pointer(root+0x700,&current)) {
