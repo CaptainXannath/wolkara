@@ -321,10 +321,15 @@ int main(void) { @autoreleasepool {
     CFRunLoopObserverRef observer=CFRunLoopObserverCreateWithHandler(NULL,kCFRunLoopBeforeWaiting,true,0,
         ^(__unused CFRunLoopObserverRef o,__unused CFRunLoopActivity activity) { trackingCompleted=YES; });
     CFRunLoopAddObserver(CFRunLoopGetCurrent(),observer,(__bridge CFStringRef)UITrackingRunLoopMode);
+    // This headless fixture has no UIKit event source to keep tracking alive.
+    CFRunLoopTimerRef keepAlive=CFRunLoopTimerCreateWithHandler(NULL,CFAbsoluteTimeGetCurrent()+60,0,0,0,
+        ^(__unused CFRunLoopTimerRef timer) {});
+    CFRunLoopAddTimer(CFRunLoopGetCurrent(),keepAlive,(__bridge CFStringRef)UITrackingRunLoopMode);
     FixtureTrackingApplication *tracking=[FixtureTrackingApplication new];
     tracking.fixtureWindow=[FixtureTrackingWindow new];
     [tracking ak_pumpUIKitFor:0 returnAfterSource:NO];
     assert(trackingCompleted);
     CFRunLoopObserverInvalidate(observer); CFRelease(observer);
+    CFRunLoopTimerInvalidate(keepAlive); CFRelease(keepAlive);
     puts("display pass, frame rects, panels, tracking areas, layer placement, contents scale, window ordering, Quartz events, window numbers and modifier keys: PASS");
 } }
