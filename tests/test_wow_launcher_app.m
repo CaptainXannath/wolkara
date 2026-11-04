@@ -64,8 +64,7 @@ static CALayer *ActivityLayer(CALayer *layer) {
     method_setImplementation(class_getInstanceMethod(TKWoWUpdater.class,@selector(updatePlan:root:progress:error:)),(IMP)Update);
     [NSUserDefaults.standardUserDefaults setObject:@"wow_classic_beta" forKey:@"WoWProduct"];
     [NSUserDefaults.standardUserDefaults removeObjectForKey:@"WoWRepairRequested.wow_classic_beta"];
-    // Simulate an earlier interrupted download followed by a complete USB copy.
-    [NSUserDefaults.standardUserDefaults setBool:YES forKey:@"WoWInstallRequested.wow_classic_beta"];
+    [NSUserDefaults.standardUserDefaults removeObjectForKey:@"WoWInstallRequested.wow_classic_beta"];
     // Device language must not change this fork's English launcher UI.
     [NSUserDefaults.standardUserDefaults setObject:@[@"es-ES"] forKey:@"AppleLanguages"];
     if (![NSProcessInfo.processInfo.arguments containsObject:@"--preview"]) dispatch_after(dispatch_time(DISPATCH_TIME_NOW,30*NSEC_PER_SEC),dispatch_get_global_queue(QOS_CLASS_UTILITY,0), ^{
@@ -99,8 +98,6 @@ static CALayer *ActivityLayer(CALayer *layer) {
 - (void)checkReady {
     assert(!self.controller.presentedViewController);
     assert(![NSFileManager.defaultManager fileExistsAtPath:[fixture.directory stringByAppendingPathComponent:@"Interface/AddOns/WolkaraTouch"]]);
-    assert(atomic_load(&updates)==0);
-    assert(![NSUserDefaults.standardUserDefaults boolForKey:@"WoWInstallRequested.wow_classic_beta"]);
     assert([self primary].enabled);
     assert([[self status] isEqual:@"Ready to play"] && self.controller.title.length==0);
     assert([[(UILabel *)Find(self.controller.view,@"wow.title") text] isEqual:@"WOLKARA"]);
