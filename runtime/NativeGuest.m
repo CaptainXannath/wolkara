@@ -912,7 +912,7 @@ static void tact_watch_owner_lifetime(void) {
         // Fast-path observed allocations before falling back to the broader
         // marker scan. This starts before the guest's main is entered and
         // probes only mapped, read-only memory: never modify guest state.
-        LOG("[tact-lifetime] fast sampler started before guest main; five observed offsets; read-only\\n");
+        LOG("[tact-lifetime] fast sampler started before guest main; five observed offsets; read-only\n");
         for (;tick<18000 && !atomic_load(&tact_lifetime_stop) && !root;tick++) {
             for(size_t k=0;k<sizeof previousOffsets/sizeof previousOffsets[0];k++) {
                 uintptr_t candidate=base+previousOffsets[k];
@@ -941,10 +941,10 @@ static void tact_watch_owner_lifetime(void) {
         }
         free(buffer);
         if (!root) {
-            LOG("[tact-lifetime] owner not found in fast/periodic scan (ticks=%u)\\n",tick);
+            LOG("[tact-lifetime] owner not found in fast/periodic scan (ticks=%u)\n",tick);
             return;
         }
-        LOG("[tact-lifetime] owner found offset-from-arena=%#llx after ~%u ms (fast/periodic)\\n",
+        LOG("[tact-lifetime] owner found offset-from-arena=%#llx after ~%u ms (fast/periodic)\n",
             (unsigned long long)(root-base),tick*5);
         uintptr_t previous=0;
         bool first=true;
@@ -953,16 +953,16 @@ static void tact_watch_owner_lifetime(void) {
         for(unsigned sample=0;sample<40000 && !atomic_load(&tact_lifetime_stop);sample++) {
             uintptr_t current=0;
             if (!tact_read_pointer(root+0x700,&current)) {
-                LOG("[tact-lifetime] field unreadable after %u samples\\n",sample);
+                LOG("[tact-lifetime] field unreadable after %u samples\n",sample);
                 break;
             }
             if(first || current!=previous) {
-                LOG("[tact-lifetime] sample %u: root+0x700=%p%s\\n",
+                LOG("[tact-lifetime] sample %u: root+0x700=%p%s\n",
                     sample,(void *)current,first?" (initial observation)":" (changed)");
                 previous=current;first=false;
             }
             if (sample && sample%2500==0)
-                LOG("[tact-lifetime] sample %u: unchanged=%p\\n",sample,(void *)current);
+                LOG("[tact-lifetime] sample %u: unchanged=%p\n",sample,(void *)current);
             usleep(2000);
         }
     }
