@@ -52,6 +52,7 @@ static NativeCodeMemory local_quarantine;
 #include <stdatomic.h>
 #include <sys/stat.h>
 #include <mach/mach_time.h>
+#include <Security/SecureTransport.h>
 static atomic_bool initialization_attempted;
 static unsigned software_cpu_limit;
 // ng_startup_step: a new step restarts its clock; counting within it does not.
@@ -721,6 +722,10 @@ static char *guest_getenv(const char *);
 static bool case_insensitive_files;
 static DIR *guest_opendir(const char *);
 static struct dirent *guest_readdir(DIR *);
+static SSLContextRef tact_ssl_create_context(CFAllocatorRef,SSLProtocolSide,SSLConnectionType);
+static OSStatus tact_ssl_handshake(SSLContextRef);
+static OSStatus tact_ssl_set_io(SSLContextRef,SSLReadFunc,SSLWriteFunc);
+static OSStatus tact_ssl_set_peer_domain(SSLContextRef,const char *,size_t);
 static int guest_getaddrinfo(const char *, const char *, const struct addrinfo *, struct addrinfo **);
 static struct hostent *guest_gethostbyname(const char *);
 static int guest_socket(int, int, int);
@@ -1111,6 +1116,10 @@ static void *hook(const char *name) {
         if (trace_guest) HOOK("readdir",guest_readdir);
     }
     if (trace_guest) { HOOK("mkdir",guest_mkdir); HOOK("getenv",guest_getenv);
+        HOOK("SSLCreateContext",tact_ssl_create_context);
+        HOOK("SSLSetIOFuncs",tact_ssl_set_io);
+        HOOK("SSLSetPeerDomainName",tact_ssl_set_peer_domain);
+        HOOK("SSLHandshake",tact_ssl_handshake);
         HOOK("getaddrinfo",guest_getaddrinfo); HOOK("gethostbyname",guest_gethostbyname);
         HOOK("socket",guest_socket); HOOK("connect",guest_connect); HOOK("connectx",guest_connectx);
         HOOK("sendmsg",guest_sendmsg); HOOK("recvmsg",guest_recvmsg);
@@ -1461,6 +1470,53 @@ static char *guest_realpath_extsn(const char *path, char *resolved) { return tra
 // Trace lines carry a small per-thread number; the first tracer is the main
 // thread, which starts the guest.
 static unsigned trace_tid(void);
+// Trace SecureTransport use without replacing behavior: invoke the actual
+// host implementations, preserve errno, and never log peer domain text,
+// credentials, TLS payloads, or certificates. Distinguishes an imported
+// symbol from a transport operation actually attempted by the guest.
+static SSLContextRef tact_ssl_create_context(CFAllocatorRef allocator,
+                                                SSLProtocolSide side,
+                                                SSLConnectionType type) {
+    static SSLContextRef (*real)(CFAllocatorRef,SSLProtocolSide,SSLConnectionType);
+    if(!real)real=dlsym(RTLD_DEFAULT,"SSLCreateContext");
+    SSLContextRef ctx=real?real(allocator,side,type):NULL;
+    int saved=errno;
+    LOG("[tact-tls] SSLCreateContext side=%d type=%d -> %s\n",
+        (int)side,(int)type,ctx?"context":"NULL");
+    errno=saved;
+    return ctx;
+}
+static OSStatus tact_ssl_set_io(SSLContextRef ctx,SSLReadFunc readFn,SSLWriteFunc writeFn) {
+    static OSStatus (*real)(SSLContextRef,SSLReadFunc,SSLWriteFunc);
+    if(!real)real=dlsym(RTLD_DEFAULT,"SSLSetIOFuncs");
+    OSStatus result=real?real(ctx,readFn,writeFn):errSSLInternal;
+    int saved=errno;
+    LOG("[tact-tls] SSLSetIOFuncs -> %d callbacks=%s\n",
+        (int)result,readFn&&writeFn?"both":"missing");
+    errno=saved;
+    return result;
+}
+static OSStatus tact_ssl_set_peer_domain(SSLContextRef ctx,const char *hostname,size_t length) {
+    static OSStatus (*real)(SSLContextRef,const char *,size_t);
+    if(!real)real=dlsym(RTLD_DEFAULT,"SSLSetPeerDomainName");
+    OSStatus result=real?real(ctx,hostname,length):errSSLInternal;
+    int saved=errno;
+    LOG("[tact-tls] SSLSetPeerDomainName host-length=%zu -> %d\n",
+        length,(int)result);
+    errno=saved;
+    return result;
+}
+static OSStatus tact_ssl_handshake(SSLContextRef ctx) {
+    static OSStatus (*real)(SSLContextRef);
+    if(!real)real=dlsym(RTLD_DEFAULT,"SSLHandshake");
+    OSStatus result=real?real(ctx):errSSLInternal;
+    int saved=errno;
+    static atomic_uint seen;
+    if(result!=errSSLWouldBlock || atomic_fetch_add(&seen,1)<12)
+        LOG("[tact-tls] SSLHandshake -> %d\n",(int)result);
+    errno=saved;
+    return result;
+}
 // DNS resolution precedes a socket connection. Observe guest calls only.
 // Preserve the resolver's result and errno, including failures.
 static int guest_getaddrinfo(const char *node,const char *service,
@@ -2147,7 +2203,9 @@ static void probe_forever_cdn_metadata(void) {
               // The content E-Key was reported in Tact.log for Forever 70755.
               // Probe exactly this data object; never download or modify it.
               if ([build isEqualToString:@"1.60.1.70755"])
-                  probe_forever_cdn_head(@"46c3d32d04ba185323ebea70f24ce282",@"data"); }
+                  probe_forever_cdn_head(@"46c3d32d04ba185323ebea70f24ce282",@"data");
+                  LOG("[cdn-probe] checking exact TACT failure E-Key as patch-index object\n");
+                  probe_forever_cdn_head(@"46c3d32d04ba185323ebea70f24ce282",@"patch-index"); }
         found=YES;
     }
     if (!found) LOG("[cdn-probe] no Forever product row in metadata (rows=%lu)\n",(unsigned long)(lines.count-1));
