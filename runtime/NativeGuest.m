@@ -885,66 +885,85 @@ static void tact_probe_missing_owner(const void *caller, const void *frame) {
 // vm_read_overwrite(), then sample one word after the unique debug sentinels
 // identify the object. This can distinguish never-initialized vs. later-cleared.
 static atomic_bool tact_lifetime_stop;
+static bool tact_owner_signature(uintptr_t candidate) {
+    uintptr_t marker=0, self=0, sentinel=0;
+    if (candidate>UINTPTR_MAX-0x710)return false;
+    return tact_read_pointer(candidate+0x6d8,&marker) &&
+        marker==UINT64_C(0x4d5554584d555458) &&
+        tact_read_pointer(candidate+0x6f0,&self) && self==candidate &&
+        tact_read_pointer(candidate+0x708,&sentinel) &&
+        sentinel==UINT64_C(0x4d55545a);
+}
 static void tact_watch_owner_lifetime(void) {
     @autoreleasepool {
         uintptr_t base=(uintptr_t)guest.arena.executable;
-        if (!base || base>UINTPTR_MAX-0x40a00000UL) return;
+        if (!base || base>UINTPTR_MAX-0x40a00000UL)return;
         const uintptr_t start=base+0x40100000UL;
         const uintptr_t end=base+0x40a00000UL;
+        const uintptr_t previousOffsets[]={
+            0x402d80a0UL, 0x402c00a0UL, 0x402a80a0UL,
+            0x402740a0UL, 0x406980a0UL
+        };
         const size_t chunk=16384;
         uint8_t *buffer=malloc(chunk);
-        if (!buffer) return;
+        if (!buffer)return;
         uintptr_t root=0;
-        unsigned attempts=0;
-        LOG("[tact-lifetime] sampler started; searching near arena end, read-only\n");
-        // Bounded to 90 seconds; scan at most 9 MiB every 400 ms.
-        for (; attempts<225 && !atomic_load(&tact_lifetime_stop) && !root; attempts++) {
-            for (uintptr_t page=start;page<end;page+=chunk) {
-                vm_size_t read=0;
-                if (vm_read_overwrite(mach_task_self(),(vm_address_t)page,
-                    (vm_size_t)chunk,(vm_address_t)buffer,&read)!=KERN_SUCCESS ||
-                    read!=chunk) continue;
-                for (size_t offset=0;offset+8<=chunk;offset+=8) {
-                    uint64_t marker=0;memcpy(&marker,buffer+offset,8);
-                    if (marker!=UINT64_C(0x4d5554584d555458)) continue;
-                    uintptr_t at=page+offset;
-                    if(at<0x6d8)continue;
-                    uintptr_t candidate=at-0x6d8, self=0, sentinel=0;
-                    if (tact_read_pointer(candidate+0x6f0,&self) &&
-                        tact_read_pointer(candidate+0x708,&sentinel) &&
-                        self==candidate && sentinel==UINT64_C(0x4d55545a)) {
-                        root=candidate;break;
+        unsigned tick=0;
+        // Fast-path observed allocations before falling back to the broader
+        // marker scan. This starts before the guest's main is entered and
+        // probes only mapped, read-only memory: never modify guest state.
+        LOG("[tact-lifetime] fast sampler started before guest main; five observed offsets; read-only\\n");
+        for (;tick<18000 && !atomic_load(&tact_lifetime_stop) && !root;tick++) {
+            for(size_t k=0;k<sizeof previousOffsets/sizeof previousOffsets[0];k++) {
+                uintptr_t candidate=base+previousOffsets[k];
+                if(tact_owner_signature(candidate)) { root=candidate;break; }
+            }
+            // Avoid scanning 9 MiB on every tick: 500 ms fallback cadence.
+            if (!root && tick && tick%100==0) {
+                for (uintptr_t page=start;page<end && !root;page+=chunk) {
+                    vm_size_t read=0;
+                    if (vm_read_overwrite(mach_task_self(),(vm_address_t)page,
+                        (vm_size_t)chunk,(vm_address_t)buffer,&read)!=KERN_SUCCESS ||
+                        read!=chunk)continue;
+                    for (size_t off=0;off+8<=chunk;off+=8) {
+                        uint64_t marker=0;memcpy(&marker,buffer+off,8);
+                        if(marker!=UINT64_C(0x4d5554584d555458))continue;
+                        uintptr_t at=page+off;
+                        if(at<0x6d8)continue;
+                        uintptr_t candidate=at-0x6d8;
+                        if(tact_owner_signature(candidate)) {
+                            root=candidate;break;
+                        }
                     }
                 }
-                if(root)break;
             }
-            if (!root) usleep(400000);
+            if(!root)usleep(5000);
         }
         free(buffer);
         if (!root) {
-            LOG("[tact-lifetime] owner not found in bounded scan (%u attempts)\n",attempts);
+            LOG("[tact-lifetime] owner not found in fast/periodic scan (ticks=%u)\\n",tick);
             return;
         }
+        LOG("[tact-lifetime] owner found offset-from-arena=%#llx after ~%u ms (fast/periodic)\\n",
+            (unsigned long long)(root-base),tick*5);
         uintptr_t previous=0;
         bool first=true;
-        LOG("[tact-lifetime] owner found offset-from-arena=%#llx after %u scans\n",
-            (unsigned long long)(root-base),attempts+1);
-        // Sample the actual null-producing field; report changes only.
-        // A read-only sampler cannot prove a value never changed between samples.
-        for(unsigned tick=0;tick<8000 && !atomic_load(&tact_lifetime_stop);tick++) {
+        // Sample every 2 ms, log only changes and occasional heartbeats.
+        // Polling is observational and cannot rule out sub-millisecond writes.
+        for(unsigned sample=0;sample<40000 && !atomic_load(&tact_lifetime_stop);sample++) {
             uintptr_t current=0;
             if (!tact_read_pointer(root+0x700,&current)) {
-                LOG("[tact-lifetime] field unreadable after %u samples\n",tick);
+                LOG("[tact-lifetime] field unreadable after %u samples\\n",sample);
                 break;
             }
             if(first || current!=previous) {
-                LOG("[tact-lifetime] sample %u: root+0x700=%p%s\n",
-                    tick,(void *)current,first?" (initial observation)":" (changed)");
+                LOG("[tact-lifetime] sample %u: root+0x700=%p%s\\n",
+                    sample,(void *)current,first?" (initial observation)":" (changed)");
                 previous=current;first=false;
             }
-            if (tick && tick%1000==0)
-                LOG("[tact-lifetime] sample %u: unchanged=%p\n",tick,(void *)current);
-            usleep(10000);
+            if (sample && sample%2500==0)
+                LOG("[tact-lifetime] sample %u: unchanged=%p\\n",sample,(void *)current);
+            usleep(2000);
         }
     }
 }
