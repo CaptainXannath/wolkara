@@ -894,108 +894,108 @@ static bool tact_owner_signature(uintptr_t candidate) {
         tact_read_pointer(candidate+0x708,&sentinel) &&
         sentinel==UINT64_C(0x4d55545a);
 }
-// The owner is a host-side allocation, not reliably positioned relative to
-// the guest's executable arena. Scan bounded readable/writable VM regions,
-// checking only the observed page+0xa0 allocation alignment for the three
-// independent owner sentinels. Never change page protections or game state.
-static uintptr_t tact_locate_owner_vm_regions(uint8_t *buffer, unsigned *visited) {
-    vm_address_t address=0;
-    vm_size_t length=0;
-    unsigned regions=0;
-    uint64_t bytes=0;
-    const uint64_t maxScan=256ULL*1024*1024;
-    const uint64_t maxRegion=128ULL*1024*1024;
-    const size_t chunk=256*1024;
-    const size_t page=16384;
-    while (regions<4096 && bytes<maxScan && !atomic_load(&tact_lifetime_stop)) {
-        vm_region_basic_info_data_64_t info={0};
-        mach_msg_type_number_t count=VM_REGION_BASIC_INFO_COUNT_64;
-        mach_port_t name=MACH_PORT_NULL;
-        kern_return_t kr=vm_region_64(mach_task_self(),&address,&length,
-            VM_REGION_BASIC_INFO_64,(vm_region_info_t)&info,&count,&name);
-        if(name!=MACH_PORT_NULL)mach_port_deallocate(mach_task_self(),name);
-        if(kr!=KERN_SUCCESS || !length)break;
-        regions++;
-        uintptr_t start=(uintptr_t)address;
-        uintptr_t finish=start+(uintptr_t)length;
-        if(finish<start)break;
-        if((info.protection&VM_PROT_READ) &&
-           (info.protection&VM_PROT_WRITE) &&
-           length<=maxRegion && bytes+length<=maxScan) {
-            bytes+=length;
-            for(uintptr_t cursor=start;cursor<finish;cursor+=chunk) {
-                if(atomic_load(&tact_lifetime_stop))break;
-                size_t n=(size_t)MIN((uintptr_t)chunk,finish-cursor);
-                vm_size_t got=0;
-                if(vm_read_overwrite(mach_task_self(),(vm_address_t)cursor,
-                    (vm_size_t)n,(vm_address_t)buffer,&got)!=KERN_SUCCESS || got!=n)
-                    continue;
-                uintptr_t aligned=(cursor+page-1)&~((uintptr_t)page-1);
-                for(uintptr_t pageBase=aligned;pageBase<cursor+n;pageBase+=page) {
-                    uintptr_t candidate=pageBase+0xa0;
-                    uintptr_t markerAddress=candidate+0x6d8;
-                    if(markerAddress+8>cursor+n || markerAddress<cursor)continue;
-                    uint64_t marker=0;
-                    memcpy(&marker,buffer+(markerAddress-cursor),8);
-                    if(marker==UINT64_C(0x4d5554584d555458) &&
-                       tact_owner_signature(candidate)) {
-                        if(visited)*visited=regions;
-                        return candidate;
-                    }
-                }
+// The TACT owner has repeatedly lived near arena +1 GiB, but on some
+// launches host allocations were below the arena instead. Restrict each
+// memory pass to those two grounded address bands; a whole-process VM scan
+// previously exhausted its read budget before reaching the allocation.
+// Only read mapped pages and validate three independent owner sentinels.
+static uintptr_t tact_scan_band(uintptr_t start, uintptr_t finish, uint8_t *buffer,
+                                unsigned *successfulReads) {
+    const uintptr_t block=256*1024;
+    const uintptr_t page=16*1024;
+    if(start>=finish)return 0;
+    for(uintptr_t at=start;at<finish;at+=block) {
+        if(atomic_load(&tact_lifetime_stop))return 0;
+        vm_size_t got=0;
+        bool bulk=vm_read_overwrite(mach_task_self(),(vm_address_t)at,(vm_size_t)block,
+            (vm_address_t)buffer,&got)==KERN_SUCCESS && got==block;
+        if(bulk) {
+            if(successfulReads)(*successfulReads)++;
+            for(uintptr_t offset=0;offset<block;offset+=page) {
+                uintptr_t candidate=at+offset+0xa0;
+                const uint8_t *mark=buffer+offset+0x778;
+                uint64_t marker=0;
+                memcpy(&marker,mark,sizeof marker);
+                if(marker==UINT64_C(0x4d5554584d555458) &&
+                   tact_owner_signature(candidate))return candidate;
+            }
+        } else {
+            // Mixed-protection VM region: retry each mapped 16-KiB page.
+            for(uintptr_t offset=0;offset<block;offset+=page) {
+                uintptr_t address=at+offset;
+                got=0;
+                if(vm_read_overwrite(mach_task_self(),(vm_address_t)address,
+                    (vm_size_t)page,(vm_address_t)buffer,&got)!=KERN_SUCCESS ||
+                    got!=page)continue;
+                if(successfulReads)(*successfulReads)++;
+                uint64_t marker=0;
+                memcpy(&marker,buffer+0x778,sizeof marker);
+                uintptr_t candidate=address+0xa0;
+                if(marker==UINT64_C(0x4d5554584d555458) &&
+                   tact_owner_signature(candidate))return candidate;
             }
         }
-        if(finish==UINTPTR_MAX)break;
-        address=(vm_address_t)finish;
     }
-    if(visited)*visited=regions;
     return 0;
 }
 static void tact_watch_owner_lifetime(void) {
     @autoreleasepool {
         uintptr_t base=(uintptr_t)guest.arena.executable;
-        if (!base || base>UINTPTR_MAX-0x40a00000UL)return;
-        const uintptr_t previousOffsets[]={
-            0x402d80a0UL,0x402c00a0UL,0x402a80a0UL,
-            0x402740a0UL,0x406980a0UL,0x406d80a0UL
+        if(!base || base<0x8000000 || base>UINTPTR_MAX-0x40b00000UL)return;
+        const uintptr_t knownOffsets[]={
+            0x402d80a0UL,0x402c00a0UL,0x402a80a0UL,0x402740a0UL,
+            0x406980a0UL,0x406d80a0UL,0x403180a0UL
         };
+        // +1 GiB offsets from past successful runs: scan 9 MiB near them.
+        const uintptr_t highStart=base+0x40100000UL;
+        const uintptr_t highEnd=base+0x40a00000UL;
+        // Some earlier launches placed the same owner about 110 MiB below
+        // the executable arena. This narrow fallback covers that case.
+        const uintptr_t lowStart=base-0x7800000UL;
+        const uintptr_t lowEnd=base-0x6000000UL;
         uint8_t *buffer=malloc(256*1024);
         if(!buffer)return;
         uintptr_t root=0;
-        unsigned tick=0;
-        unsigned regions=0;
+        unsigned tick=0, highPass=0, lowPass=0, readablePages=0;
         uint64_t began=mach_absolute_time();
-        LOG("[tact-lifetime] early sampler started; searching writable VM regions, including below arena; read-only\n");
-        // Keep the known +1-GiB fast path but also enumerate mapped writable
-        // host allocations, including addresses below the executable arena.
-        for (;tick<18000 && !atomic_load(&tact_lifetime_stop) && !root;tick++) {
-            for(size_t k=0;k<sizeof previousOffsets/sizeof previousOffsets[0];k++) {
-                uintptr_t candidate=base+previousOffsets[k];
+        LOG("[tact-lifetime] priority sampler started before guest main; bounded windows above/below arena; read-only\n");
+        for (;tick<9000 && !atomic_load(&tact_lifetime_stop) && !root;tick++) {
+            for(size_t k=0;k<sizeof knownOffsets/sizeof knownOffsets[0];k++) {
+                uintptr_t candidate=base+knownOffsets[k];
                 if(tact_owner_signature(candidate)) {root=candidate;break;}
             }
-            if(!root && tick%10==0)
-                root=tact_locate_owner_vm_regions(buffer,&regions);
-            if(!root)usleep(5000);
+            if(!root && tick%10==0) {
+                highPass++;
+                root=tact_scan_band(highStart,highEnd,buffer,&readablePages);
+            }
+            if(!root && tick%35==0) {
+                lowPass++;
+                root=tact_scan_band(lowStart,lowEnd,buffer,&readablePages);
+            }
+            if(!root && (tick==0 || tick%200==0))
+                LOG("[tact-lifetime] scan progress tick=%u above=%u below=%u readable-blocks=%u\n",
+                    tick,highPass,lowPass,readablePages);
+            if(!root)usleep(10000);
         }
         free(buffer);
         if (!root) {
-            LOG("[tact-lifetime] owner not found in fast/periodic scan (ticks=%u)\n",tick);
+            LOG("[tact-lifetime] owner not found: ticks=%u high=%u low=%u readable=%u\n",
+                tick,highPass,lowPass,readablePages);
             return;
         }
         uint64_t elapsed=mach_absolute_time()-began;
-        mach_timebase_info_data_t timebase={0};
+        mach_timebase_info_data_t tb={0};
         uint64_t elapsedNs=0;
-        if(mach_timebase_info(&timebase)==KERN_SUCCESS && timebase.denom)
-            elapsedNs=elapsed/timebase.denom*timebase.numer;
-        LOG("[tact-lifetime] owner found absolute=%p arena=%p delta=%lld elapsed=%llu ms regions=%u\n",
+        if(mach_timebase_info(&tb)==KERN_SUCCESS && tb.denom)
+            elapsedNs=elapsed/tb.denom*tb.numer;
+        LOG("[tact-lifetime] owner found absolute=%p arena=%p delta=%lld elapsed=%llu ms high=%u low=%u\n",
             (void *)root,(void *)base,(long long)((int64_t)root-(int64_t)base),
-            (unsigned long long)(elapsedNs/1000000),regions);
+            (unsigned long long)(elapsedNs/1000000),highPass,lowPass);
         uintptr_t previous=0;
         bool first=true;
-        // Read-only 2-ms samples; a transient sub-2-ms change could be missed.
-        for(unsigned sample=0;sample<40000 && !atomic_load(&tact_lifetime_stop);sample++) {
+        for(unsigned sample=0;sample<30000 && !atomic_load(&tact_lifetime_stop);sample++) {
             uintptr_t current=0;
-            if (!tact_read_pointer(root+0x700,&current)) {
+            if(!tact_read_pointer(root+0x700,&current)) {
                 LOG("[tact-lifetime] field unreadable after %u samples\n",sample);
                 break;
             }
@@ -1004,7 +1004,7 @@ static void tact_watch_owner_lifetime(void) {
                     sample,(void *)current,first?" (initial observation)":" (changed)");
                 previous=current;first=false;
             }
-            if (sample && sample%2500==0)
+            if(sample && sample%2500==0)
                 LOG("[tact-lifetime] sample %u: unchanged=%p\n",sample,(void *)current);
             usleep(2000);
         }
