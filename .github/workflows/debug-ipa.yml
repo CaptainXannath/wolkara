@@ -65,3 +65,15 @@ jobs:
           name: Wolkara-Regression-Logs
           path: logs/
           if-no-files-found: ignore
+
+  baseline-signing:
+    # Reproduce the unchanged Local Signing failures on the same runner image.
+    # Keep these checks visible; do not skip integrity assertions to get green CI.
+    runs-on: macos-26
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: 65b412d16b72f02b341016f2d1e3c7ca8551f0fc
+      - name: Test unchanged baseline signing behavior
+        run: python3 -m unittest tests.test_sign_guest_local -v
