@@ -46,11 +46,13 @@ static bool public_host(const char *host) {
     if(n>=sizeof domain)return false;
     for(size_t i=0;i<n;i++)domain[i]=(char)tolower((unsigned char)host[i]);
     domain[n]=0;
-    static const char *suffixes[]={".blizzard.com",".battle.net",".akamaihd.net",".edgesuite.net",".battle.net.cn",".battlenet.com.cn"};
-    for(size_t i=0;i<sizeof suffixes/sizeof suffixes[0];i++) {
-        size_t size=strlen(suffixes[i]);
-        if(n>size && !strcmp(domain+n-size,suffixes[i]))return true;
-    }
+    // An arbitrary subdomain can itself carry a credential. Keep only CDN
+    // authorities observed in this investigation; an unfamiliar host is
+    // still associated with the request, but its name stays redacted.
+    static const char *hosts[]={"level3.ssl.blizzard.com","level3.blizzard.com",
+        "wow.download.prd.cdn.blizzard.com"};
+    for(size_t i=0;i<sizeof hosts/sizeof hosts[0];i++)
+        if(!strcmp(domain,hosts[i]))return true;
     return false;
 }
 static bool hexpart(const char *p,size_t length) {
@@ -106,7 +108,13 @@ void gh_http_peer(GHTTPTrace *trace,const char *peer,size_t length) {
     } else snprintf(trace->peer,sizeof trace->peer,"[redacted-host]");
 }
 static void output(GHTTPTrace *trace,const char *line,GHTTPEmit emit,void *context) {
-    if (emit && trace->reports<128) {trace->reports++;emit(line,context);}
+    if (!emit) return;
+    if (trace->reports<128) {trace->reports++;emit(line,context);}
+    else if (trace->reports==128) {
+        char notice[128];trace->reports++;
+        snprintf(notice,sizeof notice,"[tact-http] connection=%" PRIu64 " text-report-limit=128 reached; later text reports omitted\n",trace->id);
+        emit(notice,context);
+    }
 }
 static void reset_stream(GHTTPStream *stream) { memset(stream,0,sizeof *stream); }
 static GHTTPPending *active(GHTTPTrace *trace) {
@@ -135,7 +143,7 @@ static void stop_stream(GHTTPTrace *trace,GHTTPStream *stream,bool outbound,cons
     if (!outbound && request && request->target_object && !stream->object_terminal) {
         object_event(trace,request,stream,GHTTP_OBJECT_ABORT,reason,NULL,0,0,0);
         stream->object_terminal=true;
-    } else if (outbound && stream->target_object && trace->object_requests<8) {
+    } else if (outbound && stream->target_object) {
         GHTTPPending pending={.id=trace->next_request+1,.target_object=true};
         snprintf(pending.method,sizeof pending.method,"%s",stream->method);
         snprintf(pending.url,sizeof pending.url,"%s",stream->target);
@@ -232,8 +240,10 @@ static void headers_done(GHTTPTrace *trace,GHTTPStream *s,bool outbound,GHTTPEmi
         unsigned tail=(trace->queue_start+trace->queue_count)%8;
         GHTTPPending *pending=&trace->queue[tail];memset(pending,0,sizeof *pending);
         pending->id=request;pending->head=s->head;pending->get=s->get;
-        pending->target_object=s->target_object && trace->object_requests<8;
-        if (pending->target_object)trace->object_requests++;
+        // The fixed queue bounds simultaneous requests. Do not permanently
+        // stop observing this E-Key after eight sequential retries: a later
+        // response may be the first complete copy or the first useful error.
+        pending->target_object=s->target_object;
         trace->queue_count++;
         // A Host header supplies the authority for origin-form requests. Its
         // validated value replaces only the explicit unavailable placeholder.

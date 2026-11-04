@@ -153,11 +153,19 @@ static void test_object_observation(void) {
     assert(observed.events[GHTTP_OBJECT_UNSUPPORTED]==1 && !observed.bytes);
     assert(!strcmp(observed.last_reason,"http2-not-observable"));no_secrets();
     reset_object(&trace);
-    for(unsigned i=0;i<10;i++) {
+    for(unsigned i=0;i<12;i++) {
         feed(&trace,true,object_request,true);feed(&trace,false,"HTTP/1.1 403 No\r\nContent-Length: 0\r\n\r\n",true);
     }
-    assert(observed.events[GHTTP_OBJECT_REQUEST]==8 && observed.events[GHTTP_OBJECT_COMPLETE]==8);
-    assert(!observed.bytes);no_secrets();
+    assert(observed.events[GHTTP_OBJECT_REQUEST]==12 && observed.events[GHTTP_OBJECT_RESPONSE]==12);
+    assert(observed.events[GHTTP_OBJECT_COMPLETE]==12 && observed.status==403);
+    // The first successful body may arrive after many rejected retries on
+    // the same keep-alive connection. It must still reach verification.
+    feed(&trace,true,object_request,true);feed(&trace,false,object_response,true);
+    feed_entity(&trace,GHTTP_TACT_ENCODED_SIZE,true);
+    assert(observed.events[GHTTP_OBJECT_REQUEST]==13 && observed.events[GHTTP_OBJECT_RESPONSE]==13);
+    assert(observed.events[GHTTP_OBJECT_COMPLETE]==13 && observed.complete_candidates==1);
+    assert(observed.request==13 && observed.status==200 && observed.bytes==GHTTP_TACT_ENCODED_SIZE);
+    no_secrets();
 }
 int main(void) {
     GHTTPTrace trace;
@@ -169,6 +177,10 @@ int main(void) {
     assert(!strcmp(safe,"https://wow.download.prd.cdn.blizzard.com/tpr/wow/data/46/c3/46c3d32d04ba185323ebea70f24ce282"));
     gh_http_url("/session/SECRET/download",NULL,true,safe,sizeof safe);assert(strstr(safe,"[redacted-path]"));assert(!strstr(safe,"SECRET"));
     gh_http_url("https://bad\nhost/SECRET",NULL,true,safe,sizeof safe);assert(strstr(safe,"[redacted-host]"));
+    gh_http_url("https://SECRET.blizzard.com" GHTTP_TACT_OBJECT_PATH,NULL,true,safe,sizeof safe);
+    assert(strstr(safe,"[redacted-host]"));assert(strstr(safe,GHTTP_TACT_OBJECT_PATH));assert(!strstr(safe,"SECRET"));
+    gh_http_url(GHTTP_TACT_OBJECT_PATH,"CREDENTIAL.battle.net",true,safe,sizeof safe);
+    assert(strstr(safe,"[unavailable]"));assert(!strstr(safe,"CREDENTIAL"));
     static const char *invalid_authorities[]={
         "wow.download.prd.cdn.blizzard.com:SECRET","wow.download.prd.cdn.blizzard.com:CREDENTIAL",
         "wow.download.prd.cdn.blizzard.com:443:SECRET","wow.download.prd.cdn.blizzard.com:",
@@ -190,6 +202,14 @@ int main(void) {
     assert(strstr(captured,"method=GET"));assert(strstr(captured,"[unavailable]"));no_secrets();
     gh_http_url("/tpr/wow/data/46/c3/46c3d32d04ba185323ebea70f24ce282",NULL,true,safe,1);assert(!safe[0]);
     gh_http_url("/tpr/wow/data/00/c3/46c3d32d04ba185323ebea70f24ce282",NULL,true,safe,sizeof safe);assert(strstr(safe,"[redacted-path]"));
+
+    reset(&trace);
+    for(unsigned i=0;i<70;i++) {
+        feed(&trace,true,"GET /x HTTP/1.1\r\nHost: level3.ssl.blizzard.com\r\n\r\n",false);
+        feed(&trace,false,"HTTP/1.1 204 No Content\r\n\r\n",false);
+    }
+    assert(occurrences("text-report-limit=128 reached")==1);
+    no_secrets();
 
     for(unsigned fragmented=0;fragmented<2;fragmented++) {
         reset(&trace);feed(&trace,true,request,fragmented);

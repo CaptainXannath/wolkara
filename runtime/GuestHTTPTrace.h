@@ -48,7 +48,7 @@ typedef struct {
     uint64_t id, next_request;
     char peer[256];
     bool tls;
-    unsigned queue_start, queue_count, reports, errors, retry_errors, object_requests;
+    unsigned queue_start, queue_count, reports, errors, retry_errors;
     bool unsupported_notified;
     GHTTPPending queue[8];
     GHTTPObjectObserve observe;

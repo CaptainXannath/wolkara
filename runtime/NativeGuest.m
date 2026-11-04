@@ -714,9 +714,14 @@ static int guest_posix_spawn(pid_t *, const char *, const posix_spawn_file_actio
 static void guest_exit(int) __attribute__((noreturn));
 static void guest_abort(void) __attribute__((noreturn));
 // Opt-in tracing (--trace-guest): the guest's failed file access, the
-// directories it creates and the environment variables it reads. Off by
-// default, and then the guest binds straight to libc for these.
+// directories it creates and the environment variables it reads. Generic
+// names are logged only after the explicit option; Forever's automatic
+// retrieval route uses the structured cache and transport observers.
 static bool trace_guest;
+// The automatic Forever route needs targeted cache and transport observation.
+// Generic filename, directory-entry and environment logs require the user's
+// explicit tracing option because arbitrary names can contain credentials.
+static bool trace_guest_explicit;
 static int guest_open(const char *, int, ...);
 static int guest_openat(int, const char *, int, ...);
 static int guest_stat(const char *, struct stat *);
@@ -791,6 +796,7 @@ static void pump_shader_wait(void) { CFRunLoopRunInMode(kCFRunLoopDefaultMode,.0
 // Addresses and frame layouts below belong only to the exact 70755 image
 // identified by the supplied device log. A version string alone is insufficient.
 static bool tact_70755_image;
+static atomic_uintptr_t tact_lifetime_candidate;
 static bool tact_file_identity(const struct stat *a,const struct stat *b) {
     return a->st_dev==b->st_dev && a->st_ino==b->st_ino && a->st_size==b->st_size &&
         a->st_mtimespec.tv_sec==b->st_mtimespec.tv_sec && a->st_mtimespec.tv_nsec==b->st_mtimespec.tv_nsec &&
@@ -972,9 +978,15 @@ static void tact_probe_missing_owner(const void *caller, const void *frame) {
     LOG("[tact-owner] saved caller x19=%p owner+0x10=%p %s owner[+0x10]+0x700=%p %s\n",
         (void *)owner,(void *)root,valid_root?"read":"unreadable",
         (void *)child,valid_child?"read":"unreadable");
+    if(valid_root) {
+        uintptr_t candidate=atomic_load(&tact_lifetime_candidate);
+        LOG("[tact-owner] crash-root=%p lifetime-signature-candidate=%p attribution=%s\n",
+            (void *)root,(void *)candidate,
+            !candidate?"candidate-not-found":candidate==root?"same-address":"different-address");
+    }
     if (valid_child) {
         uintptr_t derived=0;bool matches=gto_mutex_derived(child,0x198,&derived);
-        LOG("[tact-owner] validated chain child=%p plus=0x28+0x170 derived-mutex=%p actual-mutex=0x198 match=%s; initialization cause remains unknown\n",
+        LOG("[tact-owner] nearby field child=%p plus=0x28+0x170 derived-mutex=%p actual-mutex=0x198 arithmetic-match=%s; field-to-call dataflow unverified\n",
             (void *)child,(void *)derived,matches?"yes":"no");
     }
     // One-time read-only snapshot of selected neighboring slots in the
@@ -1095,7 +1107,7 @@ static void tact_watch_owner_lifetime(void) {
         }
         free(buffer);
         if (!root) {
-            LOG("[tact-lifetime] owner not found: ticks=%u high=%u low=%u readable=%u\n",
+            LOG("[tact-lifetime] signature candidate not found: ticks=%u high=%u low=%u readable=%u\n",
                 tick,highPass,lowPass,readablePages);
             return;
         }
@@ -1104,7 +1116,8 @@ static void tact_watch_owner_lifetime(void) {
         uint64_t elapsedNs=0;
         if(mach_timebase_info(&tb)==KERN_SUCCESS && tb.denom)
             elapsedNs=elapsed/tb.denom*tb.numer;
-        LOG("[tact-lifetime] owner found absolute=%p arena=%p delta=%lld elapsed=%llu ms high=%u low=%u\n",
+        atomic_store(&tact_lifetime_candidate,root);
+        LOG("[tact-lifetime] signature candidate found absolute=%p arena=%p delta=%lld elapsed=%llu ms high=%u low=%u\n",
             (void *)root,(void *)base,(long long)((int64_t)root-(int64_t)base),
             (unsigned long long)(elapsedNs/1000000),highPass,lowPass);
         uintptr_t previous=0;
@@ -1133,6 +1146,7 @@ static void tact_watch_owner_lifetime(void) {
 static void tact_start_owner_sampler(void) {
     if (!tact_70755_image || !tact_validate_owner_layout())return;
     atomic_store(&tact_lifetime_stop,false);
+    atomic_store(&tact_lifetime_candidate,0);
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY,0),^{
         tact_watch_owner_lifetime();
     });
@@ -1222,9 +1236,10 @@ static void *hook(const char *name) {
         HOOK("access",guest_access); HOOK("opendir",guest_opendir);
         HOOK("fopen",guest_fopen); HOOK("fopen$DARWIN_EXTSN",guest_fopen_extsn);
         HOOK("realpath",guest_realpath); HOOK("realpath$DARWIN_EXTSN",guest_realpath_extsn);
-        if (trace_guest) HOOK("readdir",guest_readdir);
+        if (trace_guest_explicit) HOOK("readdir",guest_readdir);
     }
-    if (trace_guest) { HOOK("mkdir",guest_mkdir); HOOK("getenv",guest_getenv);
+    if (trace_guest) {
+        if (trace_guest_explicit) { HOOK("mkdir",guest_mkdir); HOOK("getenv",guest_getenv); }
         HOOK("SSLCreateContext",tact_ssl_create_context);
         HOOK("SSLSetIOFuncs",tact_ssl_set_io);
         HOOK("SSLSetPeerDomainName",tact_ssl_set_peer_domain);
@@ -1328,15 +1343,19 @@ static void loggable_path(const char *path, char *out, size_t size) {
 // the tool. system and popen are not declared for iOS; the macOS guest
 // imports them, so they are found at run time.
 static int guest_system(const char *command) {
-    char shown[1024]; home_relative(command,shown,sizeof shown);
-    LOG("[native] system(%s)\n",command?shown:"NULL");
+    if(trace_guest_explicit) {
+        char shown[1024];home_relative(command,shown,sizeof shown);
+        LOG("[native] system(%s)\n",command?shown:"NULL");
+    } else LOG("[native] system(command=%s)\n",command?"redacted":"NULL");
     static int (*real_system)(const char *);
     if (!real_system) real_system=dlsym(RTLD_DEFAULT,"system");
     return real_system?real_system(command):-1;
 }
 static FILE *guest_popen(const char *command, const char *mode) {
-    char shown[1024]; home_relative(command,shown,sizeof shown);
-    LOG("[native] popen(%s)\n",command?shown:"NULL");
+    if(trace_guest_explicit) {
+        char shown[1024];home_relative(command,shown,sizeof shown);
+        LOG("[native] popen(%s)\n",command?shown:"NULL");
+    } else LOG("[native] popen(command=%s)\n",command?"redacted":"NULL");
     static FILE *(*real_popen)(const char *, const char *);
     if (!real_popen) real_popen=dlsym(RTLD_DEFAULT,"popen");
     return real_popen?real_popen(command,mode):NULL;
@@ -1402,7 +1421,7 @@ static unsigned trace_tid(void) {
 }
 // Logging must not change the errno the guest reads.
 static void trace_failure(const char *call, const char *path) {
-    if (!trace_guest) return;
+    if (!trace_guest_explicit) return;
     int code=errno;
     char shown[1024]; if (path) loggable_path(path,shown,sizeof shown);
     log_once("[native] %s(%s) failed errno=%d\n",call,path?shown:"NULL",code);
@@ -1411,12 +1430,13 @@ static void trace_failure(const char *call, const char *path) {
 // What the guest finds, not only what it misses: a depot built from a
 // directory listing differs when a file is absent, added or truncated.
 static void trace_success(const char *call, const char *path, long long size) {
-    if (!trace_guest) return;
+    if (!trace_guest_explicit) return;
     char shown[1024]; if (path) loggable_path(path,shown,sizeof shown);
     log_once("[native] [t%u] %s(%s) ok size=%lld\n",trace_tid(),call,path?shown:"NULL",size);
 }
 static struct dirent *guest_readdir(DIR *directory) {
     struct dirent *entry=readdir(directory);
+    int saved=errno;
     if (trace_guest && entry) {
         char base[PATH_MAX];
         int fd=dirfd(directory);
@@ -1425,7 +1445,7 @@ static struct dirent *guest_readdir(DIR *directory) {
             log_once("[native] [t%u] readdir(%s) -> %s type=%d\n",trace_tid(),shown,entry->d_name,(int)entry->d_type);
         }
     }
-    return entry;
+    errno=saved;return entry;
 }
 // --case-insensitive-files: the lookup's variant to retry, if any. Never for
 // creating files; Foundation's own file APIs are not covered.
@@ -1586,8 +1606,10 @@ static DIR *guest_opendir(const char *path) {
     DIR *directory=opendir(path);
     char found[PATH_MAX];
     if (!directory && case_variant(path,found,sizeof found) && (directory=opendir(found))) case_found(path,found);
+    int saved=errno;
     if (!directory) trace_failure("opendir",path);
     else trace_success("opendir",path,-1);
+    errno=saved;
     return directory;
 }
 static char *traced_realpath(char *(*real)(const char *, char *), const char *path, char *resolved) {
@@ -1619,6 +1641,7 @@ static unsigned trace_tid(void);
 // are never allocated by inspecting process memory or by retaining TLS objects.
 // The lock protects metadata, and is never held across a transport operation.
 static os_unfair_lock tact_http_lock=OS_UNFAIR_LOCK_INIT;
+enum { TACT_HTTP_CONNECTION_LIMIT=64, TACT_HTTP_OBJECT_LOG_LIMIT=256 };
 typedef struct {
     uintptr_t key;
     bool used,tls;
@@ -1626,9 +1649,12 @@ typedef struct {
     GTOCapture *capture;
     size_t observed;
     uint64_t request;
+    unsigned object_reports;
+    bool object_report_limit_notified;
 } TactHTTPConnection;
-static TactHTTPConnection tact_http_connections[64];
+static TactHTTPConnection tact_http_connections[TACT_HTTP_CONNECTION_LIMIT];
 static uint64_t tact_http_sequence;
+static bool tact_http_capacity_reported;
 static void tact_http_emit(const char *line,void *context) { (void)context;LOG("%s",line); }
 static const char *tact_http_event_name(GHTTPObjectKind kind) {
     switch(kind) {
@@ -1642,6 +1668,17 @@ static const char *tact_http_event_name(GHTTPObjectKind kind) {
     }
     return "unknown";
 }
+static bool tact_http_log_budget(TactHTTPConnection *connection,uint64_t id) {
+    if(connection->object_reports<TACT_HTTP_OBJECT_LOG_LIMIT) {
+        connection->object_reports++;return true;
+    }
+    if(!connection->object_report_limit_notified) {
+        connection->object_report_limit_notified=true;
+        LOG("[tact-object] connection=%llu event-log-limit=%u reached; later target events are processed but not logged\n",
+            (unsigned long long)id,(unsigned)TACT_HTTP_OBJECT_LOG_LIMIT);
+    }
+    return false;
+}
 static void tact_http_object(const GHTTPObjectEvent *event,void *context) {
     TactHTTPConnection *connection=context;
     if(event->kind==GHTTP_OBJECT_DATA) {
@@ -1651,49 +1688,60 @@ static void tact_http_object(const GHTTPObjectEvent *event,void *context) {
         }
         return;
     }
-    LOG("[tact-object] source=guest-http-observer connection=%llu request=%llu event=%s method=%s url=%s status=%u code=%d errno=%d bytes=%llu reason=%s\n",
-        (unsigned long long)event->connection,(unsigned long long)event->request,tact_http_event_name(event->kind),
-        event->method?:"unavailable",event->url?:"unavailable",event->status,event->code,event->error_number,
-        (unsigned long long)event->total,event->reason?:"none");
+    if(tact_http_log_budget(connection,event->connection)) {
+        LOG("[tact-object] source=guest-http-observer connection=%llu request=%llu event=%s method=%s url=%s status=%u code=%d errno=%d bytes=%llu reason=%s\n",
+            (unsigned long long)event->connection,(unsigned long long)event->request,tact_http_event_name(event->kind),
+            event->method?:"unavailable",event->url?:"unavailable",event->status,event->code,event->error_number,
+            (unsigned long long)event->total,event->reason?:"none");
+    }
     if(event->kind==GHTTP_OBJECT_RESPONSE && event->eligible) {
         gto_destroy(connection->capture);
         connection->capture=gto_create(&gto_patch_index_70755);
         connection->observed=0;connection->request=event->request;
-        if(!connection->capture)LOG("[tact-object] observer capture unavailable (allocation failed)\n");
+        if(!connection->capture && tact_http_log_budget(connection,event->connection))
+            LOG("[tact-object] observer capture unavailable (allocation failed)\n");
     }
     if(event->kind==GHTTP_OBJECT_COMPLETE || event->kind==GHTTP_OBJECT_ABORT) {
         if(connection->capture && connection->request==event->request) {
             GTOResult result={0};gto_finish(connection->capture,&result);
-            LOG("[tact-object] source=guest-http-observer request=%llu verification=%s encoded-bytes=%zu decoded-bytes=%zu encoded-verified=%d decoded-verified=%d transport-complete=%d guest-decoder=unobserved\n",
-                (unsigned long long)event->request,gto_status_name(result.status),result.observed_size,result.decoded_size,
-                result.encoded_verified,result.decoded_verified,event->kind==GHTTP_OBJECT_COMPLETE);
+            if(tact_http_log_budget(connection,event->connection))
+                LOG("[tact-object] source=guest-http-observer request=%llu verification=%s encoded-bytes=%zu decoded-bytes=%zu encoded-verified=%d decoded-verified=%d transport-complete=%d guest-decoder=unobserved\n",
+                    (unsigned long long)event->request,gto_status_name(result.status),result.observed_size,result.decoded_size,
+                    result.encoded_verified,result.decoded_verified,event->kind==GHTTP_OBJECT_COMPLETE);
             gto_destroy(connection->capture);connection->capture=NULL;
         }
     }
 }
 static void tact_http_open(uintptr_t key,bool tls) {
     if(!trace_guest)return;
+    bool report_capacity=false;
     os_unfair_lock_lock(&tact_http_lock);
-    size_t slot=64;
-    for(size_t i=0;i<64;i++) {
+    size_t slot=TACT_HTTP_CONNECTION_LIMIT;
+    for(size_t i=0;i<TACT_HTTP_CONNECTION_LIMIT;i++) {
         if(tact_http_connections[i].used && tact_http_connections[i].key==key && tact_http_connections[i].tls==tls) {slot=i;break;}
-        if(!tact_http_connections[i].used && slot==64)slot=i;
+        if(!tact_http_connections[i].used && slot==TACT_HTTP_CONNECTION_LIMIT)slot=i;
     }
-    if(slot<64) {
+    if(slot<TACT_HTTP_CONNECTION_LIMIT) {
         if(tact_http_connections[slot].used)
             gh_http_finish(&tact_http_connections[slot].trace,"transport-reused",tact_http_emit,NULL);
         gto_destroy(tact_http_connections[slot].capture);tact_http_connections[slot].capture=NULL;
         tact_http_connections[slot].key=key;tact_http_connections[slot].tls=tls;tact_http_connections[slot].used=true;
+        tact_http_connections[slot].object_reports=0;
+        tact_http_connections[slot].object_report_limit_notified=false;
         gh_http_init(&tact_http_connections[slot].trace,++tact_http_sequence,tls);
         gh_http_observe_object(&tact_http_connections[slot].trace,tact_http_object,&tact_http_connections[slot]);
+    } else if(!tact_http_capacity_reported) {
+        tact_http_capacity_reported=true;report_capacity=true;
     }
     os_unfair_lock_unlock(&tact_http_lock);
+    if(report_capacity)LOG("[tact-http] observer connection-limit=%u reached; new transports may be unobserved\n",
+        (unsigned)TACT_HTTP_CONNECTION_LIMIT);
 }
 static void tact_http_observe(uintptr_t key,bool tls,bool outbound,const void *bytes,size_t size,
                                const char *operation,int code,int saved_errno,bool close_entry) {
     if(!trace_guest)return;
     os_unfair_lock_lock(&tact_http_lock);
-    for(size_t i=0;i<64;i++) if(tact_http_connections[i].used && tact_http_connections[i].key==key && tact_http_connections[i].tls==tls) {
+    for(size_t i=0;i<TACT_HTTP_CONNECTION_LIMIT;i++) if(tact_http_connections[i].used && tact_http_connections[i].key==key && tact_http_connections[i].tls==tls) {
         GHTTPTrace *trace=&tact_http_connections[i].trace;
         if(size)gh_http_feed(trace,outbound,bytes,size,tact_http_emit,NULL);
         if(code)gh_http_error(trace,operation,code,saved_errno,tact_http_emit,NULL);
@@ -1708,7 +1756,7 @@ static void tact_http_observe(uintptr_t key,bool tls,bool outbound,const void *b
 }
 static void tact_http_peer(SSLContextRef ctx,const char *hostname,size_t length) {
     os_unfair_lock_lock(&tact_http_lock);
-    for(size_t i=0;i<64;i++) if(tact_http_connections[i].used && tact_http_connections[i].tls && tact_http_connections[i].key==(uintptr_t)ctx) {
+    for(size_t i=0;i<TACT_HTTP_CONNECTION_LIMIT;i++) if(tact_http_connections[i].used && tact_http_connections[i].tls && tact_http_connections[i].key==(uintptr_t)ctx) {
         gh_http_peer(&tact_http_connections[i].trace,hostname,length);break;
     }
     os_unfair_lock_unlock(&tact_http_lock);
@@ -1950,23 +1998,25 @@ static int guest_connect(int fd, const struct sockaddr *address, socklen_t size)
 static int guest_getsockopt(int fd, int level, int option, void *value, socklen_t *size) {
     int result=getsockopt(fd,level,option,value,size);
     int code=errno;
+    int socket_error=-1;
+    if(!result && level==SOL_SOCKET && option==SO_ERROR && value && size && *size>=sizeof socket_error)
+        memcpy(&socket_error,value,sizeof socket_error);
     if (trace_guest)
-        log_once("[native] [t%u] getsockopt(%d,%d,%d) -> %d errno=%d value=%d\n",trace_tid(),fd,level,option,result,result?code:0,
-            value&&size&&*size>=sizeof(int)?*(int *)value:-1);
-    return result;
+        log_once("[native] [t%u] getsockopt(%d,%d,%d) -> %d errno=%d so_error=%d\n",trace_tid(),fd,level,option,result,result?code:0,socket_error);
+    errno=code;return result;
 }
 static int guest_setsockopt(int fd, int level, int option, const void *value, socklen_t size) {
     int result=setsockopt(fd,level,option,value,size);
     int code=errno;
     if (trace_guest)
         log_once("[native] [t%u] setsockopt(%d,%d,%d) -> %d errno=%d\n",trace_tid(),fd,level,option,result,result?code:0);
-    return result;
+    errno=code;return result;
 }
 static int guest_shutdown(int fd, int how) {
     int result=shutdown(fd,how);
     int code=errno;
     if (trace_guest) log_once("[native] [t%u] shutdown(%d,%d) -> %d errno=%d\n",trace_tid(),fd,how,result,result?code:0);
-    return result;
+    errno=code;return result;
 }
 // macOS answers machdep.cpu.brand_string; the iPadOS sandbox denies it with
 // EPERM. A guest that collects hardware info then holds a null where it never
@@ -2014,7 +2064,15 @@ static int guest_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, voi
         if (!result) return 0;
         errno=code;
     }
-    if (trace_guest && name) {
+    if (trace_guest && name && !trace_guest_explicit) {
+        const char *safe="[redacted-query]";
+        static const char *queries[]={"hw.packages","hw.physicalcpu","hw.logicalcpu",
+            "hw.ncpu","hw.memsize","machdep.cpu.brand_string"};
+        for(size_t i=0;i<sizeof queries/sizeof queries[0];i++)
+            if(!strcmp(name,queries[i])) {safe=queries[i];break;}
+        log_once("[native] [t%u] sysctlbyname(%s) -> %d errno=%d\n",
+            trace_tid(),safe,result,result?code:0);
+    } else if (trace_guest && name) {
         char shown[280]="";
         if (!result && oldp && oldlenp) {
             size_t n=*oldlenp;
@@ -2026,7 +2084,7 @@ static int guest_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, voi
         }
         log_once("[native] [t%u] sysctlbyname(%s) -> %d errno=%d %s\n",trace_tid(),name,result,result?code:0,shown);
     }
-    return result;
+    errno=code;return result;
 }
 static int guest_sysctl(int *name,u_int count,void *oldp,size_t *oldlenp,void *newp,size_t newlen) {
     int result=sysctl(name,count,oldp,oldlenp,newp,newlen), saved=errno;
@@ -2050,13 +2108,16 @@ static long guest_sysconf(int name) {
 }
 static int guest_uname(struct utsname *u) {
     int result=uname(u);
+    int saved=errno;
     if (trace_guest && !result) log_once("[native] [t%u] uname() -> %s %s %s\n",trace_tid(),u->sysname,u->release,u->machine);
-    return result;
+    errno=saved;return result;
 }
 static int guest_gethostname(char *name, size_t size) {
     int result=gethostname(name,size);
-    if (trace_guest && !result) log_once("[native] [t%u] gethostname() -> %s\n",trace_tid(),name);
-    return result;
+    int saved=errno;
+    if (trace_guest && !result)
+        log_once("[native] [t%u] gethostname() -> ok (value redacted)\n",trace_tid());
+    errno=saved;return result;
 }
 static int guest_poll(struct pollfd *fds, nfds_t count, int timeout) {
     int result=poll(fds,count,timeout);
@@ -2064,7 +2125,7 @@ static int guest_poll(struct pollfd *fds, nfds_t count, int timeout) {
     if (trace_guest)
         log_once("[native] [t%u] poll(%d,%dms) -> %d errno=%d revents=%#x\n",trace_tid(),(int)count,timeout,result,result<0?code:0,
             result>0?fds[0].revents:0);
-    return result;
+    errno=code;return result;
 }
 static ssize_t guest_sendto(int fd, const void *bytes, size_t length, int flags, const struct sockaddr *to, socklen_t tosize) {
     ssize_t result=sendto(fd,bytes,length,flags,to,tosize);
@@ -2728,9 +2789,9 @@ bool ng_initialize(const char *path, const char *frameworks, const char *library
     // The main branch retains the standard --trace-guest opt-in behavior.
     bool tact_70755_route=external && tact_70755_metadata && path &&
         strstr(path,"/_forever_/World of Warcraft.app/");
-    trace_guest=tact_70755_route || tact_70755_image ||
-        [NSProcessInfo.processInfo.arguments containsObject:@"--trace-guest"];
-    if (trace_guest) LOG("[native] tracing file access, socket/TLS operations and symbol resolution (70755 metadata route, exact image or --trace-guest); owner offsets require fresh file SHA-256 and live instruction validation\n");
+    trace_guest_explicit=[NSProcessInfo.processInfo.arguments containsObject:@"--trace-guest"];
+    trace_guest=tact_70755_route || tact_70755_image || trace_guest_explicit;
+    if (trace_guest) LOG("[native] tracing TACT cache, socket/TLS operations and symbol resolution (70755 metadata route, exact image or --trace-guest); generic filenames require --trace-guest; owner offsets require fresh file SHA-256 and live instruction validation\n");
     if(tact_70755_route || tact_70755_image) {
         NSString *documents=NSSearchPathForDirectoriesInDomains(NSDocumentDirectory,NSUserDomainMask,YES).firstObject;
         NSString *directory=[documents stringByAppendingPathComponent:@"World of Warcraft/Data/data"];
