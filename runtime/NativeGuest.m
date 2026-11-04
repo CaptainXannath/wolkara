@@ -1,4 +1,5 @@
 #import <Foundation/Foundation.h>
+#import <CommonCrypto/CommonDigest.h>
 #include "NativeGuest.h"
 #include "DebuggerArena.h"
 #include "HostDiagnostics.h"
@@ -10,6 +11,7 @@ static NativeCodeMemory local_quarantine;
 #include "GuestFixups.h"
 #include "GuestLink.h"
 #include "GuestPaths.h"
+#include "GuestDiagnostics.h"
 #include "GuestVMBudget.h"
 #include "GuestSoftwareVM.h"
 #include "NativeGuestPolicy.h"
@@ -21,6 +23,7 @@ static NativeCodeMemory local_quarantine;
 #include "HostExecutionProbe.h"
 #include "GuestWait.h"
 #include "GuestWaitTrace.h"
+#include "GuestHTTPTrace.h"
 #include "SignedImage.h"
 #include <dlfcn.h>
 #include <mach-o/loader.h>
@@ -726,6 +729,12 @@ static SSLContextRef tact_ssl_create_context(CFAllocatorRef,SSLProtocolSide,SSLC
 static OSStatus tact_ssl_handshake(SSLContextRef);
 static OSStatus tact_ssl_set_io(SSLContextRef,SSLReadFunc,SSLWriteFunc);
 static OSStatus tact_ssl_set_peer_domain(SSLContextRef,const char *,size_t);
+static OSStatus tact_ssl_read(SSLContextRef,void *,size_t,size_t *);
+static OSStatus tact_ssl_write(SSLContextRef,const void *,size_t,size_t *);
+static OSStatus tact_ssl_close(SSLContextRef);
+static ssize_t tact_socket_read(int,void *,size_t);
+static ssize_t tact_socket_write(int,const void *,size_t);
+static int tact_socket_close(int);
 static int guest_getaddrinfo(const char *, const char *, const struct addrinfo *, struct addrinfo **);
 static struct hostent *guest_gethostbyname(const char *);
 static int guest_socket(int, int, int);
@@ -766,6 +775,31 @@ static void pump_shader_wait(void) { CFRunLoopRunInMode(kCFRunLoopDefaultMode,.0
     unsigned tid=(trace_guest && gsv_enabled())?trace_tid():0; \
     GWWaitRecord previous=gwt_begin(tid,name,address); \
     int result=(expression); int code=errno; gwt_end(tid,previous); errno=code; return result
+// Addresses and frame layouts below belong only to the exact 70755 image
+// identified by the supplied device log. A version string alone is insufficient.
+static bool tact_70755_image;
+static bool tact_known_image(const char *path) {
+    if (!path || !strstr(path,"/_forever_/")) return false;
+    NSData *data=[NSData dataWithContentsOfFile:@(path) options:NSDataReadingMappedIfSafe error:NULL];
+    if (!data || data.length>UINT32_MAX) return false;
+    unsigned char digest[CC_SHA256_DIGEST_LENGTH];
+    CC_SHA256(data.bytes,(CC_LONG)data.length,digest);
+    static const unsigned char expected[]={
+        0x29,0xb5,0xe1,0x06,0xf5,0xff,0x89,0xa9,0x1b,0x7e,0x1b,0xec,0x0d,0x47,0x5d,0xc8,
+        0xb3,0x1f,0xb6,0x84,0xf3,0x42,0x17,0xff,0xf5,0x71,0xd8,0xa0,0x88,0x85,0x19,0xd8
+    };
+    return !memcmp(digest,expected,sizeof expected);
+}
+// Prefer the writable alias: debugger-prepared executable pages may not be
+// readable. A failed kernel read skips the observation without another fault.
+static bool tact_read_instruction(uintptr_t address,uint32_t *word) {
+    uintptr_t source=0;
+    if (!ng_diagnostic_source((uintptr_t)guest.arena.executable,
+        (uintptr_t)guest.arena.writable,guest.arena.size,address,sizeof *word,&source)) return false;
+    vm_size_t got=0;
+    return vm_read_overwrite(mach_task_self(),(vm_address_t)source,sizeof *word,
+        (vm_address_t)word,&got)==KERN_SUCCESS && got==sizeof *word;
+}
 // Capture a small, read-only ARM64 instruction window around the caller.
 // One snapshot per process to avoid flooding the log or touching guest data.
 // No guest code is patched, skipped, or altered.
@@ -781,9 +815,8 @@ static void snapshot_invalid_mutex_caller(const void *callsite) {
         callsite,(unsigned long long)(pc-guest.slide));
     for (int displacement=-96; displacement<=32; displacement+=4) {
         uintptr_t address=pc+(intptr_t)displacement;
-        if (!inside((const void *)address,sizeof(uint32_t))) continue;
         uint32_t instruction=0;
-        memcpy(&instruction,(const void *)address,sizeof instruction);
+        if (!tact_read_instruction(address,&instruction)) continue;
         LOG("[sync-probe] code preferred=%#llx relative=%+d opcode=%08x%s\n",
             (unsigned long long)(address-guest.slide),displacement,
             (unsigned)instruction,displacement==0?" <return-address>":"");
@@ -791,6 +824,7 @@ static void snapshot_invalid_mutex_caller(const void *callsite) {
     // These two return addresses are from Forever 1.60.1.70755's reported
     // crashing TACT stack. Read only: inspect how the bad x0 entered the
     // current function. New game builds may move these addresses.
+    if (!tact_70755_image) return;
     const uint64_t parents[] = {0x102a0cc8cULL, 0x102a2a788ULL};
     for (size_t frame=0; frame<sizeof parents/sizeof parents[0]; frame++) {
         uintptr_t at=(uintptr_t)(parents[frame]+guest.slide);
@@ -799,9 +833,8 @@ static void snapshot_invalid_mutex_caller(const void *callsite) {
             frame+1,(unsigned long long)parents[frame]);
         for (int displacement=-160; displacement<=24; displacement+=4) {
             uintptr_t instruction_address=at+(intptr_t)displacement;
-            if (!inside((const void *)instruction_address,sizeof(uint32_t))) continue;
             uint32_t instruction=0;
-            memcpy(&instruction,(const void *)instruction_address,sizeof instruction);
+            if (!tact_read_instruction(instruction_address,&instruction)) continue;
             LOG("[sync-probe] ancestor %zu code preferred=%#llx relative=%+d opcode=%08x%s\n",
                 frame+1,(unsigned long long)(instruction_address-guest.slide),
                 displacement,(unsigned)instruction,displacement==0?" <return-address>":"");
@@ -819,9 +852,8 @@ static void snapshot_invalid_mutex_caller(const void *callsite) {
             helper+1,(unsigned long long)helper_sites[helper]);
         for (int delta=-160;delta<=160;delta+=4) {
             uintptr_t cursor=at+(intptr_t)delta;
-            if (!inside((const void *)cursor,sizeof(uint32_t))) continue;
             uint32_t opcode=0;
-            memcpy(&opcode,(const void *)cursor,sizeof opcode);
+            if (!tact_read_instruction(cursor,&opcode)) continue;
             LOG("[sync-probe] helper %zu code preferred=%#llx relative=%+d opcode=%08x%s\n",
                 helper+1,(unsigned long long)(cursor-guest.slide),
                 delta,(unsigned)opcode,delta==0?" <call-target>":"");
@@ -847,15 +879,15 @@ static bool tact_read_pointer(uintptr_t source, uintptr_t *result) {
 // The caller's x19 is the object whose +0x10 field points to the owner
 // with a +0x700 pointer. The next thunk adds 0x28 to that pointer.
 static void tact_probe_missing_owner(const void *caller, const void *frame) {
-    if ((uintptr_t)caller < guest.slide ||
+    if (!tact_70755_image || (uintptr_t)caller < guest.slide ||
         (uintptr_t)caller-guest.slide != 0x102a3aa3cULL) return;
     uintptr_t fp=(uintptr_t)frame, parent_fp=0, owner=0, root=0, child=0;
     uintptr_t stack_end=(uintptr_t)pthread_get_stackaddr_np(pthread_self());
     size_t stack_size=pthread_get_stacksize_np(pthread_self());
     uintptr_t stack_start=stack_end>=stack_size?stack_end-stack_size:0;
-    if (fp<stack_start || fp>stack_end-16 ||
+    if (stack_end<16 || stack_start>UINTPTR_MAX-16 || fp<stack_start || fp>stack_end-16 ||
         !tact_read_pointer(fp,&parent_fp) ||
-        parent_fp<stack_start+16 || parent_fp>stack_end-16) {
+        parent_fp<=fp || (parent_fp&15) || parent_fp<stack_start+16 || parent_fp>stack_end-16) {
         LOG("[tact-owner] cannot validate guest frame pointer\n"); return;
     }
     if (!tact_read_pointer(parent_fp-8,&owner)) {
@@ -1000,6 +1032,10 @@ static void tact_watch_owner_lifetime(void) {
         bool first=true;
         for(unsigned sample=0;sample<30000 && !atomic_load(&tact_lifetime_stop);sample++) {
             uintptr_t current=0;
+            if (!tact_owner_signature(root)) {
+                LOG("[tact-lifetime] owner signature changed; stopping without following recycled storage\n");
+                break;
+            }
             if(!tact_read_pointer(root+0x700,&current)) {
                 LOG("[tact-lifetime] field unreadable after %u samples\n",sample);
                 break;
@@ -1016,7 +1052,7 @@ static void tact_watch_owner_lifetime(void) {
     }
 }
 static void tact_start_owner_sampler(void) {
-    if (!guest.path || !strstr(guest.path,"/_forever_/"))return;
+    if (!tact_70755_image)return;
     atomic_store(&tact_lifetime_stop,false);
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY,0),^{
         tact_watch_owner_lifetime();
@@ -1032,29 +1068,23 @@ static void diagnose_guest_mutex(const char *operation, const void *mutex, const
         (unsigned long long)(inside((void *)at,4)?at-guest.slide:0));
 }
 static int guest_mutex_lock(pthread_mutex_t *mutex) {
+    int saved_errno=errno;
     if ((uintptr_t)mutex==0x198)
         tact_probe_missing_owner(__builtin_return_address(0),__builtin_frame_address(0));
     diagnose_guest_mutex("pthread_mutex_lock",mutex,__builtin_return_address(0));
     if ((uintptr_t)mutex < 4096)
         snapshot_invalid_mutex_caller(__builtin_return_address(0));
-    // Experimental crash-isolation guard for the invalid 0x198 pointer seen
-    // in Forever build 70707. Return an actual pthread error, not success.
-    // This does not initialize a missing game object or fix its lifetime.
-    if ((uintptr_t)mutex < 4096) {
-        LOG("[sync-probe] rejected invalid pthread_mutex_lock(%p) with EINVAL\n", mutex);
-        return EINVAL;
-    }
+    // Observations must not move the fault or change synchronization semantics.
+    errno=saved_errno;
     if (trace_guest && gsv_enabled()) {
         WAIT_TRACE_CALL("pthread_mutex_lock",mutex,pthread_mutex_lock(mutex));
     }
     return pthread_mutex_lock(mutex);
 }
 static int guest_mutex_unlock(pthread_mutex_t *mutex) {
+    int saved_errno=errno;
     diagnose_guest_mutex("pthread_mutex_unlock",mutex,__builtin_return_address(0));
-    if ((uintptr_t)mutex < 4096) {
-        LOG("[sync-probe] rejected invalid pthread_mutex_unlock(%p) with EINVAL\n", mutex);
-        return EINVAL;
-    }
+    errno=saved_errno;
     return pthread_mutex_unlock(mutex);
 }
 static int guest_cond_wait(pthread_cond_t *condition,pthread_mutex_t *mutex) {
@@ -1120,6 +1150,12 @@ static void *hook(const char *name) {
         HOOK("SSLSetIOFuncs",tact_ssl_set_io);
         HOOK("SSLSetPeerDomainName",tact_ssl_set_peer_domain);
         HOOK("SSLHandshake",tact_ssl_handshake);
+        HOOK("SSLRead",tact_ssl_read); HOOK("SSLWrite",tact_ssl_write);
+        HOOK("SSLClose",tact_ssl_close);
+        if (!gsv_enabled()) {
+            HOOK("read",tact_socket_read); HOOK("write",tact_socket_write);
+            HOOK("close",tact_socket_close);
+        }
         HOOK("getaddrinfo",guest_getaddrinfo); HOOK("gethostbyname",guest_gethostbyname);
         HOOK("socket",guest_socket); HOOK("connect",guest_connect); HOOK("connectx",guest_connectx);
         HOOK("sendmsg",guest_sendmsg); HOOK("recvmsg",guest_recvmsg);
@@ -1175,9 +1211,9 @@ static void *guest_dlsym(void *handle, const char *name) {
         else value=dlsym(handle,name);
     }
     else if (!value) value = dlsym(handle,name);
-    // Tracing reaches through the application's own libraries: what a placed
-    // image exports is wrapped so each call logs its arguments and result.
-    if (trace_guest && placed && value && inside(value,4)) value=gw_wrap(name,value);
+    // dlsym does not describe the export's type or signature. An untyped
+    // trampoline cannot safely forward data symbols, stack arguments or Darwin
+    // varargs. Log resolution and return the original address unchanged.
     LOG("[native] dlsym(%s) -> %p\n",name?name:"(null)",value); return value;
 }
 // Placed images stay for the life of the guest.
@@ -1474,21 +1510,111 @@ static unsigned trace_tid(void);
 // host implementations, preserve errno, and never log peer domain text,
 // credentials, TLS payloads, or certificates. Distinguishes an imported
 // symbol from a transport operation actually attempted by the guest.
+// A fixed, bounded bank observes guest-owned native transports only. Entries
+// are never allocated by inspecting process memory or by retaining TLS objects.
+// The lock protects metadata, and is never held across a transport operation.
+static os_unfair_lock tact_http_lock=OS_UNFAIR_LOCK_INIT;
+static struct { uintptr_t key; bool used,tls; GHTTPTrace trace; } tact_http_connections[64];
+static uint64_t tact_http_sequence;
+static void tact_http_emit(const char *line,void *context) { (void)context;LOG("%s",line); }
+static void tact_http_open(uintptr_t key,bool tls) {
+    if(!trace_guest)return;
+    os_unfair_lock_lock(&tact_http_lock);
+    size_t slot=64;
+    for(size_t i=0;i<64;i++) {
+        if(tact_http_connections[i].used && tact_http_connections[i].key==key && tact_http_connections[i].tls==tls) {slot=i;break;}
+        if(!tact_http_connections[i].used && slot==64)slot=i;
+    }
+    if(slot<64) {
+        tact_http_connections[slot].key=key;tact_http_connections[slot].tls=tls;tact_http_connections[slot].used=true;
+        gh_http_init(&tact_http_connections[slot].trace,++tact_http_sequence,tls);
+    }
+    os_unfair_lock_unlock(&tact_http_lock);
+}
+static void tact_http_observe(uintptr_t key,bool tls,bool outbound,const void *bytes,size_t size,
+                               const char *operation,int code,int saved_errno,bool close_entry) {
+    if(!trace_guest)return;
+    os_unfair_lock_lock(&tact_http_lock);
+    for(size_t i=0;i<64;i++) if(tact_http_connections[i].used && tact_http_connections[i].key==key && tact_http_connections[i].tls==tls) {
+        GHTTPTrace *trace=&tact_http_connections[i].trace;
+        if(size)gh_http_feed(trace,outbound,bytes,size,tact_http_emit,NULL);
+        if(code)gh_http_error(trace,operation,code,saved_errno,tact_http_emit,NULL);
+        if(close_entry) {memset(trace,0,sizeof *trace);tact_http_connections[i].used=false;}
+        break;
+    }
+    os_unfair_lock_unlock(&tact_http_lock);
+}
+static void tact_http_peer(SSLContextRef ctx,const char *hostname,size_t length) {
+    os_unfair_lock_lock(&tact_http_lock);
+    for(size_t i=0;i<64;i++) if(tact_http_connections[i].used && tact_http_connections[i].tls && tact_http_connections[i].key==(uintptr_t)ctx) {
+        gh_http_peer(&tact_http_connections[i].trace,hostname,length);break;
+    }
+    os_unfair_lock_unlock(&tact_http_lock);
+}
+static ssize_t tact_socket_read(int fd,void *bytes,size_t size) {
+    ssize_t result=read(fd,bytes,size);int saved=errno;
+    tact_http_observe((uintptr_t)fd,false,false,bytes,result>0?(size_t)result:0,"read",result<0?-1:0,result<0?saved:0,false);
+    errno=saved;return result;
+}
+static ssize_t tact_socket_write(int fd,const void *bytes,size_t size) {
+    ssize_t result=write(fd,bytes,size);int saved=errno;
+    tact_http_observe((uintptr_t)fd,false,true,bytes,result>0?(size_t)result:0,"write",result<0?-1:0,result<0?saved:0,false);
+    errno=saved;return result;
+}
+static int tact_socket_close(int fd) {
+    int result=close(fd),saved=errno;
+    tact_http_observe((uintptr_t)fd,false,false,NULL,0,"close",result<0?-1:0,result<0?saved:0,!result);
+    errno=saved;return result;
+}
+static OSStatus tact_ssl_read(SSLContextRef ctx,void *bytes,size_t size,size_t *processed) {
+    static OSStatus (*real)(SSLContextRef,void *,size_t,size_t *);static dispatch_once_t once;
+    int incoming=errno;
+    dispatch_once(&once,^{real=dlsym(RTLD_DEFAULT,"SSLRead");});
+    errno=incoming;
+    OSStatus result=real?real(ctx,bytes,size,processed):errSSLInternal;int saved=errno;
+    size_t count=real && processed && (!result || result==errSSLWouldBlock)?*processed:0;
+    tact_http_observe((uintptr_t)ctx,true,false,bytes,count<=size?count:0,"SSLRead",result==errSSLWouldBlock?0:result,0,false);
+    errno=saved;return result;
+}
+static OSStatus tact_ssl_write(SSLContextRef ctx,const void *bytes,size_t size,size_t *processed) {
+    static OSStatus (*real)(SSLContextRef,const void *,size_t,size_t *);static dispatch_once_t once;
+    int incoming=errno;
+    dispatch_once(&once,^{real=dlsym(RTLD_DEFAULT,"SSLWrite");});
+    errno=incoming;
+    OSStatus result=real?real(ctx,bytes,size,processed):errSSLInternal;int saved=errno;
+    size_t count=real && processed && (!result || result==errSSLWouldBlock)?*processed:0;
+    tact_http_observe((uintptr_t)ctx,true,true,bytes,count<=size?count:0,"SSLWrite",result==errSSLWouldBlock?0:result,0,false);
+    errno=saved;return result;
+}
+static OSStatus tact_ssl_close(SSLContextRef ctx) {
+    static OSStatus (*real)(SSLContextRef);static dispatch_once_t once;
+    int incoming=errno;
+    dispatch_once(&once,^{real=dlsym(RTLD_DEFAULT,"SSLClose");});
+    errno=incoming;
+    OSStatus result=real?real(ctx):errSSLInternal;int saved=errno;
+    tact_http_observe((uintptr_t)ctx,true,false,NULL,0,"SSLClose",result==errSSLWouldBlock?0:result,0,true);
+    errno=saved;return result;
+}
 static SSLContextRef tact_ssl_create_context(CFAllocatorRef allocator,
                                                 SSLProtocolSide side,
                                                 SSLConnectionType type) {
-    static SSLContextRef (*real)(CFAllocatorRef,SSLProtocolSide,SSLConnectionType);
-    if(!real)real=dlsym(RTLD_DEFAULT,"SSLCreateContext");
+    static SSLContextRef (*real)(CFAllocatorRef,SSLProtocolSide,SSLConnectionType);static dispatch_once_t once;
+    int incoming=errno;
+    dispatch_once(&once,^{real=dlsym(RTLD_DEFAULT,"SSLCreateContext");});
+    errno=incoming;
     SSLContextRef ctx=real?real(allocator,side,type):NULL;
     int saved=errno;
+    if(ctx)tact_http_open((uintptr_t)ctx,true);
     LOG("[tact-tls] SSLCreateContext side=%d type=%d -> %s\n",
         (int)side,(int)type,ctx?"context":"NULL");
     errno=saved;
     return ctx;
 }
 static OSStatus tact_ssl_set_io(SSLContextRef ctx,SSLReadFunc readFn,SSLWriteFunc writeFn) {
-    static OSStatus (*real)(SSLContextRef,SSLReadFunc,SSLWriteFunc);
-    if(!real)real=dlsym(RTLD_DEFAULT,"SSLSetIOFuncs");
+    static OSStatus (*real)(SSLContextRef,SSLReadFunc,SSLWriteFunc);static dispatch_once_t once;
+    int incoming=errno;
+    dispatch_once(&once,^{real=dlsym(RTLD_DEFAULT,"SSLSetIOFuncs");});
+    errno=incoming;
     OSStatus result=real?real(ctx,readFn,writeFn):errSSLInternal;
     int saved=errno;
     LOG("[tact-tls] SSLSetIOFuncs -> %d callbacks=%s\n",
@@ -1497,23 +1623,30 @@ static OSStatus tact_ssl_set_io(SSLContextRef ctx,SSLReadFunc readFn,SSLWriteFun
     return result;
 }
 static OSStatus tact_ssl_set_peer_domain(SSLContextRef ctx,const char *hostname,size_t length) {
-    static OSStatus (*real)(SSLContextRef,const char *,size_t);
-    if(!real)real=dlsym(RTLD_DEFAULT,"SSLSetPeerDomainName");
+    static OSStatus (*real)(SSLContextRef,const char *,size_t);static dispatch_once_t once;
+    int incoming=errno;
+    dispatch_once(&once,^{real=dlsym(RTLD_DEFAULT,"SSLSetPeerDomainName");});
+    errno=incoming;
     OSStatus result=real?real(ctx,hostname,length):errSSLInternal;
     int saved=errno;
+    if(!result)tact_http_peer(ctx,hostname,length);
     LOG("[tact-tls] SSLSetPeerDomainName host-length=%zu -> %d\n",
         length,(int)result);
     errno=saved;
     return result;
 }
 static OSStatus tact_ssl_handshake(SSLContextRef ctx) {
-    static OSStatus (*real)(SSLContextRef);
-    if(!real)real=dlsym(RTLD_DEFAULT,"SSLHandshake");
+    static OSStatus (*real)(SSLContextRef);static dispatch_once_t once;
+    int incoming=errno;
+    dispatch_once(&once,^{real=dlsym(RTLD_DEFAULT,"SSLHandshake");});
+    errno=incoming;
     OSStatus result=real?real(ctx):errSSLInternal;
     int saved=errno;
     static atomic_uint seen;
     if(result!=errSSLWouldBlock || atomic_fetch_add(&seen,1)<12)
         LOG("[tact-tls] SSLHandshake -> %d\n",(int)result);
+    if(result && result!=errSSLWouldBlock)
+        tact_http_observe((uintptr_t)ctx,true,false,NULL,0,"SSLHandshake",result,0,false);
     errno=saved;
     return result;
 }
@@ -1526,9 +1659,10 @@ static int guest_getaddrinfo(const char *node,const char *service,
     const char *shown_service=service?gsv_string(service,local_service,sizeof local_service):NULL;
     int status=getaddrinfo(shown_node,shown_service,hints,result);
     int saved_errno=errno;
+    char safe_node[600];gh_http_url("/",shown_node,false,safe_node,sizeof safe_node);
+    const char *safe_service=shown_service && strspn(shown_service,"0123456789")==strlen(shown_service)?shown_service:"[redacted]";
     if(trace_guest) log_once("[native] [t%u] getaddrinfo(%s,%s) -> %d errno=%d\n",
-        trace_tid(),shown_node?shown_node:"(null)",
-        shown_service?shown_service:"(null)",status,saved_errno);
+        trace_tid(),safe_node,safe_service,status,saved_errno);
     errno=saved_errno;
     return status;
 }
@@ -1537,8 +1671,9 @@ static int guest_getaddrinfo(const char *node,const char *service,
 static struct hostent *guest_gethostbyname(const char *name) {
     struct hostent *result=gethostbyname(name);
     int saved=errno;
+    char safe_node[600];gh_http_url("/",name,false,safe_node,sizeof safe_node);
     if(trace_guest) log_once("[native] [t%u] gethostbyname(%s) -> %s errno=%d\n",
-        trace_tid(),name?name:"(null)",result?"ok":"NULL",saved);
+        trace_tid(),safe_node,result?"ok":"NULL",saved);
     errno=saved;
     return result;
 }
@@ -1547,6 +1682,12 @@ static int guest_connectx(int fd, const sa_endpoints_t *ends, sae_associd_t asso
                           unsigned int iovcnt, size_t *len, sae_connid_t *connid) {
     int result=connectx(fd,ends,assoc,flags,iov,iovcnt,len,connid);
     int saved=errno;
+    size_t remaining=!result && len?*len:0;
+    for(unsigned int i=0;i<iovcnt && iov && remaining;i++) {
+        size_t n=iov[i].iov_len<remaining?iov[i].iov_len:remaining;
+        tact_http_observe((uintptr_t)fd,false,true,iov[i].iov_base,n,"connectx",0,0,false);remaining-=n;
+    }
+    if(result)tact_http_observe((uintptr_t)fd,false,false,NULL,0,"connectx",result,saved,false);
     if(trace_guest) log_once("[native] [t%u] connectx(fd=%d,flags=%#x) -> %d errno=%d\n",
         trace_tid(),fd,flags,result,result?saved:0);
     errno=saved;
@@ -1555,6 +1696,12 @@ static int guest_connectx(int fd, const sa_endpoints_t *ends, sae_associd_t asso
 static ssize_t guest_sendmsg(int fd, const struct msghdr *msg, int flags) {
     ssize_t result=sendmsg(fd,msg,flags);
     int saved=errno;
+    size_t remaining=result>0?(size_t)result:0;
+    for(int i=0;msg && i<msg->msg_iovlen && remaining;i++) {
+        size_t n=msg->msg_iov[i].iov_len<remaining?msg->msg_iov[i].iov_len:remaining;
+        tact_http_observe((uintptr_t)fd,false,true,msg->msg_iov[i].iov_base,n,"sendmsg",0,0,false);remaining-=n;
+    }
+    if(result<0)tact_http_observe((uintptr_t)fd,false,true,NULL,0,"sendmsg",-1,saved,false);
     static atomic_uint seen;
     if(trace_guest && (result<0 || atomic_fetch_add(&seen,1)<48))
         LOG("[native] [t%u] sendmsg(fd=%d) -> %zd errno=%d\n",
@@ -1565,6 +1712,12 @@ static ssize_t guest_sendmsg(int fd, const struct msghdr *msg, int flags) {
 static ssize_t guest_recvmsg(int fd, struct msghdr *msg, int flags) {
     ssize_t result=recvmsg(fd,msg,flags);
     int saved=errno;
+    size_t remaining=result>0 && !(flags&MSG_PEEK)?(size_t)result:0;
+    for(int i=0;msg && i<msg->msg_iovlen && remaining;i++) {
+        size_t n=msg->msg_iov[i].iov_len<remaining?msg->msg_iov[i].iov_len:remaining;
+        tact_http_observe((uintptr_t)fd,false,false,msg->msg_iov[i].iov_base,n,"recvmsg",0,0,false);remaining-=n;
+    }
+    if(result<0)tact_http_observe((uintptr_t)fd,false,false,NULL,0,"recvmsg",-1,saved,false);
     static atomic_uint seen;
     if(trace_guest && (result<0 || atomic_fetch_add(&seen,1)<48))
         LOG("[native] [t%u] recvmsg(fd=%d) -> %zd errno=%d\n",
@@ -1577,15 +1730,17 @@ static ssize_t guest_recvmsg(int fd, struct msghdr *msg, int flags) {
 static int guest_socket(int domain, int type, int protocol) {
     int fd=socket(domain,type,protocol);
     int code=errno;
+    if(fd>=0 && (domain==AF_INET || domain==AF_INET6) && type==SOCK_STREAM)tact_http_open((uintptr_t)fd,false);
     if (trace_guest) {
         const char *family=domain==AF_UNIX?"AF_UNIX":domain==AF_INET?"AF_INET":domain==AF_INET6?"AF_INET6":"?";
         log_once("[native] [t%u] socket(%s,%d) -> %d errno=%d\n",trace_tid(),family,type,fd,fd<0?code:0);
     }
-    return fd;
+    errno=code;return fd;
 }
 static int guest_connect(int fd, const struct sockaddr *address, socklen_t size) {
     int result=connect(fd,address,size);
     int code=errno;
+    if(result)tact_http_observe((uintptr_t)fd,false,false,NULL,0,"connect",result,code,false);
     if (trace_guest && address) {
         char shown[1024]="?";
         if (address->sa_family==AF_UNIX && size>=sizeof(sa_family_t)) {
@@ -1598,7 +1753,7 @@ static int guest_connect(int fd, const struct sockaddr *address, socklen_t size)
         } else snprintf(shown,sizeof shown,"(family %d)",address->sa_family);
         log_once("[native] [t%u] connect(%s) -> %d errno=%d\n",trace_tid(),shown,result,result?code:0);
     }
-    return result;
+    errno=code;return result;
 }
 // What a non-blocking connect is followed by: polling and the error it ends in.
 static int guest_getsockopt(int fd, int level, int option, void *value, socklen_t *size) {
@@ -1723,14 +1878,17 @@ static int guest_poll(struct pollfd *fds, nfds_t count, int timeout) {
 static ssize_t guest_sendto(int fd, const void *bytes, size_t length, int flags, const struct sockaddr *to, socklen_t tosize) {
     ssize_t result=sendto(fd,bytes,length,flags,to,tosize);
     int code=errno;
+    tact_http_observe((uintptr_t)fd,false,true,bytes,result>0?(size_t)result:0,"sendto",result<0?-1:0,result<0?code:0,false);
     if (trace_guest) log_once("[native] [t%u] sendto(%d,%zu) -> %zd errno=%d\n",trace_tid(),fd,length,result,result<0?code:0);
-    return result;
+    errno=code;return result;
 }
 static ssize_t guest_recvfrom(int fd, void *bytes, size_t length, int flags, struct sockaddr *from, socklen_t *fromsize) {
     ssize_t result=recvfrom(fd,bytes,length,flags,from,fromsize);
     int code=errno;
+    size_t count=result>0?(size_t)result:0;if(count>length)count=length;
+    if(!(flags&MSG_PEEK))tact_http_observe((uintptr_t)fd,false,false,bytes,count,"recvfrom",result<0?-1:0,result<0?code:0,false);
     if (trace_guest) log_once("[native] [t%u] recvfrom(%d,%zu) -> %zd errno=%d\n",trace_tid(),fd,length,result,result<0?code:0);
-    return result;
+    errno=code;return result;
 }
 // A crash on the guest's own pages reports no registers; when tracing, log
 // them before the system takes its report.
@@ -2035,180 +2193,150 @@ static bool run_initializers(const GuestImage *image, uint64_t slide, const char
     }
     return true;
 }
-// One safe connectivity check, only on this experimental Forever branch.
-// The content hash is a public CDN object identifier, not a credential.
-// Use HEAD to avoid downloading the object or altering game installation.
-static void probe_forever_cdn_head(NSString *key, NSString *kind) {
-    NSCharacterSet *nonHex=[[NSCharacterSet characterSetWithCharactersInString:@"0123456789abcdefABCDEF"] invertedSet];
-    if ((! [kind isEqualToString:@"config"] && ![kind isEqualToString:@"data"] &&
-         ![kind isEqualToString:@"index"] && ![kind isEqualToString:@"patch-index"]) ||
-        key.length!=32 || [key rangeOfCharacterFromSet:nonHex].location!=NSNotFound) {
-        LOG("[cdn-probe] HEAD skipped: invalid build-key hash format\n"); return;
-    }
-    NSString *remoteKind=[kind isEqualToString:@"patch-index"]?@"patch":([kind isEqualToString:@"index"]?@"data":kind);
-    NSString *object=([kind isEqualToString:@"index"] || [kind isEqualToString:@"patch-index"])?[key stringByAppendingString:@".index"]:key;
-    NSString *url=[NSString stringWithFormat:@"https://level3.ssl.blizzard.com/tpr/wow/%@/%@/%@/%@",
-        remoteKind,
-        [key substringToIndex:2],[key substringWithRange:NSMakeRange(2,2)],object];
-    NSURLSessionConfiguration *config=[NSURLSessionConfiguration ephemeralSessionConfiguration];
-    config.timeoutIntervalForRequest=5;
-    config.timeoutIntervalForResource=6;
-    config.requestCachePolicy=NSURLRequestReloadIgnoringLocalCacheData;
-    NSURLSession *session=[NSURLSession sessionWithConfiguration:config];
-    NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:[NSURL URLWithString:url]];
-    request.HTTPMethod=@"HEAD";
-    dispatch_semaphore_t finished=dispatch_semaphore_create(0);
-    __block NSInteger status=0, errorCode=0;
-    __block NSString *errorDomain=@"none";
-    NSURLSessionDataTask *task=[session dataTaskWithRequest:request completionHandler:
-        ^(NSData *data, NSURLResponse *response, NSError *error) {
-            (void)data;
-            if ([response isKindOfClass:NSHTTPURLResponse.class])
-                status=((NSHTTPURLResponse *)response).statusCode;
-            if (error) { errorDomain=error.domain; errorCode=error.code; }
-            dispatch_semaphore_signal(finished);
-        }];
-    [task resume];
-    long timedOut=dispatch_semaphore_wait(finished,dispatch_time(DISPATCH_TIME_NOW,8*NSEC_PER_SEC));
-    if (timedOut) [task cancel];
-    [session invalidateAndCancel];
-    if (timedOut) LOG("[cdn-probe] CDN HTTPS HEAD kind=%s timed out after 8 seconds\n",kind.UTF8String);
-    else LOG("[cdn-probe] CDN HTTPS HEAD kind=%s status=%ld error-domain=%s error-code=%ld\n",
-        kind.UTF8String,(long)status,errorDomain.UTF8String,(long)errorCode);
+// Read only content-addressed public metadata; no speculative HTTP probes run
+// before guest entry. A build-config "patch-index" manifest is distinct from
+// the CDN config's archive .index catalogues. Only allowlisted fields are logged.
+static bool tact_metadata_hash(NSString *key) {
+    return key.length==32 && [key rangeOfCharacterFromSet:
+        [[NSCharacterSet characterSetWithCharactersInString:@"0123456789abcdefABCDEF"] invertedSet]].location==NSNotFound;
 }
-// Inspect the installed CDN configuration read-only. The WoW TACT error
-// identifies a patch INDEX, not necessarily the same /data/ object whose
-// HEAD request succeeded. Report keys and counts, never the full manifest.
-static void probe_forever_patch_config(NSString *key) {
-    NSCharacterSet *nonHex=[[NSCharacterSet characterSetWithCharactersInString:@"0123456789abcdefABCDEF"] invertedSet];
-    if (key.length!=32 || [key rangeOfCharacterFromSet:nonHex].location!=NSNotFound) {
-        LOG("[patch-config] invalid CDN configuration key\n"); return;
-    }
+static NSArray<NSString *> *tact_metadata_words(NSString *value) {
+    return [[value componentsSeparatedByCharactersInSet:NSCharacterSet.whitespaceCharacterSet]
+        filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"length > 0"]];
+}
+static NSDictionary<NSString *,NSString *> *tact_local_config(NSString *key,NSString *label) {
+    if (!tact_metadata_hash(key)) { LOG("[tact-metadata] %s invalid configuration key\n",label.UTF8String); return nil; }
     NSString *base=[NSSearchPathForDirectoriesInDomains(NSDocumentDirectory,NSUserDomainMask,YES).firstObject
-                    stringByAppendingPathComponent:@"World of Warcraft/Data/config"];
-    NSString *relative=[NSString stringWithFormat:@"%@/%@/%@",[key substringToIndex:2],
-                         [key substringWithRange:NSMakeRange(2,2)],key];
-    NSString *path=[base stringByAppendingPathComponent:relative];
-    NSDictionary *attributes=[NSFileManager.defaultManager attributesOfItemAtPath:path error:NULL];
-    unsigned long long size=[attributes[NSFileSize] unsignedLongLongValue];
-    if (!attributes || size==0 || size>2*1024*1024) {
-        LOG("[patch-config] local CDN configuration absent or oversized bytes=%llu\n",size); return;
+        stringByAppendingPathComponent:@"World of Warcraft/Data/config"];
+    NSString *path=[base stringByAppendingPathComponent:[NSString stringWithFormat:@"%@/%@/%@",
+        [key substringToIndex:2],[key substringWithRange:NSMakeRange(2,2)],key]];
+    struct stat info;
+    if (lstat(path.fileSystemRepresentation,&info) || !S_ISREG(info.st_mode) ||
+        info.st_size<=0 || info.st_size>2*1024*1024) {
+        LOG("[tact-metadata] %s local configuration absent or invalid\n",label.UTF8String); return nil;
     }
     NSData *data=[NSData dataWithContentsOfFile:path options:0 error:NULL];
-    NSString *text=data?[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding]:nil;
-    if (!text) { LOG("[patch-config] CDN configuration could not be decoded\n"); return; }
-    NSString *target=@"46c3d32d04ba185323ebea70f24ce282";
-    BOOL present=[text rangeOfString:target options:NSCaseInsensitiveSearch].location!=NSNotFound;
-    LOG("[patch-config] CDN config bytes=%llu target-EKey-present=%s\n",size,present?"yes":"no");
-    unsigned matched=0;
-    for (NSString *raw in [text componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet]) {
-        NSRange split=[raw rangeOfString:@" = "];
-        if (split.location==NSNotFound || !split.location) continue;
-        NSString *field=[raw substringToIndex:split.location];
-        NSString *lower=field.lowercaseString;
-        if (![lower containsString:@"patch"] && ![lower containsString:@"index"] &&
-            ![lower containsString:@"archive"]) continue;
-        NSString *value=[raw substringFromIndex:NSMaxRange(split)];
-        NSArray<NSString *> *items=[[value componentsSeparatedByCharactersInSet:NSCharacterSet.whitespaceCharacterSet]
-            filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"length > 0"]];
-        if (field.length>64 || matched++>=24) continue;
-        if ([field isEqualToString:@"archives"] ||
-            [field isEqualToString:@"patch-archives"] ||
-            [field isEqualToString:@"patch-file-index"] ||
-            [field isEqualToString:@"file-index"]) {
-            NSString *indices=[[NSSearchPathForDirectoriesInDomains(NSDocumentDirectory,NSUserDomainMask,YES).firstObject
-                                stringByAppendingPathComponent:@"World of Warcraft/Data"]
-                                stringByAppendingPathComponent:@"indices"];
-            unsigned local=0,missing=0,invalid=0;
-            for (NSString *hash in items) {
-                BOOL valid=hash.length==32 &&
-                    [hash rangeOfCharacterFromSet:nonHex].location==NSNotFound;
-                if (!valid) { invalid++; continue; }
-                NSString *name=[hash stringByAppendingString:@".index"];
-                if ([NSFileManager.defaultManager fileExistsAtPath:[indices stringByAppendingPathComponent:name]]) local++;
-                else missing++;
-            }
-            LOG("[patch-index] field=%s local-present=%u local-missing=%u invalid-keys=%u\n",
-                field.UTF8String,local,missing,invalid);
-            if (items.count && ([field isEqualToString:@"archives"] ||
-                                [field isEqualToString:@"file-index"] ||
-                                [field isEqualToString:@"patch-archives"] ||
-                                [field isEqualToString:@"patch-file-index"])) {
-                // Four HEAD requests total. TACT.Net distinguishes standard
-                // data indices (/data/) from patch indices (/patch/).
-                BOOL patch=[field isEqualToString:@"patch-archives"] ||
-                           [field isEqualToString:@"patch-file-index"];
-                probe_forever_cdn_head(items.firstObject,patch?@"patch-index":@"index");
-            }
-        }
-        LOG("[patch-config] field=%s values=%lu target-EKey-in-field=%s\n",
-            field.UTF8String,(unsigned long)items.count,
-            [value rangeOfString:target options:NSCaseInsensitiveSearch].location!=NSNotFound?"yes":"no");
+    if (!data.length || data.length>2*1024*1024) return nil;
+    unsigned char digest[CC_MD5_DIGEST_LENGTH];
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    CC_MD5(data.bytes,(CC_LONG)data.length,digest);
+#pragma clang diagnostic pop
+    NSMutableString *actual=[NSMutableString stringWithCapacity:32];
+    for (unsigned i=0;i<sizeof digest;i++) [actual appendFormat:@"%02x",digest[i]];
+    if (![actual isEqualToString:key.lowercaseString]) {
+        LOG("[tact-metadata] %s local configuration checksum mismatch\n",label.UTF8String); return nil;
     }
-    LOG("[patch-config] inspected fields=%u\n",matched);
+    NSString *text=[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+    if (!text) return nil;
+    NSMutableDictionary *fields=[NSMutableDictionary new];
+    for (NSString *raw in [text componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet]) {
+        NSString *line=[raw stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+        if (!line.length || [line hasPrefix:@"#"]) continue;
+        NSRange split=[line rangeOfString:@" = "];
+        if (split.location==NSNotFound || !split.location) return nil;
+        NSString *name=[line substringToIndex:split.location];
+        if (fields[name]) return nil;
+        fields[name]=[line substringFromIndex:NSMaxRange(split)];
+    }
+    LOG("[tact-metadata] %s local configuration MD5 verified bytes=%lu\n",
+        label.UTF8String,(unsigned long)data.length);
+    return fields;
 }
-// Diagnostics only: Files on iPhone may hide the .build.info dotfile.
-// Report only public CDN routing metadata for the selected Forever product;
-// never log the build keys, CDN keys, install keys, or complete metadata file.
+static void probe_forever_build_config(NSString *key) {
+    NSDictionary *config=tact_local_config(key,@"build");
+    if (!config) return;
+    NSString *target=@"46c3d32d04ba185323ebea70f24ce282";
+    BOOL matched=NO;
+    for (NSString *field in @[@"patch-index",@"patch",@"encoding",@"root",@"install",@"download"]) {
+        NSArray<NSString *> *items=tact_metadata_words(config[field] ?: @"");
+        NSUInteger position=0;
+        for (NSString *item in items) {
+            if ([item.lowercaseString isEqualToString:target]) {
+                LOG("[tact-metadata] target-EKey source=active-build-config field=%s token=%lu\n",
+                    field.UTF8String,(unsigned long)position);
+                matched=YES;
+            }
+            position++;
+        }
+        if ([field isEqualToString:@"patch-index"] && items.count==2 &&
+            tact_metadata_hash(items[0]) && tact_metadata_hash(items[1])) {
+            // These are public content identifiers, not authorization keys.
+            LOG("[tact-metadata] patch-index manifest ckey=%s ekey=%s resource=encoded-data-object (not archive .index)\n",
+                items[0].UTF8String,items[1].UTF8String);
+            NSArray<NSString *> *sizes=tact_metadata_words(config[@"patch-index-size"] ?: @"");
+            NSCharacterSet *nonDigit=[[NSCharacterSet decimalDigitCharacterSet] invertedSet];
+            if (sizes.count==2 && [sizes[0] length]<=10 && [sizes[1] length]<=10 &&
+                [sizes[0] rangeOfCharacterFromSet:nonDigit].location==NSNotFound &&
+                [sizes[1] rangeOfCharacterFromSet:nonDigit].location==NSNotFound)
+                LOG("[tact-metadata] patch-index declared decoded-bytes=%s encoded-bytes=%s\n",
+                    sizes[0].UTF8String,sizes[1].UTF8String);
+        }
+    }
+    if (!matched) LOG("[tact-metadata] target-EKey absent from allowlisted active build-config fields\n");
+}
+static void probe_forever_patch_config(NSString *key) {
+    NSDictionary *config=tact_local_config(key,@"CDN");
+    if (!config) return;
+    NSString *indices=[NSSearchPathForDirectoriesInDomains(NSDocumentDirectory,NSUserDomainMask,YES).firstObject
+        stringByAppendingPathComponent:@"World of Warcraft/Data/indices"];
+    for (NSString *field in @[@"archives",@"patch-archives",@"file-index",@"patch-file-index"]) {
+        NSArray<NSString *> *items=tact_metadata_words(config[field] ?: @"");
+        unsigned local=0,missing=0,invalid=0;
+        for (NSString *hash in items) {
+            if (!tact_metadata_hash(hash)) { invalid++; continue; }
+            NSString *path=[indices stringByAppendingPathComponent:[hash stringByAppendingString:@".index"]];
+            if ([NSFileManager.defaultManager fileExistsAtPath:path]) local++;
+            else missing++;
+        }
+        LOG("[patch-index] field=%s local-present=%u local-missing=%u invalid-keys=%u (presence only)\n",
+            field.UTF8String,local,missing,invalid);
+    }
+}
+// Inspect .build.info without exposing arbitrary columns, query strings or
+// credentials. The active build's own configuration establishes provenance.
 static void probe_forever_cdn_metadata(void) {
     NSString *documents=NSSearchPathForDirectoriesInDomains(NSDocumentDirectory,NSUserDomainMask,YES).firstObject;
-    if (!documents.length) { LOG("[cdn-probe] Documents directory unavailable\n"); return; }
-    NSString *info=[[documents stringByAppendingPathComponent:@"World of Warcraft"]
-                    stringByAppendingPathComponent:@".build.info"];
+    if (!documents.length) return;
+    NSString *info=[documents stringByAppendingPathComponent:@"World of Warcraft/.build.info"];
     NSDictionary *attributes=[NSFileManager.defaultManager attributesOfItemAtPath:info error:NULL];
     unsigned long long bytes=[attributes[NSFileSize] unsignedLongLongValue];
-    if (!attributes || bytes==0 || bytes>2*1024*1024) {
-        LOG("[cdn-probe] metadata missing or invalid size=%llu\n",bytes); return;
-    }
+    if (!bytes || bytes>2*1024*1024) { LOG("[tact-metadata] .build.info absent or oversized\n"); return; }
     NSData *data=[NSData dataWithContentsOfFile:info options:0 error:NULL];
+    if (data.length>2*1024*1024) return;
     NSString *text=data?[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding]:nil;
-    if (!text) { LOG("[cdn-probe] metadata unreadable or invalid UTF-8\n"); return; }
-    NSMutableArray<NSString *> *lines=[NSMutableArray array];
+    if (!text) return;
+    NSMutableArray<NSString *> *lines=[NSMutableArray new];
     for (NSString *raw in [text componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet]) {
         NSString *line=[raw stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
         if (line.length && ![line hasPrefix:@"#"]) [lines addObject:line];
     }
-    if (lines.count<2) { LOG("[cdn-probe] metadata has no product rows\n"); return; }
-    NSMutableArray<NSString *> *fields=[NSMutableArray array];
+    if (lines.count<2) return;
+    NSMutableArray<NSString *> *fields=[NSMutableArray new];
     for (NSString *entry in [lines[0] componentsSeparatedByString:@"|"])
         [fields addObject:[entry componentsSeparatedByString:@"!"].firstObject ?: @""];
-    NSUInteger product=[fields indexOfObject:@"Product"];
-    NSUInteger active=[fields indexOfObject:@"Active"];
-    NSUInteger version=[fields indexOfObject:@"Version"];
-    NSUInteger cdnPath=[fields indexOfObject:@"CDN Path"];
-    NSUInteger cdnHosts=[fields indexOfObject:@"CDN Hosts"];
-    NSUInteger buildKey=[fields indexOfObject:@"Build Key"];
-    NSUInteger cdnKey=[fields indexOfObject:@"CDN Key"];
-    if (product==NSNotFound || cdnPath==NSNotFound || cdnHosts==NSNotFound) {
-        LOG("[cdn-probe] required routing columns not present\n"); return;
+    if ([NSSet setWithArray:fields].count!=fields.count || [fields containsObject:@""]) {
+        LOG("[tact-metadata] duplicate or empty metadata column\n"); return;
     }
-    BOOL found=NO;
+    NSArray *required=@[@"Product",@"Active",@"Version",@"CDN Path",@"CDN Hosts",@"Build Key",@"CDN Key"];
+    for (NSString *field in required) if ([fields indexOfObject:field]==NSNotFound) return;
+    NSUInteger product=[fields indexOfObject:@"Product"],active=[fields indexOfObject:@"Active"];
+    NSUInteger buildKey=[fields indexOfObject:@"Build Key"],cdnKey=[fields indexOfObject:@"CDN Key"];
+    NSUInteger matches=0;
+    NSArray<NSString *> *selected=nil;
     for (NSUInteger i=1;i<lines.count;i++) {
         NSArray<NSString *> *values=[lines[i] componentsSeparatedByString:@"|"];
-        if (values.count!=fields.count || ![values[product] isEqualToString:@"wowf"]) continue;
-        NSString *host=values[cdnHosts], *route=values[cdnPath];
-        NSString *build=version!=NSNotFound?values[version]:@"(unknown)";
-        NSString *isActive=active!=NSNotFound?values[active]:@"(unknown)";
-        // Bound what a malformed file can contribute to a diagnostic log.
-        if (host.length>512 || route.length>256 || build.length>128) {
-            LOG("[cdn-probe] routing metadata fields exceed safe display length\n"); return;
-        }
-        LOG("[cdn-probe] product=wowf active=%s version=%s cdn_path=%s cdn_hosts=%s\n",
-            isActive.UTF8String,build.UTF8String,route.UTF8String,host.UTF8String);
-        if ([isActive isEqualToString:@"1"] && cdnKey!=NSNotFound)
-            probe_forever_patch_config(values[cdnKey]);
-        if ([isActive isEqualToString:@"1"] && [host isEqualToString:@"level3.ssl.blizzard.com"] &&
-            [route isEqualToString:@"tpr/wow"] && buildKey!=NSNotFound)
-            { probe_forever_cdn_head(values[buildKey],@"config");
-              // The content E-Key was reported in Tact.log for Forever 70755.
-              // Probe exactly this data object; never download or modify it.
-              if ([build isEqualToString:@"1.60.1.70755"])
-                  probe_forever_cdn_head(@"46c3d32d04ba185323ebea70f24ce282",@"data");
-                  LOG("[cdn-probe] checking exact TACT failure E-Key as patch-index object\n");
-                  probe_forever_cdn_head(@"46c3d32d04ba185323ebea70f24ce282",@"patch-index"); }
-        found=YES;
+        if (values.count!=fields.count || ![values[product] isEqualToString:@"wowf"] ||
+            ![values[active] isEqualToString:@"1"]) continue;
+        selected=values; matches++;
     }
-    if (!found) LOG("[cdn-probe] no Forever product row in metadata (rows=%lu)\n",(unsigned long)(lines.count-1));
+    if (matches!=1) { LOG("[tact-metadata] expected one active Forever row, found=%lu\n",(unsigned long)matches); return; }
+    NSString *build=selected[[fields indexOfObject:@"Version"]];
+    NSCharacterSet *badVersion=[[NSCharacterSet characterSetWithCharactersInString:@"0123456789."] invertedSet];
+    if (!build.length || build.length>64 || [build rangeOfCharacterFromSet:badVersion].location!=NSNotFound) return;
+    LOG("[tact-metadata] product=wowf active=1 version=%s (local metadata; no HTTP probes)\n",build.UTF8String);
+    probe_forever_build_config(selected[buildKey]);
+    probe_forever_patch_config(selected[cdnKey]);
 }
 bool ng_initialize(const char *path, const char *frameworks, const char *library_map, FILE *log, bool full_startup) {
     // Failure can leave installed Objective-C hooks and an uncertain helper.
@@ -2299,6 +2427,9 @@ bool ng_initialize(const char *path, const char *frameworks, const char *library
     external=!signed_backend && !local && (atomic_load(&use_external_authorization) ||
         [NSProcessInfo.processInfo.arguments containsObject:@"--external-authorization"]);
 #endif
+    tact_70755_image=external && tact_known_image(path);
+    LOG("[tact-owner] exact 70755 image probes=%s (SHA-256 match required)\n",
+        tact_70755_image?"enabled":"disabled");
     if (!signed_backend) {
         // Only what certainly cannot fit is refused; the rest is the device's answer.
         size_t limit=nc_launch_limit(), available=nc_available_memory();
@@ -2402,8 +2533,8 @@ bool ng_initialize(const char *path, const char *frameworks, const char *library
     // This opt-in test branch captures failed file access, successful file
     // lookup metadata, and network setup to distinguish data and host failures.
     // The main branch retains the standard --trace-guest opt-in behavior.
-    trace_guest=YES;
-    if (trace_guest) LOG("[native] tracing failed file access, created directories, getenv, sockets and the calls dlsym hands out (--trace-guest)\n");
+    trace_guest=tact_70755_image || [NSProcessInfo.processInfo.arguments containsObject:@"--trace-guest"];
+    if (trace_guest) LOG("[native] tracing file access, socket/TLS operations and symbol resolution (70755 diagnostics or --trace-guest)\n");
     if (trace_guest) {
         struct sigaction crash_registers={0};
         crash_registers.sa_sigaction=guest_crash_registers;
