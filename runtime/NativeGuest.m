@@ -894,64 +894,87 @@ static bool tact_owner_signature(uintptr_t candidate) {
         tact_read_pointer(candidate+0x708,&sentinel) &&
         sentinel==UINT64_C(0x4d55545a);
 }
-// Bounded read-only locator: use 256-KiB VM reads when memory is
-// contiguous, then retry sparse regions at 16 KiB. No guest writes or
-// page-permission changes; all matches are checked against three sentinels.
-static uintptr_t tact_locate_owner(uintptr_t start, uintptr_t end, uint8_t *buffer) {
-    const size_t large=256*1024;
-    const size_t small=16*1024;
-    for (uintptr_t page=start; page<end; page+=large) {
-        vm_size_t got=0;
-        bool bulk=vm_read_overwrite(mach_task_self(),(vm_address_t)page,
-            (vm_size_t)large,(vm_address_t)buffer,&got)==KERN_SUCCESS && got==large;
-        size_t stride=bulk?large:small;
-        for(size_t sub=0;sub<large;sub+=stride) {
-            uintptr_t address=page+sub;
-            if(!bulk) {
-                got=0;
-                if(vm_read_overwrite(mach_task_self(),(vm_address_t)address,
-                    (vm_size_t)small,(vm_address_t)buffer,&got)!=KERN_SUCCESS ||
-                    got!=small)continue;
-            }
-            const uint8_t *bytes=bulk?buffer+sub:buffer;
-            for(size_t off=0;off+8<=stride;off+=8) {
-                uint64_t marker=0;
-                memcpy(&marker,bytes+off,8);
-                if(marker!=UINT64_C(0x4d5554584d555458))continue;
-                uintptr_t at=address+off;
-                if(at<0x6d8)continue;
-                uintptr_t candidate=at-0x6d8;
-                if(tact_owner_signature(candidate))return candidate;
+// The owner is a host-side allocation, not reliably positioned relative to
+// the guest's executable arena. Scan bounded readable/writable VM regions,
+// checking only the observed page+0xa0 allocation alignment for the three
+// independent owner sentinels. Never change page protections or game state.
+static uintptr_t tact_locate_owner_vm_regions(uint8_t *buffer, unsigned *visited) {
+    vm_address_t address=0;
+    vm_size_t length=0;
+    unsigned regions=0;
+    uint64_t bytes=0;
+    const uint64_t maxScan=256ULL*1024*1024;
+    const uint64_t maxRegion=128ULL*1024*1024;
+    const size_t chunk=256*1024;
+    const size_t page=16384;
+    while (regions<4096 && bytes<maxScan && !atomic_load(&tact_lifetime_stop)) {
+        vm_region_basic_info_data_64_t info={0};
+        mach_msg_type_number_t count=VM_REGION_BASIC_INFO_COUNT_64;
+        mach_port_t name=MACH_PORT_NULL;
+        kern_return_t kr=vm_region_64(mach_task_self(),&address,&length,
+            VM_REGION_BASIC_INFO_64,(vm_region_info_t)&info,&count,&name);
+        if(name!=MACH_PORT_NULL)mach_port_deallocate(mach_task_self(),name);
+        if(kr!=KERN_SUCCESS || !length)break;
+        regions++;
+        uintptr_t start=(uintptr_t)address;
+        uintptr_t finish=start+(uintptr_t)length;
+        if(finish<start)break;
+        if((info.protection&VM_PROT_READ) &&
+           (info.protection&VM_PROT_WRITE) &&
+           length<=maxRegion && bytes+length<=maxScan) {
+            bytes+=length;
+            for(uintptr_t cursor=start;cursor<finish;cursor+=chunk) {
+                if(atomic_load(&tact_lifetime_stop))break;
+                size_t n=(size_t)MIN((uintptr_t)chunk,finish-cursor);
+                vm_size_t got=0;
+                if(vm_read_overwrite(mach_task_self(),(vm_address_t)cursor,
+                    (vm_size_t)n,(vm_address_t)buffer,&got)!=KERN_SUCCESS || got!=n)
+                    continue;
+                uintptr_t aligned=(cursor+page-1)&~((uintptr_t)page-1);
+                for(uintptr_t pageBase=aligned;pageBase<cursor+n;pageBase+=page) {
+                    uintptr_t candidate=pageBase+0xa0;
+                    uintptr_t markerAddress=candidate+0x6d8;
+                    if(markerAddress+8>cursor+n || markerAddress<cursor)continue;
+                    uint64_t marker=0;
+                    memcpy(&marker,buffer+(markerAddress-cursor),8);
+                    if(marker==UINT64_C(0x4d5554584d555458) &&
+                       tact_owner_signature(candidate)) {
+                        if(visited)*visited=regions;
+                        return candidate;
+                    }
+                }
             }
         }
+        if(finish==UINTPTR_MAX)break;
+        address=(vm_address_t)finish;
     }
+    if(visited)*visited=regions;
     return 0;
 }
 static void tact_watch_owner_lifetime(void) {
     @autoreleasepool {
         uintptr_t base=(uintptr_t)guest.arena.executable;
         if (!base || base>UINTPTR_MAX-0x40a00000UL)return;
-        const uintptr_t start=base+0x40100000UL;
-        const uintptr_t end=base+0x40a00000UL;
         const uintptr_t previousOffsets[]={
-            0x402d80a0UL, 0x402c00a0UL, 0x402a80a0UL,
-            0x402740a0UL, 0x406980a0UL, 0x406d80a0UL
+            0x402d80a0UL,0x402c00a0UL,0x402a80a0UL,
+            0x402740a0UL,0x406980a0UL,0x406d80a0UL
         };
         uint8_t *buffer=malloc(256*1024);
-        if (!buffer)return;
+        if(!buffer)return;
         uintptr_t root=0;
         unsigned tick=0;
+        unsigned regions=0;
         uint64_t began=mach_absolute_time();
-        LOG("[tact-lifetime] fast sampler started before guest main; periodic 9-MiB VM snapshot; read-only\n");
-        // Five-ms direct probes plus a broad scan every fifth tick.
-        // A broad scan may itself take longer than 25 ms.
+        LOG("[tact-lifetime] early sampler started; searching writable VM regions, including below arena; read-only\n");
+        // Keep the known +1-GiB fast path but also enumerate mapped writable
+        // host allocations, including addresses below the executable arena.
         for (;tick<18000 && !atomic_load(&tact_lifetime_stop) && !root;tick++) {
             for(size_t k=0;k<sizeof previousOffsets/sizeof previousOffsets[0];k++) {
                 uintptr_t candidate=base+previousOffsets[k];
                 if(tact_owner_signature(candidate)) {root=candidate;break;}
             }
-            if (!root && tick%5==0)
-                root=tact_locate_owner(start,end,buffer);
+            if(!root && tick%10==0)
+                root=tact_locate_owner_vm_regions(buffer,&regions);
             if(!root)usleep(5000);
         }
         free(buffer);
@@ -964,8 +987,9 @@ static void tact_watch_owner_lifetime(void) {
         uint64_t elapsedNs=0;
         if(mach_timebase_info(&timebase)==KERN_SUCCESS && timebase.denom)
             elapsedNs=elapsed/timebase.denom*timebase.numer;
-        LOG("[tact-lifetime] owner found offset-from-arena=%#llx elapsed=%llu ms (fast/periodic)\n",
-            (unsigned long long)(root-base),(unsigned long long)(elapsedNs/1000000));
+        LOG("[tact-lifetime] owner found absolute=%p arena=%p delta=%lld elapsed=%llu ms regions=%u\n",
+            (void *)root,(void *)base,(long long)((int64_t)root-(int64_t)base),
+            (unsigned long long)(elapsedNs/1000000),regions);
         uintptr_t previous=0;
         bool first=true;
         // Read-only 2-ms samples; a transient sub-2-ms change could be missed.
