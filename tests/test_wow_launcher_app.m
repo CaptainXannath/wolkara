@@ -134,11 +134,25 @@ static CALayer *ActivityLayer(CALayer *layer) {
     assert([self primary].enabled);
     atomic_store(&slow,true); [self tap];
     [NSNotificationCenter.defaultCenter postNotificationName:UIApplicationWillResignActiveNotification object:nil];
+    assert(![self primary].enabled && UIApplication.sharedApplication.idleTimerDisabled);
+    [NSNotificationCenter.defaultCenter postNotificationName:UIApplicationDidEnterBackgroundNotification object:nil];
+    assert([[self status] isEqual:@"Check paused"] && [self primary].enabled);
+    assert(!UIApplication.sharedApplication.idleTimerDisabled);
     [self performSelector:@selector(checkCancellation) withObject:nil afterDelay:0.7];
 }
 - (void)checkCancellation {
-    assert(self.launches==0); atomic_store(&slow,false); [self.controller refresh];
-    [self performSelector:@selector(captureAndLaunch) withObject:nil afterDelay:0.3];
+    assert(self.launches==0 && [[self status] isEqual:@"Check paused"]); atomic_store(&slow,false);
+    [NSNotificationCenter.defaultCenter postNotificationName:UIApplicationDidBecomeActiveNotification object:nil];
+    [NSNotificationCenter.defaultCenter postNotificationName:UIApplicationDidBecomeActiveNotification object:nil];
+    [self performSelector:@selector(checkResumed) withObject:nil afterDelay:0.3];
+}
+- (void)checkResumed {
+    assert(self.launches==0 && [[self status] isEqual:@"Ready to play"]);
+    assert(!UIApplication.sharedApplication.idleTimerDisabled);
+    unsigned before=atomic_load(&requests);
+    [NSNotificationCenter.defaultCenter postNotificationName:UIApplicationDidBecomeActiveNotification object:nil];
+    assert(atomic_load(&requests)==before);
+    [self captureAndLaunch];
 }
 - (void)captureAndLaunch {
     assert([self primary].enabled);

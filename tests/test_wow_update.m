@@ -35,6 +35,12 @@ static NSData *IndexObjects(NSArray<NSData *> *objects){
 }
 static NSData *Index(NSData *raw){return IndexObjects(@[raw]);}
 
+@interface TKCheckpointUpdater : TKWoWUpdater
+@end
+@implementation TKCheckpointUpdater
+- (uint64_t)verificationCheckpointBytes { return 1; }
+@end
+
 @interface TKWoWUpdater (StorageTests)
 - (NSNumber *)importantStorageAtPath:(NSString *)path error:(NSError **)error;
 - (NSNumber *)freeStorageAtPath:(NSString *)path error:(NSError **)error;
@@ -125,10 +131,21 @@ int main(void){@autoreleasepool{
     assert([info writeToFile:[root stringByAppendingPathComponent:@".build.info"] atomically:YES]);
     TKWoWCASCStore *source=[[TKWoWCASCStore alloc] initWithDirectory:[root stringByAppendingPathComponent:@"Data/data"] error:&error];assert(source);
     assert([source addData:present key:TKWoWMD5(present) error:&error]);assert([source checkpoint:&error]);source=nil;
-    __block BOOL paused=NO;
-    BOOL result=[[[TKWoWUpdater alloc] initWithClient:client] updatePlan:plan root:root progress:^(NSString *phase,uint64_t done,uint64_t total){(void)done;(void)total;if([phase isEqual:@"download"]){paused=YES;[client cancel];}} error:&error];
+    __block BOOL paused=NO, savedDuringScan=NO;
+    BOOL result=[[[TKCheckpointUpdater alloc] initWithClient:client] updatePlan:plan root:root progress:^(NSString *phase,uint64_t done,uint64_t total){
+        if([phase isEqual:@"verify"] && done==total) {
+            // Reopen before the updater's normal end/cancellation cleanup. A
+            // killed process could resume from this already durable receipt.
+            NSString *data=[base stringByAppendingPathComponent:[NSString stringWithFormat:
+                @".tolkara-updates/wow_classic_beta-%@-enUS/installation/Data/data",build]];
+            TKWoWCASCStore *reopened=[[TKWoWCASCStore alloc] initWithDirectory:data error:NULL];
+            assert(reopened && [reopened verifyKey:TKWoWMD5(present) size:present.length]);
+            assert(reopened.verificationBytesRead==0);savedDuringScan=YES;
+        }
+        if([phase isEqual:@"download"]){paused=YES;[client cancel];}
+    } error:&error];
     if(!paused)fprintf(stderr,"Cancel fixture failed before download: %s\n",error.localizedDescription.UTF8String);
-    assert(!result && paused);assert([[NSData dataWithContentsOfFile:exe] isEqual:old]);assert([[NSData dataWithContentsOfFile:[root stringByAppendingPathComponent:@".build.info"]] isEqual:info]);
+    assert(!result && paused && savedDuringScan);assert([[NSData dataWithContentsOfFile:exe] isEqual:old]);assert([[NSData dataWithContentsOfFile:[root stringByAppendingPathComponent:@".build.info"]] isEqual:info]);
     assert([Text(@"settings edited while paused") writeToFile:settings atomically:YES]);
     TKUpdateClient *resume=[TKUpdateClient new];resume.responses=client.responses;resume.archive=archive;
     __block BOOL changedMetadata=NO;

@@ -45,6 +45,7 @@ static BOOL ValidCapacity(NSNumber *capacity) {
 }
 @implementation TKWoWUpdater { TKWoWClient *_client; }
 - (instancetype)initWithClient:(TKWoWClient *)client { if((self=[super init]))_client=client;return self; }
+- (uint64_t)verificationCheckpointBytes { return 1024ULL*1024*1024; }
 - (BOOL)cancelled:(NSError **)error { return _client.cancelled? !Fail(error,@"Update paused. Reopen the app to resume."):NO; }
 - (NSNumber *)importantStorageAtPath:(NSString *)path error:(NSError **)error {
     NSURL *url=[NSURL fileURLWithPath:path isDirectory:YES];
@@ -200,11 +201,15 @@ static BOOL ValidCapacity(NSNumber *capacity) {
         const TKWoWDownloadEntry *entries=records.bytes; NSUInteger count=records.length/sizeof(*entries);
         NSMutableData *missing=[NSMutableData new];uint64_t required=0,processed=0,total=0;
         for(NSUInteger i=0;i<count;i++)total+=entries[i].size;
+        uint64_t savedReadBytes=0;
         for(NSUInteger i=0;i<count;i++) { @autoreleasepool {
             if([self cancelled:&failure])return NO;
-            NSString *key=TKWoWHex(entries[i].key,16);
-            if(![store verifyKey:key size:entries[i].size]) { [missing appendBytes:entries+i length:sizeof(*entries)];required+=entries[i].size+30; }
+            if(![store verifyKeyBytes:entries[i].key size:entries[i].size]) { [missing appendBytes:entries+i length:sizeof(*entries)];required+=entries[i].size+30; }
             processed+=entries[i].size;
+            if(store.verificationBytesRead-savedReadBytes>=[self verificationCheckpointBytes]) {
+                if(![store saveVerification:&failure])return NO;
+                savedReadBytes=store.verificationBytesRead;
+            }
             if(i%500==0 || i+1==count) {
                 if(store.verificationBytesReused)progress(@"reuse",i+1,count);
                 else progress(@"verify",processed,total);

@@ -166,8 +166,8 @@ static NSPoint mouseScreenLocation;
 }
 - (NSPoint)convertPointToBacking:(NSPoint)p { NSSize s=[self convertSizeToBacking:CGSizeMake(p.x,p.y)]; return CGPointMake(s.width,s.height); }
 - (NSPoint)convertPointFromBacking:(NSPoint)p { NSSize s=[self convertSizeFromBacking:CGSizeMake(p.x,p.y)]; return CGPointMake(s.width,s.height); }
-- (NSSize)convertSizeFromBacking:(NSSize)s { CGFloat f = self.window.backingScaleFactor ?: UIScreen.mainScreen.nativeScale; return CGSizeMake(s.width/f,s.height/f); }
-- (NSSize)convertSizeToBacking:(NSSize)s { CGFloat f = self.window.backingScaleFactor ?: UIScreen.mainScreen.nativeScale; return CGSizeMake(s.width*f,s.height*f); }
+- (NSSize)convertSizeFromBacking:(NSSize)s { CGFloat f = self.window.backingScaleFactor ?: AKConfiguredGuestBackingScale(); return CGSizeMake(s.width/f,s.height/f); }
+- (NSSize)convertSizeToBacking:(NSSize)s { CGFloat f = self.window.backingScaleFactor ?: AKConfiguredGuestBackingScale(); return CGSizeMake(s.width*f,s.height*f); }
 - (NSRect)convertRectFromBacking:(NSRect)r { NSSize p=[self convertSizeFromBacking:(NSSize){r.origin.x,r.origin.y}]; return (NSRect){{p.width,p.height},[self convertSizeFromBacking:r.size]}; }
 - (NSRect)convertRectToBacking:(NSRect)r { NSSize p=[self convertSizeToBacking:(NSSize){r.origin.x,r.origin.y}]; return (NSRect){{p.width,p.height},[self convertSizeToBacking:r.size]}; }
 - (NSPoint)ak_originInWindow { NSPoint o = _frame.origin; for (NSView *v = _superview; v; v = v->_superview) { o.x += v->_frame.origin.x; o.y += v->_frame.origin.y; } return o; }
@@ -609,7 +609,11 @@ static BOOL AKIsRight(UIEvent *ev) { return (ev.buttonMask & UIEventButtonMaskSe
 @interface AKHostViewController : UIViewController
 @end
 @implementation AKHostViewController
-- (void)loadView { self.view = [[AKHostView alloc] initWithFrame:UIScreen.mainScreen.bounds]; self.view.backgroundColor = UIColor.blackColor; }
+- (void)loadView {
+    self.view = [[AKHostView alloc] initWithFrame:NSScreen.mainScreen.frame];
+    self.view.backgroundColor = UIColor.blackColor;
+    self.view.contentScaleFactor = AKConfiguredGuestBackingScale();
+}
 - (BOOL)prefersStatusBarHidden { return YES; }
 // Ask UIKit to require a deliberate repeat of edge gestures while gaming.
 // This is an immersive preference, not a device-wide kiosk lock.
@@ -693,7 +697,7 @@ static void logLayer(CALayer *layer,unsigned depth) {
 }
 - (void)setFrame:(NSRect)frame display:(BOOL)display { [self setFrame:frame display:display animate:NO]; }
 - (NSRect)frame { return _host ? (CGRect){CGPointZero, _host.bounds.size} : _contentRect; }
-- (CGFloat)backingScaleFactor { return (_uiWindow.screen ?: UIScreen.mainScreen).nativeScale; }
+- (CGFloat)backingScaleFactor { return AKConfiguredGuestBackingScale(); }
 - (BOOL)isKeyWindow { return _uiWindow.isKeyWindow; }
 - (BOOL)isVisible { return _uiWindow && !_uiWindow.hidden; }
 - (NSUInteger)occlusionState { return self.isVisible && _uiWindow.windowScene.activationState!=UISceneActivationStateBackground ? 2 : 0; }
@@ -730,6 +734,7 @@ static void logLayer(CALayer *layer,unsigned depth) {
     [self ak_hostBoundsChanged:_host.bounds];
 }
 - (void)ak_hostBoundsChanged:(CGRect)b {
+    if (_host.window) AKSetGuestDisplayGeometry(b.size,_host.window.windowScene.screen.maximumFramesPerSecond);
     if (CGSizeEqualToSize(b.size, CGSizeZero)) return;
     // As AppKit: the view may keep its own scale, as Wine's does when it draws
     // one pixel a point.
@@ -768,9 +773,11 @@ static void logLayer(CALayer *layer,unsigned depth) {
             if ([s isKindOfClass:UIWindowScene.class]) { scene = (UIWindowScene *)s; break; }
         if (!scene) { AKLog(@"makeKeyAndOrderFront: no UIWindowScene connected"); return; }
         _uiWindow = [[UIWindow alloc] initWithWindowScene:scene];
+        _uiWindow.frame=scene.coordinateSpace.bounds;
+        AKSetGuestDisplayGeometry(_uiWindow.bounds.size,scene.screen.maximumFramesPerSecond);
         AKHostViewController *vc = [AKHostViewController new];
         _uiWindow.rootViewController = vc;
-        _host = (AKHostView *)vc.view; _host.nsWindow = self;
+        _host = (AKHostView *)vc.view; _host.frame=_uiWindow.bounds; _host.nsWindow = self;
         if (_contentView) [self ak_attach];
     }
     [_uiWindow makeKeyAndVisible];
@@ -894,7 +901,7 @@ static void logLayer(CALayer *layer,unsigned depth) {
     if (NSThread.isMainThread && [self.keyWindow ak_nativeControlsActive] &&
         _lastUIKitPump - _lastTrackingPump >= 1.0 / 120.0) {
         _lastTrackingPump = _lastUIKitPump;
-        CFRunLoopRunInMode((__bridge CFStringRef)UITrackingRunLoopMode, 0, false);
+        CFRunLoopRunInMode((__bridge CFStringRef)UITrackingRunLoopMode, .001, false);
         _lastTrackingPump = CACurrentMediaTime();
     }
     CFRunLoopRunInMode(kCFRunLoopDefaultMode, seconds, once);

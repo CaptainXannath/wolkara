@@ -410,3 +410,28 @@ compressing a roughly 27.5-point line and clipping descenders in “Ready to pla
 The row now centers its arranged views and labels resist vertical compression.
 The UIKit fixture checks text bounds at default and maximum accessibility sizes;
 large content remains scrollable. This changes neither update nor launch logic.
+
+
+## November 2026 maintenance
+
+Verification now consumes the manifest's binary keys directly. A warm check reuses
+receipts only for unchanged files and matching keys/extents; it does not skip integrity
+checks. Long cold scans save progress every 1 GiB so an interrupted process can resume.
+Transient interruptions keep verification running; entering the background pauses it,
+and returning resumes unfinished work without starting a game. Completed checks are
+not repeated when dismissing a sheet. Auto-Lock is restored after checking finishes.
+An old pending download request is completed through the verified updater rather than
+being cleared solely because a USB import's executable and metadata look current.
+
+The renderer uses the active window scene at its first attachment and follows resizing
+and rotation, including iPhone Pro, Pro Max and Duo windows. AppKit and CoreGraphics
+share a backing scale and immutable display-mode snapshots. Phones default to Balanced
+(2 pixels per point); Settings → Rendering quality also offers Performance (1 pixel per
+point), effective on the next game launch. The game still owns its drawable allocation
+and graphics settings. iPads keep their usual 2× scale. A larger surface costs graphics
+memory and GPU time; the setting is not a frame-rate guarantee.
+
+Native control tracking receives a complete UIKit turn while settings or the native
+editor is open. Existing saved trigger arrangements are preserved, while new/reset
+layouts default to inner triggers. The separately selected External JIT target remains
+an experimental opt-in; it does not change the normal Wolkara startup path.

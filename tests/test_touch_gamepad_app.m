@@ -143,7 +143,7 @@ static void TestPreferences(void) {
     AKGamepadLayout *migrated=[[AKGamepadLayout alloc] initWithDefaults:defaults];
     assert(fabs(migrated.opacity-.6)<.001 && fabs(migrated.rearScale-1.2)<.001 &&
            fabs(migrated.frontScale-.9)<.001 && !migrated.hapticsEnabled);
-    assert([defaults dictionaryForKey:@"WolkaraTouchLayoutV1"]);
+    assert([defaults dictionaryForKey:@"WolkaraTouchLayoutV1"] && !migrated.swapShoulders);
     CGRect migratedFrame=[migrated frameForItem:@"menu" defaultFrame:CGRectMake(0,0,100,100) inBounds:CGRectMake(0,0,500,300)];
     assert(CGRectEqualToRect(migratedFrame,CGRectMake(200,100,100,100)));
     migrated.opacity=.3;[migrated save];

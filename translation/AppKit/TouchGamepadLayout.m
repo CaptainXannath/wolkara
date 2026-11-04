@@ -30,7 +30,7 @@ static CGFloat Number(id value, CGFloat fallback) {
         self.rearScale = Number(values[@"rearScale"],1);
         self.frontScale = Number(values[@"frontScale"],1);
         self.hapticsEnabled = Number(values[@"hapticsEnabled"],1) != 0;
-        self.swapShoulders = Number(values[@"swapShoulders"],1) != 0;
+        self.swapShoulders = Number(values[@"swapShoulders"],values.count ? 0 : 1) != 0;
         _positions = [NSMutableDictionary new];
         id positions = values[@"positions"];
         if ([positions isKindOfClass:NSDictionary.class]) for (NSString *key in positions) {
