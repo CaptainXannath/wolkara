@@ -812,25 +812,34 @@ static bool tact_known_image(const char *path,bool external) {
     if (!valid) {close(fd);LOG("[tact-owner] identity gate disabled reason=source-not-bounded-regular-file\n");errno=saved;return false;}
     unsigned char *buffer=malloc(65536),digest[CC_SHA256_DIGEST_LENGTH];
     if (!buffer) {close(fd);LOG("[tact-owner] identity gate disabled reason=hash-buffer-allocation-failed\n");errno=saved;return false;}
-    CC_SHA256_CTX context;CC_SHA256_Init(&context);
-    uint64_t total=0;ssize_t count=0;int read_error=0;
+    CC_SHA256_CTX context;
+    if(!CC_SHA256_Init(&context)) {
+        free(buffer);close(fd);
+        LOG("[tact-owner] identity gate disabled reason=source-hash-init-failed\n");
+        errno=saved;return false;
+    }
+    uint64_t total=0;ssize_t count=0;int read_error=0;bool hash_error=false;
     while (total<(uint64_t)before.st_size) {
         size_t wanted=(size_t)((uint64_t)before.st_size-total);if (wanted>65536) wanted=65536;
         count=read(fd,buffer,wanted);
         if (count<0 && errno==EINTR) continue;
         if (count<=0) {read_error=count<0?errno:0;break;}
-        CC_SHA256_Update(&context,buffer,(CC_LONG)count);total+=(uint64_t)count;
+        if(!CC_SHA256_Update(&context,buffer,(CC_LONG)count)) {hash_error=true;break;}
+        total+=(uint64_t)count;
     }
-    valid=total==(uint64_t)before.st_size && !fstat(fd,&after) && !lstat(path,&named) &&
+    valid=!hash_error && total==(uint64_t)before.st_size && !fstat(fd,&after) && !lstat(path,&named) &&
         S_ISREG(named.st_mode) && tact_file_identity(&before,&after) && tact_file_identity(&after,&named);
     close(fd);free(buffer);
     if (!valid) {
         LOG("[tact-owner] identity gate disabled reason=%s bytes-read=%llu expected-bytes=%llu errno=%d\n",
-            total!=(uint64_t)before.st_size?"source-read-incomplete":"source-changed-during-hash",
+            hash_error?"source-hash-update-failed":total!=(uint64_t)before.st_size?"source-read-incomplete":"source-changed-during-hash",
             (unsigned long long)total,(unsigned long long)before.st_size,read_error);
         errno=saved;return false;
     }
-    CC_SHA256_Final(digest,&context);
+    if(!CC_SHA256_Final(digest,&context)) {
+        LOG("[tact-owner] identity gate disabled reason=source-hash-final-failed\n");
+        errno=saved;return false;
+    }
     char actual[65];for (unsigned i=0;i<sizeof digest;i++) snprintf(actual+i*2,3,"%02x",digest[i]);
     GTOGate gate=gto_70755_gate(external,digest,sizeof digest);
     LOG("[tact-owner] source=fresh-executable-file sha256=%s bytes=%llu gate=%s expected=%s (library-record hash is not used)\n",
@@ -1621,6 +1630,18 @@ typedef struct {
 static TactHTTPConnection tact_http_connections[64];
 static uint64_t tact_http_sequence;
 static void tact_http_emit(const char *line,void *context) { (void)context;LOG("%s",line); }
+static const char *tact_http_event_name(GHTTPObjectKind kind) {
+    switch(kind) {
+        case GHTTP_OBJECT_REQUEST:return "request";
+        case GHTTP_OBJECT_RESPONSE:return "response";
+        case GHTTP_OBJECT_DATA:return "data";
+        case GHTTP_OBJECT_COMPLETE:return "complete";
+        case GHTTP_OBJECT_ABORT:return "abort";
+        case GHTTP_OBJECT_ERROR:return "error";
+        case GHTTP_OBJECT_UNSUPPORTED:return "unsupported";
+    }
+    return "unknown";
+}
 static void tact_http_object(const GHTTPObjectEvent *event,void *context) {
     TactHTTPConnection *connection=context;
     if(event->kind==GHTTP_OBJECT_DATA) {
@@ -1630,8 +1651,8 @@ static void tact_http_object(const GHTTPObjectEvent *event,void *context) {
         }
         return;
     }
-    LOG("[tact-object] source=guest-http-observer connection=%llu request=%llu event=%u method=%s url=%s status=%u code=%d errno=%d bytes=%llu reason=%s\n",
-        (unsigned long long)event->connection,(unsigned long long)event->request,(unsigned)event->kind,
+    LOG("[tact-object] source=guest-http-observer connection=%llu request=%llu event=%s method=%s url=%s status=%u code=%d errno=%d bytes=%llu reason=%s\n",
+        (unsigned long long)event->connection,(unsigned long long)event->request,tact_http_event_name(event->kind),
         event->method?:"unavailable",event->url?:"unavailable",event->status,event->code,event->error_number,
         (unsigned long long)event->total,event->reason?:"none");
     if(event->kind==GHTTP_OBJECT_RESPONSE && event->eligible) {
@@ -1735,8 +1756,9 @@ static OSStatus tact_ssl_read(SSLContextRef ctx,void *bytes,size_t size,size_t *
     dispatch_once(&once,^{real=dlsym(RTLD_DEFAULT,"SSLRead");});
     errno=incoming;
     OSStatus result=real?real(ctx,bytes,size,processed):errSSLInternal;int saved=errno;
-    size_t count=real && processed && (!result || result==errSSLWouldBlock)?*processed:0;
-    tact_http_observe((uintptr_t)ctx,true,false,bytes,count<=size?count:0,"SSLRead",result==errSSLWouldBlock?0:result,0,false);
+    size_t count=real && processed && (!result || result==errSSLWouldBlock || result==errSSLClosedGraceful)?*processed:0;
+    tact_http_observe((uintptr_t)ctx,true,false,bytes,count<=size?count:0,"SSLRead",
+        result==errSSLWouldBlock || result==errSSLClosedGraceful?0:result,0,false);
     if(result==errSSLClosedGraceful)
         tact_http_observe((uintptr_t)ctx,true,false,NULL,0,"eof",0,0,true);
     errno=saved;return result;
@@ -1757,7 +1779,8 @@ static OSStatus tact_ssl_close(SSLContextRef ctx) {
     dispatch_once(&once,^{real=dlsym(RTLD_DEFAULT,"SSLClose");});
     errno=incoming;
     OSStatus result=real?real(ctx):errSSLInternal;int saved=errno;
-    tact_http_observe((uintptr_t)ctx,true,false,NULL,0,"SSLClose",result==errSSLWouldBlock?0:result,0,true);
+    tact_http_observe((uintptr_t)ctx,true,false,NULL,0,"SSLClose",result==errSSLWouldBlock?0:result,0,
+        result!=errSSLWouldBlock);
     errno=saved;return result;
 }
 static SSLContextRef tact_ssl_create_context(CFAllocatorRef allocator,
@@ -1883,7 +1906,9 @@ static ssize_t guest_recvmsg(int fd, struct msghdr *msg, int flags) {
         tact_http_observe((uintptr_t)fd,false,false,msg->msg_iov[i].iov_base,n,"recvmsg",0,0,false);remaining-=n;
     }
     if(result<0)tact_http_observe((uintptr_t)fd,false,false,NULL,0,"recvmsg",-1,saved,false);
-    if(!result && !(flags&MSG_PEEK))tact_http_observe((uintptr_t)fd,false,false,NULL,0,"eof",0,0,true);
+    bool requested=false;
+    for(int i=0;msg && i<msg->msg_iovlen;i++) if(msg->msg_iov[i].iov_len) {requested=true;break;}
+    if(!result && requested && !(flags&MSG_PEEK))tact_http_observe((uintptr_t)fd,false,false,NULL,0,"eof",0,0,true);
     static atomic_uint seen;
     if(trace_guest && (result<0 || atomic_fetch_add(&seen,1)<48))
         LOG("[native] [t%u] recvmsg(fd=%d) -> %zd errno=%d\n",

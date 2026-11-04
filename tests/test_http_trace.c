@@ -1,5 +1,6 @@
 #include "GuestHTTPTrace.h"
 #include <assert.h>
+#include <errno.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -172,6 +173,7 @@ int main(void) {
         "wow.download.prd.cdn.blizzard.com:SECRET","wow.download.prd.cdn.blizzard.com:CREDENTIAL",
         "wow.download.prd.cdn.blizzard.com:443:SECRET","wow.download.prd.cdn.blizzard.com:",
         "wow.download.prd.cdn.blizzard.com:0","wow.download.prd.cdn.blizzard.com:65536",
+        "wow.download.prd.cdn.blizzard.com:00000000123",
         "wow.download.prd.cdn.blizzard.com:+443","wow..blizzard.com","-wow.blizzard.com",
         "wow-.blizzard.com","[wow.blizzard.com]"
     };
@@ -221,10 +223,13 @@ int main(void) {
     gh_http_feed(&trace,true,too_long,sizeof too_long,capture,NULL);feed(&trace,true,request,true);assert(!captured[0]);
     reset(&trace);feed(&trace,true,"GET /SECRET HTTP/1.1\nAuthorization: SECRET\n\n",true);assert(!captured[0]);
     reset(&trace);
-    for(unsigned i=0;i<200;i++)gh_http_error(&trace,"read",-1,35,capture,NULL);
+    for(unsigned i=0;i<200;i++)gh_http_error(&trace,"read",-1,EAGAIN,capture,NULL);
+    gh_http_error(&trace,"read",-1,ECONNRESET,capture,NULL);
     feed(&trace,true,request,true);
     feed(&trace,false,"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n",true);
-    assert(occurrences("operation=read")==16);
+    assert(occurrences("operation=read")==3);
+    char terminal[32];snprintf(terminal,sizeof terminal,"errno=%d",ECONNRESET);
+    assert(strstr(captured,terminal));
     assert(strstr(captured,"request=1 method=GET"));assert(strstr(captured,"request=1 status=200"));no_secrets();
     test_object_observation();
     puts("HTTP metadata redaction, target entity observation, fragmentation, framing and bounds passed");return 0;

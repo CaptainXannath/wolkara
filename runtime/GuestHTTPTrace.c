@@ -1,5 +1,6 @@
 #include "GuestHTTPTrace.h"
 #include <ctype.h>
+#include <errno.h>
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -28,11 +29,11 @@ static bool safe_host(const char *host, size_t length) {
     }
     if(!label || host[end-1]=='-')return false;
     if(end<length) {
-        unsigned port=0;
+        unsigned port=0,digits=0;
         if(end+1==length)return false;
         for(size_t i=end+1;i<length;i++) {
             unsigned char c=(unsigned char)host[i];
-            if(c<'0' || c>'9')return false;
+            if(c<'0' || c>'9' || ++digits>5)return false;
             port=port*10+(unsigned)(c-'0');
             if(port>65535)return false;
         }
@@ -280,8 +281,9 @@ static void headers_done(GHTTPTrace *trace,GHTTPStream *s,bool outbound,GHTTPEmi
 }
 static void line_done(GHTTPTrace *trace,GHTTPStream *s,bool outbound,GHTTPEmit emit,void *context) {
     if (s->state==FIRST) {
+        bool http2_preface=!strncmp(s->line,"PRI * HTTP/2",12);
         if (!first_line(trace,s,outbound))stop_stream(trace,s,outbound,
-            !strncmp(s->line,"PRI * HTTP/2",12)?"http2-not-observable":"malformed-http1-first-line");
+            http2_preface?"http2-not-observable":"malformed-http1-first-line");
     }
     else if (s->state==HEADERS) {
         if (!s->line[0]) headers_done(trace,s,outbound,emit,context);
@@ -342,10 +344,11 @@ void gh_http_feed(GHTTPTrace *trace,bool outbound,const void *raw,size_t length,
     }
 }
 void gh_http_error(GHTTPTrace *trace,const char *operation,int code,int error_number,GHTTPEmit emit,void *context) {
-    // Repeated EAGAIN on a nonblocking socket must not consume the request
-    // and response budget before the first HTTP line arrives.
-    if (trace->errors>=16) return;
-    trace->errors++;
+    // Nonblocking retries are common. Bound their reports separately so they
+    // cannot hide a later terminal error on the target request.
+    bool retry=code==-1 && (error_number==EAGAIN || error_number==EWOULDBLOCK);
+    if (retry) {if(trace->retry_errors>=2)return;trace->retry_errors++;}
+    else {if(trace->errors>=16)return;trace->errors++;}
     object_event(trace,active(trace),&trace->inbound,GHTTP_OBJECT_ERROR,operation,NULL,0,code,error_number);
     char line[1024];
     if(trace->outbound.state==HEADERS && trace->outbound.method[0]) {

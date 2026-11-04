@@ -23,6 +23,7 @@ struct GTCObserver {
     GTOObjectSpec spec;
     FILE *log;
     unsigned reports;
+    unsigned segment_open_reports,segment_close_reports,unrelated_io_reports;
     bool candidate;
     uint64_t offset,size;
     struct stat segment_stamp;
@@ -94,7 +95,7 @@ static void snapshot(GTCObserver *observer,int fd,uint64_t offset,uint64_t size,
             return;
         }
     }
-    uint8_t *bytes=malloc((size_t)size?:1);
+    uint8_t *bytes=malloc(size?(size_t)size:1);
     if (!bytes) {
         if (report(observer)) fprintf(observer->log,"[tact-cache] source=observer-snapshot kind=%s fd=%d result=observer-allocation-failed\n",kind,fd);
         return;
@@ -170,7 +171,8 @@ void gtc_opened(GTCObserver *observer,const char *path,int fd,int flags,int erro
     bool segment=valid && observer->candidate && same_stamp(&observer->segment_stamp,&current);
     if (!kind && segment) kind="casc-prefix-candidate";
     if (!kind) goto done;
-    if (report(observer)) fprintf(observer->log,"[tact-cache] source=guest-open kind=%s fd=%d flags=%#x errno=%d\n",kind,fd,flags,fd<0?error_number:0);
+    bool report_segment=!segment || observer->segment_open_reports++<4;
+    if (report_segment && report(observer)) fprintf(observer->log,"[tact-cache] source=guest-open kind=%s fd=%d flags=%#x errno=%d\n",kind,fd,flags,fd<0?error_number:0);
     if (!valid) goto done;
     size_t slot=GTC_FDS;
     for (size_t i=0;i<GTC_FDS;i++) {
@@ -183,7 +185,7 @@ void gtc_opened(GTCObserver *observer,const char *path,int fd,int flags,int erro
     }
     uint64_t offset=segment?observer->offset:0,size=segment?observer->size:(uint64_t)current.st_size;
     observer->descriptors[slot]=(GTCDescriptor){.used=true,.fd=fd,.kind=kind,.offset=offset,.size=size,.stamp=current};
-    snapshot(observer,fd,offset,size,kind,segment);
+    if(report_segment) snapshot(observer,fd,offset,size,kind,segment);
 done:
     pthread_mutex_unlock(&observer->lock);errno=saved;
 }
@@ -204,6 +206,8 @@ void gtc_io(GTCObserver *observer,int fd,const char *operation,int64_t offset,ui
             entry->used=false;break;
         }
         const char *intersection=offset<0?"unknown":overlaps((uint64_t)offset,result>0?(uint64_t)result:requested,entry->offset,entry->size)?"yes":"no";
+        if(!strcmp(entry->kind,"casc-prefix-candidate") && !strcmp(intersection,"no") &&
+            !error_number && observer->unrelated_io_reports++>=4) break;
         if (report(observer)) fprintf(observer->log,"[tact-cache] source=guest-io kind=%s fd=%d operation=%s offset=%lld requested=%llu result=%lld errno=%d candidate-overlap=%s\n",
             entry->kind,fd,safe_operation(operation),(long long)offset,(unsigned long long)requested,(long long)result,error_number,intersection);
         break;
@@ -217,7 +221,9 @@ void gtc_closed(GTCObserver *observer,int fd,int result,int error_number) {
     for (size_t i=0;i<GTC_FDS;i++) {
         GTCDescriptor *entry=&observer->descriptors[i];
         if (!entry->used || entry->fd!=fd) continue;
-        if (report(observer)) fprintf(observer->log,"[tact-cache] source=guest-close kind=%s fd=%d result=%d errno=%d association=prior-target\n",entry->kind,fd,result,result<0?error_number:0);
+        bool report_segment=strcmp(entry->kind,"casc-prefix-candidate") ||
+            observer->segment_close_reports++<4;
+        if (report_segment && report(observer)) fprintf(observer->log,"[tact-cache] source=guest-close kind=%s fd=%d result=%d errno=%d association=prior-target\n",entry->kind,fd,result,result<0?error_number:0);
         if (!result || error_number==EBADF || error_number==EINTR) entry->used=false;
         break;
     }

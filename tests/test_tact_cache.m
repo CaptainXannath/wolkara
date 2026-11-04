@@ -63,6 +63,7 @@ int main(void) {
         assert(size==raw.length);
         gtc_io(observer,fd,"pread",offset,size,(int64_t)size,0);
         gtc_io(observer,fd,"mmap",offset,size,(int64_t)size,0);
+        for(unsigned i=0;i<20;i++) gtc_io(observer,fd,"pread",offset+(int64_t)size+1,1,1,0);
         assert(lseek(fd,0,SEEK_CUR)==7);
         assert(!close(fd));gtc_closed(observer,fd,0,0);
         NSString *keyPath=[NSString stringWithFormat:@"/cache/%s",spec.ekey];
@@ -77,6 +78,9 @@ int main(void) {
         assert(strstr(output,"casc-prefix=candidate"));
         assert(strstr(output,"encoded-checks=verified decoded-hash=verified"));
         assert(strstr(output,"source=guest-io") && strstr(output,"candidate-overlap=yes"));
+        const char *cursor=output;unsigned unrelated=0;
+        while((cursor=strstr(cursor,"candidate-overlap=no"))) {unrelated++;cursor++;}
+        assert(unrelated==4);
         assert(strstr(output,"kind=encoded-key-name operation=stat result=-1 errno=2"));
         assert(!strstr(output,root) && !strstr(output,spec.ekey) && !strstr(output,spec.ckey));
         fclose(log);
