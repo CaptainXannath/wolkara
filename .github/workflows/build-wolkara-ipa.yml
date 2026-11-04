@@ -1,43 +1,114 @@
-# Put this file at .github/workflows/build-wolkara-ipa.yml in your own fork.
-# Builds an unsigned, experimental External JIT IPA. This DOES NOT validate
-# game execution, signing entitlements, or World of Warcraft login.
-name: Build Wolkara unsigned IPA
+name: Build Wolkara iPhone IPAs
 
+# Push generates the first pair of downloads; Actions > Run workflow rebuilds.
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/build-wolkara-ipa.yml
 
 permissions:
   contents: read
 
+concurrency:
+  group: wolkara-ipa-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
-  build:
+  ipa:
+    name: ${{ matrix.variant }} unsigned IPA
     runs-on: macos-26
-    timeout-minutes: 60
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [legacy, stikdebug]
+
     steps:
-      - name: Check out Wolkara
+      - name: Check out the requested JavierLasso-Version branch
         uses: actions/checkout@v4
+        with:
+          ref: JavierLasso-Version
+          persist-credentials: false
+
+      - name: Show source and toolchain
+        run: |
+          git log -1 --oneline
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
 
       - name: Install XcodeGen
         run: brew install xcodegen
 
-      - name: Build Wolkara's experimental External JIT IPA
+      - name: Build the experimental IPA
+        shell: bash
         env:
           TOLKARA_SYSTEM_ROOTS: "NO"
-        run: bash tools/package_ipa.sh Wolkara-unsigned.ipa
+        run: |
+          set -euo pipefail
+          if [ "${{ matrix.variant }}" = "legacy" ]; then
+            bash tools/package_ipa.sh Wolkara-legacy-unsigned.ipa
+          else
+            bash tools/package_external_jit_ipa.sh Wolkara-stikdebug-unsigned.ipa
+          fi
 
-      - name: Upload unsigned IPA
+      - name: Validate IPA and record SHA-256
+        shell: bash
+        run: |
+          set -euo pipefail
+          IPA="Wolkara-${{ matrix.variant }}-unsigned.ipa"
+          test -s "$IPA"
+          unzip -tq "$IPA" >/dev/null
+          unzip -Z1 "$IPA" | grep -F '.app/Info.plist'
+          shasum -a 256 "$IPA" > "$IPA.sha256"
+
+      - name: Include install requirements
+        shell: bash
+        run: |
+          cat > "INSTALL-${{ matrix.variant }}.txt" <<'NOTES'
+          WOLKARA: EXPERIMENTAL IPHONE BUILD
+          Source: CaptainXannath/wolkara, JavierLasso-Version
+
+          This IPA contains no Blizzard game files. It is ad-hoc signed and
+          must be re-signed for your iPhone with your own signing setup.
+
+          legacy: Requires a compatible External JIT enabler. Signing may
+          strip or disallow requested memory/address-space entitlements.
+          stikdebug: Experimental StikDebug flow. Requires development
+          signing with get-task-allow, StikDebug, device pairing and
+          LocalDevVPN. Run the app's External JIT test before WoW.
+
+          These unsigned builds are NOT the validated integrated Developer
+          service build. Installation does not prove iOS will allow guest
+          execution or that WoW Forever will start or stay running.
+
+          See docs/EXTERNAL_JIT.md and docs/WOLKARA_DISTRIBUTION.md in the
+          repository for setup and compatibility limitations.
+          Do not delete an existing app with downloaded game data just to
+          try an alternative build. Keep the same bundle ID for upgrades.
+          NOTES
+
+      - name: Upload downloadable IPA
         uses: actions/upload-artifact@v4
         with:
-          name: Wolkara-unsigned-IPA
-          path: Wolkara-unsigned.ipa
+          name: Wolkara-${{ matrix.variant }}-iPhone-IPA
+          path: |
+            Wolkara-${{ matrix.variant }}-unsigned.ipa
+            Wolkara-${{ matrix.variant }}-unsigned.ipa.sha256
+            INSTALL-${{ matrix.variant }}.txt
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 30
 
-      - name: Upload build logs if build fails
+      - name: Upload build failure logs
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: Wolkara-build-logs
+          name: Wolkara-${{ matrix.variant }}-build-logs
           path: logs/
           if-no-files-found: ignore
-          retention-days: 7
+          retention-days: 14
+
+      - name: Record built source revision
+        run: |
+          echo "Built JavierLasso-Version commit $(git rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"
