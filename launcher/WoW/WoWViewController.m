@@ -271,14 +271,14 @@ static UIStackView *Stack(NSArray<UIView *> *views, CGFloat spacing) {
     [NSUserDefaults.standardUserDefaults setBool:YES forKey:[@"WoWRepairRequested." stringByAppendingString:_product[@"id"]]];
     [self checkForUpdatesAndLaunch:NO install:YES];
 }
-// No full-game verification: repair only missing patch CDN indexes when
+// No full-game verification: repair only missing CDN indexes when
 // explicitly requested. Game segments, settings, and existing files remain.
 - (void)restorePatchIndexes {
     if(_busy || _starting || _sessionUsed || !_installation.app ||
        ![_product[@"id"] isEqualToString:@"wowf"] ||
        _installation.state!=TKWoWInstallationReady || !_plan)return;
-    UIAlertController *confirm=[UIAlertController alertControllerWithTitle:@"Experimental patch-index repair"
-        message:@"Download and verify the missing Forever patch indexes without rechecking the full game. Existing files are not overwritten. This is a diagnostic experiment and may not resolve the crash."
+    UIAlertController *confirm=[UIAlertController alertControllerWithTitle:@"Experimental CDN-index repair"
+        message:@"Download and verify only missing Forever patch and loose-file indexes without rechecking the full game. Existing files are not overwritten. This may not resolve the TACT crash."
         preferredStyle:UIAlertControllerStyleAlert];
     [confirm addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
     [confirm addAction:[UIAlertAction actionWithTitle:@"Restore missing indexes" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
@@ -334,10 +334,10 @@ static UIStackView *Stack(NSArray<UIView *> *views, CGFloat spacing) {
                 self->_updateDone=0;self->_updateTotal=0;self->_updatePhase=nil;
                 [self render];
                 NSString *message=complete?
-                    @"The missing patch indexes were downloaded and validated. Try Play again with JIT enabled. This does not guarantee the TACT crash is fixed.":
+                    @"All indexes required by the current CDN catalog were checked; missing ones were downloaded and validated. Try Play with JIT enabled. This does not guarantee the TACT crash is fixed.":
                     (problem.localizedDescription?:@"The download did not finish. Already installed files were not overwritten.");
                 UIAlertController *result=[UIAlertController alertControllerWithTitle:
-                    complete?@"Patch-index repair finished":@"Patch-index repair stopped"
+                    complete?@"CDN-index repair finished":@"CDN-index repair stopped"
                     message:message preferredStyle:UIAlertControllerStyleAlert];
                 [result addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
                 [self presentViewController:result animated:YES completion:nil];
@@ -389,8 +389,8 @@ static UIStackView *Stack(NSArray<UIView *> *views, CGFloat spacing) {
         detail=@"Close the app from the app switcher before starting another session.";
         action=@"Session ended";
     } else if (_busy && _updating) {
-        title=[_updatePhase isEqualToString:@"patch-indices"]?@"Restoring patch indexes…":@"Updating your game…";
-        NSDictionary *phases=@{@"patch-indices":@"Downloading and validating only missing patch indexes",
+        title=[_updatePhase isEqualToString:@"patch-indices"]?@"Restoring CDN indexes…":@"Updating your game…";
+        NSDictionary *phases=@{@"patch-indices":@"Downloading and verifying missing CDN indexes",
             @"snapshot":@"Preparing the installation",
             @"manifests":@"Reading the update",
             @"verify":@"Checking existing data",
@@ -498,7 +498,7 @@ static UIStackView *Stack(NSArray<UIView *> *views, CGFloat spacing) {
         }]];
         if([_product[@"id"] isEqualToString:@"wowf"] &&
            _installation.state==TKWoWInstallationReady && _plan) {
-            [sheet addAction:[UIAlertAction actionWithTitle:@"Restore missing patch indexes (experimental)"
+            [sheet addAction:[UIAlertAction actionWithTitle:@"Restore missing CDN indexes (experimental)"
                 style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
                     (void)a;
                     // Wait for the Settings action sheet to dismiss first.
