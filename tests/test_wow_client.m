@@ -48,6 +48,7 @@ static dispatch_group_t ProtocolDeliveries;
 @interface TKDownloadProtocol : NSURLProtocol
 @property(nonatomic) BOOL finished;
 @property(nonatomic) NSUInteger bytes;
+@property(nonatomic) dispatch_semaphore_t deliveryGate;
 @end
 @implementation TKDownloadProtocol
 + (BOOL)canInitWithRequest:(NSURLRequest *)request { return [request.URL.host isEqual:@"fixture.invalid"]; }
@@ -65,6 +66,7 @@ static dispatch_group_t ProtocolDeliveries;
     if(range) {
         unsigned long long first=0,last=0;
         assert(sscanf(range.UTF8String,"bytes=%llu-%llu",&first,&last)==2 && first<=last && last<body.length);
+        if(reply[@"holdRange"] && [reply[@"holdRange"] unsignedLongLongValue]==first)_deliveryGate=dispatch_semaphore_create(0);
         contentRange=[NSString stringWithFormat:@"bytes %llu-%llu/%lu",first,last,(unsigned long)body.length];
         body=[body subdataWithRange:NSMakeRange((NSUInteger)first,(NSUInteger)(last-first+1))];status=206;
     }
@@ -84,6 +86,7 @@ static dispatch_group_t ProtocolDeliveries;
     double delay=[reply[@"delay"] doubleValue];
     dispatch_group_enter(ProtocolDeliveries);
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(delay*NSEC_PER_SEC)),dispatch_get_global_queue(QOS_CLASS_UTILITY,0),^{
+        if(self.deliveryGate)assert(!dispatch_semaphore_wait(self.deliveryGate,dispatch_time(DISPATCH_TIME_NOW,5*NSEC_PER_SEC)));
         @try { @synchronized(self) {
             if(self.finished)return;
             [self finishCount:NO];
@@ -96,7 +99,9 @@ static dispatch_group_t ProtocolDeliveries;
         }} @finally { dispatch_group_leave(ProtocolDeliveries); }
     });
 }
-- (void)stopLoading { @synchronized(self) { [self finishCount:YES]; } }
+- (void)stopLoading { @synchronized(self) {
+    [self finishCount:YES];if(_deliveryGate)dispatch_semaphore_signal(_deliveryGate);
+} }
 @end
 @interface TKSessionClient : TKWoWClient
 @end
@@ -122,6 +127,49 @@ static NSData *ArchiveIndex(NSArray<NSData *> *objects,NSArray<NSNumber *> *offs
     uint8_t footer[20]={1,0,0,4,4,4,16,8};footer[8]=(uint8_t)objects.count;
     NSData *hash=Hash([NSData dataWithBytes:footer length:20]);memcpy(footer+12,hash.bytes,8);
     [data appendBytes:footer length:20];return data;
+}
+// Hold the first range until every other object has reached the serial
+// consumer. This detects batch barriers without relying on benchmark timing.
+@interface TKDelayedRangeClient : TKFixtureClient
+@property(nonatomic) dispatch_semaphore_t releaseFirst;
+@end
+@implementation TKDelayedRangeClient
+- (NSData *)range:(NSURL *)url offset:(uint64_t)offset size:(NSUInteger)size error:(NSError **)error {
+    if(offset==37 && dispatch_semaphore_wait(_releaseFirst,dispatch_time(DISPATCH_TIME_NOW,5*NSEC_PER_SEC))) {
+        if(error)*error=TKWoWError(@"Other ranges stalled behind the first range");return nil;
+    }
+    NSData *archive=self.responses[url.lastPathComponent];
+    assert(offset<=archive.length && size<=archive.length-offset);
+    return [archive subdataWithRange:NSMakeRange((NSUInteger)offset,size)];
+}
+@end
+static void TestReadyRanges(void) {
+    TKDelayedRangeClient *client=[TKDelayedRangeClient new];client.responses=[NSMutableDictionary new];
+    client.releaseFirst=dispatch_semaphore_create(0);
+    NSMutableArray *objects=[NSMutableArray new],*offsets=[NSMutableArray new];
+    NSMutableData *archive=[NSMutableData dataWithLength:37],*records=[NSMutableData new];
+    for(NSUInteger i=0;i<8;i++) {
+        NSData *raw=Wrap(Text([NSString stringWithFormat:@"Synthetic rolling range %lu",(unsigned long)i]));
+        [objects addObject:raw];[offsets addObject:@(archive.length)];[archive appendData:raw];archive.length+=65537;
+        TKWoWDownloadEntry entry={0};assert(TKWoWUnhex(TKWoWMD5(raw),entry.key));entry.size=raw.length;
+        [records appendBytes:&entry length:sizeof(entry)];
+    }
+    NSString *archiveKey=TKWoWMD5(archive);client.responses[archiveKey]=archive;
+    client.responses[[archiveKey stringByAppendingString:@".index"]]=ArchiveIndex(objects,offsets);
+    NSData *config=Text([NSString stringWithFormat:@"archives = %@\n",archiveKey]);client.responses[TKWoWMD5(config)]=config;
+    NSDictionary *plan=@{@"cdn":@"https://fixture.invalid/tpr/wow",@"version":@{@"CDNConfig":TKWoWMD5(config)}};
+    NSString *directory=[NSTemporaryDirectory() stringByAppendingPathComponent:NSUUID.UUID.UUIDString];NSError *error=nil;
+    NSMutableSet *seen=[NSMutableSet new];NSThread *caller=NSThread.currentThread;
+    assert([client downloadEntries:records plan:plan indices:directory consume:^BOOL(NSData *data,NSString *key,NSError **problem) {
+        (void)problem;assert(NSThread.currentThread==caller && [objects containsObject:data] && ![seen containsObject:key]);
+        if([data isEqual:objects[0]])assert(seen.count==objects.count-1);
+        [seen addObject:key];
+        if(seen.count==objects.count-1)dispatch_semaphore_signal(client.releaseFirst);
+        return YES;
+    } error:&error]);
+    assert(!error && seen.count==objects.count);
+    assert([NSFileManager.defaultManager removeItemAtPath:directory error:NULL]);
+    puts("Rolling downloader: seven verified ranges consumed while the first remained blocked.");
 }
 // Advertise large objects without allocating them: the transport stops once the
 // admitted window is visible. This checks the memory budget before any payload.
@@ -237,7 +285,25 @@ static void TestConcurrentDownloads(void) {
     ResetProtocol(responses);__block NSUInteger consumed=0;error=nil;
     assert(![client downloadEntries:records plan:plan indices:indices consume:^BOOL(NSData *data,NSString *key,NSError **problem){
         (void)data;(void)key;consumed++;*problem=TKWoWError(@"Synthetic full disk");return NO;
-    } error:&error]);assert(consumed==1 && [error.localizedDescription containsString:@"full disk"] && StartedRequests==4 && !ActiveRequests);
+    } error:&error]);assert(consumed==1 && [error.localizedDescription containsString:@"full disk"] && StartedRequests<=4);
+    assert(!dispatch_group_wait(ProtocolDeliveries,dispatch_time(DISPATCH_TIME_NOW,5*NSEC_PER_SEC)));
+    assert(!ActiveRequests);
+    // A consumer can now fail before a slow sibling finishes. Cancel and drain
+    // that live task, including when the consumer supplies no NSError.
+    for(NSNumber *provideError in @[@YES,@NO]) {
+        faulty=[responses mutableCopy];
+        faulty[archiveKey]=@{@"data":archive,@"delay":@0.02,@"holdRange":offsets[0]};
+        ResetProtocol(faulty);consumed=0;error=nil;
+        assert(![client downloadEntries:records plan:plan indices:indices consume:^BOOL(NSData *data,NSString *key,NSError **problem){
+            (void)data;(void)key;consumed++;
+            if(provideError.boolValue)*problem=TKWoWError(@"Synthetic consumer error with live sibling");
+            return NO;
+        } error:&error]);
+        assert(consumed==1 && error && StartedRequests<=4);
+        assert([error.localizedDescription containsString:provideError.boolValue?@"live sibling":@"Cannot store"]);
+        assert(!dispatch_group_wait(ProtocolDeliveries,dispatch_time(DISPATCH_TIME_NOW,5*NSEC_PER_SEC)));
+        assert(!ActiveRequests && StoppedRequests>=1);
+    }
     // User cancellation while all four requests are active must unblock them.
     faulty=[responses mutableCopy];faulty[archiveKey]=@{@"data":archive,@"delay":@5};
     ResetProtocol(faulty);FourStarted=dispatch_semaphore_create(0);dispatch_semaphore_t cancelled=dispatch_semaphore_create(0);
@@ -308,7 +374,8 @@ int main(void) {
         assert([error.localizedDescription containsString:@"HTTPS"]);
         assert([NSFileManager.defaultManager removeItemAtPath:directory error:&error]);
     }
-    TestTransferBudget();
+        TestTransferBudget();
+        TestReadyRanges();
     TestConcurrentDownloads();
     puts("WoW client tests PASS: bounded concurrent transfers, serial consumption, range validation, cancellation, verified staging, cache repair, patch invalidation, malformed metadata and failed transport.");
     return 0;

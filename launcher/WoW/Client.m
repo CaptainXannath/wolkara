@@ -93,7 +93,7 @@
 @property(nonatomic) NSURL *url;
 @property(nonatomic) BOOL ranged;
 @property(nonatomic) NSData *data;
-@property(nonatomic) NSError *error;
+@property(nonatomic) BOOL complete; // Published under the client's lock.
 @end
 @implementation TKWoWRangeJob
 @end
@@ -422,15 +422,19 @@ static int CompareRanges(const void *a,const void *b) {
             if(!requested[i].size || requested[i].size>256*1024*1024) { if(error)*error=TKWoWError(@"Invalid download object size.");return NO; }
         }
     }
-    qsort(entries,count,sizeof(*entries),CompareRanges);NSError *failure=nil;
+    qsort(entries,count,sizeof(*entries),CompareRanges);NSError *failure=nil;BOOL succeeded=NO;
     // Four independent ranges hide per-request latency, but never queue a whole
     // installation in memory. Large individual objects run alone; the normal
     // window is at most 64 MiB, including complete results awaiting the consumer.
     dispatch_queue_t queue=dispatch_queue_create("app.wolkara.download",DISPATCH_QUEUE_CONCURRENT);
+    dispatch_group_t group=dispatch_group_create();
+    dispatch_semaphore_t completed=dispatch_semaphore_create(0);
+    NSMutableArray<TKWoWRangeJob *> *jobs=[NSMutableArray new];uint64_t buffered=0;
     @try {
-    for(NSUInteger i=0;i<count;) { @autoreleasepool {
+    for(NSUInteger i=0;i<count || jobs.count;) { @autoreleasepool {
         if(self.cancelled) { failure=TKWoWError(@"Download cancelled.");return NO; }
-        NSMutableArray<TKWoWRangeJob *> *jobs=[NSMutableArray new];uint64_t buffered=0;
+        [_lock lock];failure=_downloadFailure;[_lock unlock];
+        if(failure)return NO;
         while(i<count && jobs.count<4) {
             TKWoWArchiveEntry first=entries[i];
             uint64_t end=(uint64_t)first.offset+first.size,payload=first.size;NSUInteger last=i+1;
@@ -443,43 +447,58 @@ static int CompareRanges(const void *a,const void *b) {
                 end=nextEnd;payload+=entries[last].size;last++;
             }
             NSUInteger size=(NSUInteger)(end-first.offset);
-            if(jobs.count && size>64*1024*1024-buffered)break;
+            if(jobs.count && (buffered>=64*1024*1024 || size>64*1024*1024-buffered))break;
             TKWoWRangeJob *job=[TKWoWRangeJob new];job.first=i;job.last=last;job.offset=first.offset;job.size=size;
             job.ranged=first.archive!=UINT32_MAX;
             NSString *key=job.ranged?_archives[first.archive]:TKWoWHex(first.key,16);
             job.url=[NSURL URLWithString:[NSString stringWithFormat:@"%@/data/%@/%@/%@",plan[@"cdn"],
                 [key substringToIndex:2],[key substringWithRange:NSMakeRange(2,2)],key]];
             [jobs addObject:job];buffered+=size;i=last;
+            dispatch_group_async(group,queue,^{
+                @autoreleasepool {
+                    NSError *problem=nil;
+                    job.data=job.ranged?[self range:job.url offset:job.offset size:job.size error:&problem]:
+                        [self fetch:job.url limit:job.size error:&problem];
+                    if(job.data.length!=job.size && !problem)problem=TKWoWError(@"Incomplete download.");
+                    if(problem)[self failDownloads:problem];
+                }
+                [self->_lock lock];job.complete=YES;[self->_lock unlock];
+                dispatch_semaphore_signal(completed);
+            });
             if(buffered>=64*1024*1024)break;
         }
-        dispatch_group_t group=dispatch_group_create();
-        for(TKWoWRangeJob *job in jobs)dispatch_group_async(group,queue,^{ @autoreleasepool {
-            NSError *problem=nil;
-            job.data=job.ranged?[self range:job.url offset:job.offset size:job.size error:&problem]:
-                [self fetch:job.url limit:job.size error:&problem];
-            if(job.data.length!=job.size && !problem)problem=TKWoWError(@"Incomplete download.");
-            if(problem) { job.error=problem;[self failDownloads:problem]; }
-        }});
-        // CASC storage and progress callbacks remain serial on the caller. Wait
-        // for every task before releasing its buffer or returning an error.
-        dispatch_group_wait(group,DISPATCH_TIME_FOREVER);
-        [_lock lock];failure=_downloadFailure;[_lock unlock];
+        // Consume whichever range is ready, then refill its slot. A slow range
+        // must not prevent unrelated completed ranges from making progress.
+        // Retain each reservation through the serial consumer, so downloading,
+        // completed and currently consumed buffers all share the same budget.
+        TKWoWRangeJob *ready=nil;
+        [_lock lock];failure=_downloadFailure;
+        for(TKWoWRangeJob *job in jobs)if(job.complete) { ready=job;break; }
+        [_lock unlock];
         if(failure)return NO;
-        for(TKWoWRangeJob *job in jobs) {
-            for(NSUInteger j=job.first;j<job.last;j++) { @autoreleasepool {
-                if(self.cancelled) { failure=TKWoWError(@"Download cancelled.");return NO; }
-                NSString *key=TKWoWHex(entries[j].key,16);
-                NSUInteger offset=job.ranged?entries[j].offset-job.offset:0;
-                if(offset>job.data.length || entries[j].size>job.data.length-offset) {
-                    failure=TKWoWError(@"Truncated archive range.");return NO;
-                }
-                NSData *raw=[NSData dataWithBytesNoCopy:(uint8_t *)job.data.bytes+offset length:entries[j].size freeWhenDone:NO];
-                if(!TKWoWEncodedValid(raw,key,&failure) || !consume(raw,key,&failure))return NO;
-            }}
-            job.data=nil;
-        }
+        if(!ready) { dispatch_semaphore_wait(completed,DISPATCH_TIME_FOREVER);continue; }
+        TKWoWRangeJob *job=ready;
+        for(NSUInteger j=job.first;j<job.last;j++) { @autoreleasepool {
+            if(self.cancelled) { failure=TKWoWError(@"Download cancelled.");return NO; }
+            NSString *key=TKWoWHex(entries[j].key,16);
+            NSUInteger offset=job.ranged?entries[j].offset-job.offset:0;
+            if(offset>job.data.length || entries[j].size>job.data.length-offset) {
+                failure=TKWoWError(@"Truncated archive range.");return NO;
+            }
+            NSData *raw=[NSData dataWithBytesNoCopy:(uint8_t *)job.data.bytes+offset length:entries[j].size freeWhenDone:NO];
+            if(!TKWoWEncodedValid(raw,key,&failure) || !consume(raw,key,&failure)) {
+                if(!failure)failure=TKWoWError(@"Cannot store downloaded content.");return NO;
+            }
+        }}
+        job.data=nil;
+        buffered-=job.size;[jobs removeObject:job];
     }}
+    succeeded=YES;
     } @finally {
+        // Consumer/checksum failures can now happen while siblings are active.
+        // Cancel and drain them before releasing state or allowing a retry.
+        if(!succeeded)[self failDownloads:failure?:TKWoWError(@"Download cancelled.")];
+        dispatch_group_wait(group,DISPATCH_TIME_FOREVER);
         [_lock lock];_downloadFailure=nil;[_lock unlock];
         if(failure && error)*error=failure;
     }

@@ -38,6 +38,28 @@ builds. See [setup, commands and acceptance gates](docs/EXTERNAL_JIT.md).
 
 ## Latest Wolkara gameplay report (2026-10-07)
 
+### Downloader and Mac import check (2026-10-12)
+
+A reported slow 50 GB update was a full download into staging: the normal
+Wolkara app had no active `World of Warcraft` directory. The installed Mac beta,
+1.60.1.70338, matched Blizzard's published EU build. Its 54,232,001,788 bytes of
+shared Data were copied to the empty iPhone library while Wolkara was closed.
+All 1,628 Data paths and sizes matched; after a transfer connection interruption,
+the nine incomplete files were recopied and SHA-256 checked by readback. All 56
+bundle/metadata/initial-configuration files were also SHA-256 checked, including
+the unchanged original executable. No Mac account settings were imported.
+
+The normal Wolkara target was rebuilt and updated in place with the rolling
+download scheduler described in [the launcher notes](docs/WOW_LAUNCHER.md).
+The sanitizer launcher suite passes, and the old scheduler fails the new
+blocked-range regression. The signed iOS build succeeds. All 1,684 imported game
+files retained their sizes and modification dates across app installation;
+executable and configuration hashes were unchanged. No game was launched during
+these checks. Download throughput on the physical iPhone and gameplay of this
+new client build remain unmeasured. Existing partial download staging was retained.
+
+### User-reported gameplay
+
 The developer reports **60 FPS at graphics quality 4 on an iPhone 16 Pro Max**
 in WoW Forever. Render scale, exact client build and a repeatable benchmark were
 not supplied for this latest report; do not infer them from the older quality-2

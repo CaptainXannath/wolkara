@@ -84,9 +84,13 @@ into requests of up to 16 MiB (larger individual objects remain bounded at
 256 MiB). It downloads up to four ranges concurrently, with independent response
 buffers, bounds and errors. Each window retains at most 64 MiB of payload; an
 individual object above that limit runs alone. Checksum verification, storage
-writes and progress callbacks remain serial. Cancellation or a transport failure
+writes and progress callbacks remain serial. Completed ranges are consumed as
+they become ready and their slots refilled, rather than waiting for a batch of
+four to finish. The memory reservation lasts until consumption completes; it
+includes in-flight, completed and currently consumed responses. Cancellation or a transport failure
 cancels pending tasks and waits for their completion before returning; failed
-windows never activate an installation. This improves throughput without changing
+updates never activate an installation. A checksum or consumer failure also
+cancels and drains still-running siblings before returning. This improves throughput without changing
 the foreground-only download lifecycle or durable resume semantics. Every
 selected object is checked before being passed to storage.
 
@@ -96,6 +100,14 @@ synthetic fixtures and no live CDN. This demonstrates reduced request-latency
 cost, not an expected speedup on every connection or a measured full-game download.
 The same suite covers interleaved responses, wrong/short ranges, corrupted payloads,
 consumer failure, cancellation, retry, the 64 MiB window and oversized objects.
+The 2026-10-12 rolling-window regression holds the first range until all seven
+other objects have reached the consumer, proving that one stalled range cannot
+block completed work. Additional transport tests fail a consumer while a slow
+sibling is active and require cancellation, cleanup and a nonempty error. The
+previous batch implementation fails the stalled-range test. These are synthetic
+results; the improvement's throughput on a physical iPhone remains unmeasured.
+The displayed byte count still represents verified, stored payload, so individual
+large objects and index checkpoints can produce visible pauses and jumps.
 Metadata caches are content-addressed and reverified. Protocol sources and
 licences from TACTSharp, CascLib and lookup3 are recorded in `NOTICE.md`;
 no .NET runtime is embedded.
