@@ -100,3 +100,19 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+## WolkaraForever contributions
+
+Selected source and tests under `launcher/WoW`, `launcher/Voice`, `launcher/Input`,
+`launcher/App`, `translation/AppKit`, `translation/Metal` and authorization were
+adapted from [WolkaraForever](https://github.com/jklock/wolkaraforever) by John
+Klockenkemper (jklock) and the WolkaraForever contributors. The public baseline
+is `0bacb997c148b08cc833ec44149b3d93070d8425`, with subsequent native-input changes
+developed in this collaboration. Their MIT copyright and permission notice are
+preserved in [WolkaraForever-LICENSE](WolkaraForever-LICENSE), shipped in the app.
+Original Tolkara and other third-party notices remain applicable.
+
+ZIPFoundation, used for addon archives and settings backups, is pinned to
+`22787ffb59de99e5dc1fbfe80b19c97a904ad48d`. Copyright (c) 2017–2025 Thomas Zoechling;
+MIT license, preserved in [ZIPFoundation-LICENSE](ZIPFoundation-LICENSE) and shipped
+in the app.

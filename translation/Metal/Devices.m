@@ -84,11 +84,10 @@ static id<MTLLibrary> captureLibrary(id receiver,SEL selector,dispatch_data_t da
 static id<MTLLibrary> captureLibrary(id receiver,SEL selector,dispatch_data_t data,NSError *__autoreleasing *error) {
     size_t length=dispatch_data_get_size(data);
     if(!length || length>64*1024*1024) return originalLibraryLoader(receiver,selector,data,error);
-    NSMutableData *bytes=[NSMutableData dataWithLength:length];
-    dispatch_data_apply(data,^bool(dispatch_data_t region,size_t offset,const void *buffer,size_t size) {
-        (void)region; memcpy((char *)bytes.mutableBytes+offset,buffer,size); return true;
-    });
-    unsigned char digest[CC_SHA256_DIGEST_LENGTH]; CC_SHA256(bytes.bytes,(CC_LONG)bytes.length,digest);
+    const void *mappedBytes=NULL; size_t mappedLength=0;
+    __attribute__((objc_precise_lifetime)) dispatch_data_t mapped=dispatch_data_create_map(data,&mappedBytes,&mappedLength);
+    if(!mapped || !mappedBytes || mappedLength!=length) return originalLibraryLoader(receiver,selector,data,error);
+    unsigned char digest[CC_SHA256_DIGEST_LENGTH]; CC_SHA256(mappedBytes,(CC_LONG)mappedLength,digest);
     NSMutableString *key=[NSMutableString new]; for(unsigned i=0;i<sizeof digest;i++) [key appendFormat:@"%02x",digest[i]];
     // Library contents are immutable. Reuse native library objects for identical
     // guest bytes on the same device, preserving this create method's +1 result.
@@ -100,6 +99,7 @@ static id<MTLLibrary> captureLibrary(id receiver,SEL selector,dispatch_data_t da
     NSString *name=[key stringByAppendingString:@".metallib"];
     NSString *cached=[[documents stringByAppendingPathComponent:@"TranslatedShaders"] stringByAppendingPathComponent:name];
     BOOL localOnly=getenv("TOLKARA_LOCAL_SHADERS_ONLY")!=NULL;
+    NSData *bytes=[NSData dataWithBytes:mappedBytes length:mappedLength];
     // The iPad first: the desktop container rewrapped around its unchanged AIR,
     // which the iPad's own Metal compiles. Only a library the iPad refuses falls
     // back to a translation made on a Mac, and failing that to a wait for one.

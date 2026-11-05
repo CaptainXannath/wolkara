@@ -4,6 +4,7 @@
 #import "LocalArenaPublisher.h"
 #import "LocalArenaPoller.h"
 #import "LocalServiceRetry.h"
+#import "AuthorizationBlockedState.h"
 #include "Control/ArenaControl.h"
 #import <NetworkExtension/NetworkExtension.h>
 #import <QuartzCore/QuartzCore.h>
@@ -31,6 +32,7 @@ static void announceArena(NSNotificationName name, NSDictionary *info) {
 @interface TKLocalAuthorization ()
 @property(nonatomic,strong) NETunnelProviderManager *manager;
 @property(nonatomic,readwrite) BOOL localSessionReady;
+@property(nonatomic,readwrite,copy) NSString *localSessionBlockedState;
 @property(nonatomic,strong) TKLocalServiceRetry *serviceRetry;
 @property(nonatomic) NSUInteger serviceGeneration;
 @end
@@ -67,6 +69,7 @@ static void TKWaitForStoppedRoute(NETunnelProviderManager *manager,CFTimeInterva
     [self.serviceRetry cancel];
     NSUInteger generation=++self.serviceGeneration;
     self.localSessionReady=NO;
+    self.localSessionBlockedState=nil;
     [self startLocalRoute:^(NSString *startResult) {
         if(self.serviceGeneration!=generation) {completion(@"Local service setup cancelled.");return;}
         TKWaitForRoute(self.manager,CACurrentMediaTime()+10,^(BOOL connected) {
@@ -76,6 +79,9 @@ static void TKWaitForStoppedRoute(NETunnelProviderManager *manager,CFTimeInterva
             }
             __weak TKLocalAuthorization *weakSelf=self;
             __block __weak TKLocalServiceRetry *weakRetry;
+            // The most recent attempt's cause, so a refusal names the step that
+            // failed rather than only the report text.
+            __block NSString *blockedState=nil;
             self.serviceRetry=[[TKLocalServiceRetry alloc] initWithTimeout:mode==3?120:60 interval:2 attempt:^(TKLocalServiceReply reply) {
                 TKLocalAuthorization *self=weakSelf;
                 if(!self) {reply(TKLocalServiceFailed,@"Local authorization owner unavailable.");return;}
@@ -99,6 +105,12 @@ static void TKWaitForStoppedRoute(NETunnelProviderManager *manager,CFTimeInterva
                         // Only the helper can classify a failed initial TCP
                         // connection. Never infer retryability from report text.
                         BOOL retry=mode==3 && valid && !ready && [state[@"serviceUnavailable"] isEqual:@YES];
+                        // The response handler runs off the main queue and the completion below
+                        // runs on it, so the hand-off goes through that queue rather than a bare
+                        // assignment. Enqueued before the reply, so the completion always reads
+                        // the cause this attempt produced.
+                        NSString *cause=ready?nil:WKAuthorizationBlockedState(valid?state[@"blockedState"]:nil);
+                        dispatch_async(dispatch_get_main_queue(),^{ blockedState=cause; });
                         reply(ready || (mode!=3 && valid)?TKLocalServiceReady:retry?TKLocalServiceUnavailable:TKLocalServiceFailed,report);
                     }];
                     if(!sent)reply(TKLocalServiceFailed,[result stringByAppendingString:@" Provider status unavailable."]);
@@ -111,6 +123,7 @@ static void TKWaitForStoppedRoute(NETunnelProviderManager *manager,CFTimeInterva
                 TKLocalAuthorization *self=weakSelf;
                 if(!self)return;
                 self.localSessionReady=mode==3 && ready;
+                self.localSessionBlockedState=ready?nil:blockedState;
                 self.serviceRetry=nil;
                 if(!ready)[self.manager.connection stopVPNTunnel];
                 completion(report);

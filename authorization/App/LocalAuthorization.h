@@ -11,6 +11,9 @@ FOUNDATION_EXPORT NSNotificationName const TKLocalServiceWaiting;
 
 @interface TKLocalAuthorization : NSObject
 @property(nonatomic,readonly) BOOL localSessionReady;
+// Why the last attempt refused, in the layer's blocked-state vocabulary, or nil
+// when it was not a refusal. A ready session never carries a reason.
+@property(nonatomic,readonly,copy) NSString *localSessionBlockedState;
 // Direct reachability only, no pairing/credentials/debugging. A TCP connection
 // alone does not authenticate the service or grant execution permission.
 + (void)probeDirectAccess:(void (^)(NSString *))completion;

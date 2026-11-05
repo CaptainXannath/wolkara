@@ -10,6 +10,14 @@ through Tolkara's compatibility layer; it is not streamed from a Mac.
 Tolkara's runtime and macOS API translation are the foundation of this project.
 Wolkara adds the WoW launcher, downloader/updater and mobile input interface.
 The upstream history, MIT license and [third-party notices](NOTICE.md) are retained.
+Selected improvements from [WolkaraForever](https://github.com/jklock/wolkaraforever)
+by **John Klockenkemper ([jklock](https://github.com/jklock)) and its contributors**
+are integrated here: addon management, settings backups, audio-session coordination,
+localization infrastructure, background pacing and build optimizations. Thank you
+for that work. Wolkara's native keyboard, reviewed dictation, movable toolbar and
+saved-text key include the refinements developed and tested together on iPhone.
+The imported MIT [license](WolkaraForever-LICENSE) is retained and shipped in the app.
+
 This project is not affiliated with or endorsed by Blizzard Entertainment.
 
 ## Try it with Xcode
@@ -42,11 +50,40 @@ WoW gameplay under this capability set remain untested.
   before Play becomes available.
 - Resumable downloads, checksum verification and reuse of verified unchanged
   game data. Updates preserve settings and addons.
-- An iOS keyboard with dictation and an editable draft that replaces the focused
-  game field, plus a touch trackpad with two-finger scrolling.
+- Apple's keyboard with iOS autocorrection and dismissal after Send, plus a
+  touch trackpad with two-finger scrolling.
+- A microphone button opens chat and transcribes speech into a visible local draft.
+  Review or edit it before ✓ sends; × discards. Recognition callbacks never type
+  into the game. On-device Apple Speech availability and permissions are required.
+- A key button: tap to edit a saved value; hold to type it and send once. Storage
+  uses this device's Keychain, not the clipboard, config files or input logs.
 - Physical controller support and an on-screen controller when none is connected.
 - Movable touch controls, opacity and size settings, shoulder-position swapping,
-  an alignment grid and haptics. Compact settings require no scrolling.
+  an alignment grid and haptics. The mouse/keyboard/microphone/key toolbar also
+  moves in Edit layout. Compact settings require no scrolling.
+- Settings → Game tools: import/manage addon ZIPs, browse CurseForge with your own
+  API key, back up/restore WTF + Interface, enable gamepad, or reset graphics.
+  Tools follow the selected edition. Imports require a matching TOC Interface
+  version for the installed client; that check is not a gameplay compatibility guarantee.
+- Release builds and optimized adapters, shader cache hits without a full byte copy,
+  optional expensive diagnostics and a 5 FPS background rendering limit. Foreground
+  rendering keeps the standard iOS frame-rate behavior; no 120 Hz override or M1
+  graphics preset is applied.
+
+## Moving an existing installation
+
+Close the game in the source app first. In Files, move the **whole `World of
+Warcraft` folder** into **On My iPhone → Wolkara**. Keep `_forever_`, shared `Data`
+and hidden `.build.info` together, without nesting a second `World of Warcraft`
+folder. Choose the same region and language in Wolkara. The released Forever
+client uses product `wowf` and `_forever_`; older beta files are not a current copy.
+
+Wolkara and WolkaraForever have separate app containers. Moving game files does
+not transfer saved passwords, CurseForge credentials or app preferences. Normal
+startup uses Wolkara's integrated Developer service after its one-time enrollment;
+no separate LocalDevVPN app is needed for that route. A matching installation is
+checked using metadata and its executable; full data verification is reserved for
+an update or an explicit repair, and verified unchanged blocks can be reused.
 
 ## What has been tested
 

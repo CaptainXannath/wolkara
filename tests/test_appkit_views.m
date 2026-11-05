@@ -197,8 +197,8 @@ int main(void) { @autoreleasepool {
     // change. The toolbar itself no longer supplies text input traits.
     UITextView *keyboard = [controls valueForKey:@"_keyboardInput"];
     assert([keyboard isKindOfClass:UITextView.class] && !keyboard.isSecureTextEntry);
-    assert(keyboard.autocorrectionType == UITextAutocorrectionTypeNo);
-    assert(keyboard.spellCheckingType == UITextSpellCheckingTypeNo);
+    assert(keyboard.autocorrectionType == UITextAutocorrectionTypeYes);
+    assert(keyboard.spellCheckingType == UITextSpellCheckingTypeYes);
     [controls insertText:@"@ñ🙂"];
     NSArray<NSString *> *typed = @[@"@", @"ñ", @"🙂"];
     for (unsigned i = 0; i < 3; i++) for (unsigned up = 0; up < 2; up++) {
