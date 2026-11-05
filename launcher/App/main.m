@@ -67,9 +67,18 @@
 // carry no code and no app data; the library adds a profile's app when its
 // files are present.
 static TKAppLibrary *OpenLibrary(void) {
+    NSString *documents=TKDocumentsPath(@"");
+    NSFileManager *files=NSFileManager.defaultManager;
+    // Files can hide an empty app container. Seed only a fresh Documents
+    // folder so the destination is visible before the user imports WoW.
+    if ([files createDirectoryAtPath:documents withIntermediateDirectories:YES attributes:nil error:NULL] &&
+        [files contentsOfDirectoryAtPath:documents error:NULL].count==0) {
+        NSString *guide=[NSBundle.mainBundle pathForResource:@"Importing WoW" ofType:@"txt"];
+        if (guide) [files copyItemAtPath:guide toPath:[documents stringByAppendingPathComponent:@"Importing WoW.txt"] error:NULL];
+    }
     NSString *profiles=[NSBundle.mainBundle.resourcePath stringByAppendingPathComponent:@"Guest/Profiles"];
     NSString *storage=[NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory,NSUserDomainMask,YES).firstObject stringByAppendingPathComponent:@"Tolkara"];
-    return [[TKAppLibrary alloc] initWithDocuments:TKDocumentsPath(@"") storage:storage profiles:[TKAppLibrary profilesInDirectory:profiles]];
+    return [[TKAppLibrary alloc] initWithDocuments:documents storage:storage profiles:[TKAppLibrary profilesInDirectory:profiles]];
 }
 // Starting apps needs compatibility
 // libraries built for the imported executables (tools/install.sh).
