@@ -9,6 +9,18 @@
 #import "../launcher/WoW/Updater.h"
 #import "../launcher/App/LaunchProgressView.h"
 #import "wow_installation_fixture.h"
+#import "../launcher/WoW/GameToolsViewController.h"
+#import "../launcher/WoW/AddonManager.h"
+
+// The production Swift archive is covered by test_forever_ui_archive.swift.
+// This UI fixture only needs its no-pending-restore bridge to open the launcher.
+@interface TKForeverUIArchive : NSObject
+@end
+@implementation TKForeverUIArchive
++ (BOOL)recoverInterruptedRestoreInWorkingDirectory:(NSString *)directory error:(NSError **)error {
+    (void)directory; (void)error; return YES;
+}
+@end
 
 @interface TKWoWViewController (Fixture)
 - (void)selectProduct:(NSDictionary *)product;
@@ -62,9 +74,9 @@ static CALayer *ActivityLayer(CALayer *layer) {
     (void)session; (void)options;
     method_setImplementation(class_getInstanceMethod(TKWoWClient.class,@selector(planForProduct:region:locale:error:)),(IMP)Plan);
     method_setImplementation(class_getInstanceMethod(TKWoWUpdater.class,@selector(updatePlan:root:progress:error:)),(IMP)Update);
-    [NSUserDefaults.standardUserDefaults setObject:@"wow_classic_beta" forKey:@"WoWProduct"];
-    [NSUserDefaults.standardUserDefaults removeObjectForKey:@"WoWRepairRequested.wow_classic_beta"];
-    [NSUserDefaults.standardUserDefaults removeObjectForKey:@"WoWInstallRequested.wow_classic_beta"];
+    [NSUserDefaults.standardUserDefaults setObject:@"wowf" forKey:@"WoWProduct"];
+    [NSUserDefaults.standardUserDefaults removeObjectForKey:@"WoWRepairRequested.wowf"];
+    [NSUserDefaults.standardUserDefaults removeObjectForKey:@"WoWInstallRequested.wowf"];
     // Device language must not change this fork's English launcher UI.
     [NSUserDefaults.standardUserDefaults setObject:@[@"es-ES"] forKey:@"AppleLanguages"];
     if (![NSProcessInfo.processInfo.arguments containsObject:@"--preview"]) dispatch_after(dispatch_time(DISPATCH_TIME_NOW,30*NSEC_PER_SEC),dispatch_get_global_queue(QOS_CLASS_UTILITY,0), ^{
@@ -115,13 +127,13 @@ static CALayer *ActivityLayer(CALayer *layer) {
 }
 - (void)checkRepairPaused {
     assert(atomic_load(&repairs)==1);
-    assert([NSUserDefaults.standardUserDefaults boolForKey:@"WoWRepairRequested.wow_classic_beta"]);
+    assert([NSUserDefaults.standardUserDefaults boolForKey:@"WoWRepairRequested.wowf"]);
     [self.controller refresh];
     [self performSelector:@selector(checkRepairComplete) withObject:nil afterDelay:0.3];
 }
 - (void)checkRepairComplete {
     assert(atomic_load(&repairs)==2 && [self primary].enabled && self.launches==0);
-    assert(![NSUserDefaults.standardUserDefaults boolForKey:@"WoWRepairRequested.wow_classic_beta"]);
+    assert(![NSUserDefaults.standardUserDefaults boolForKey:@"WoWRepairRequested.wowf"]);
     atomic_store(&failure,true); [self.controller refresh];
     [self performSelector:@selector(checkOffline) withObject:nil afterDelay:0.3];
 }
@@ -250,6 +262,18 @@ static CALayer *ActivityLayer(CALayer *layer) {
     assert([credits.text containsString:@"Vasilii Kharitonov"]);
     assert([credits.text containsString:@"Permission is hereby granted"]);
     assert([credits.text containsString:@"Martin Benjamins"]);
+    [self.controller.navigationController popToRootViewControllerAnimated:NO];
+    assert([credits.text containsString:@"John Klockenkemper"]);
+    TKGameToolsViewController *tools=[[TKGameToolsViewController alloc] initWithWorkingDirectory:fixture.directory
+        product:@"wow" edition:@"Retail" version:@"12.0.5.99999"];
+    UINavigationController *toolNavigation=[[UINavigationController alloc] initWithRootViewController:tools];
+    [toolNavigation loadViewIfNeeded]; [tools loadViewIfNeeded];
+    assert([tools.tableView numberOfRowsInSection:0]==5);
+    [tools tableView:tools.tableView didSelectRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:0]];
+    TKWoWAddonManagerViewController *addons=(id)toolNavigation.topViewController;
+    assert([addons isKindOfClass:TKWoWAddonManagerViewController.class]);
+    assert([[addons valueForKey:@"installedGameVersion"] isEqual:@"12.0.5"]);
+    assert([[[addons valueForKey:@"store"] valueForKey:@"product"] isEqual:@"wow"]);
     [self.controller.navigationController popToRootViewControllerAnimated:NO];
     puts("WoW UIKit PASS: automatic check/update, offline retry, edition race, background cancellation, verified launch, inline preparation/failure/session end, no duplicate launches and bundled licenses."); fflush(stdout);
     if (![NSProcessInfo.processInfo.arguments containsObject:@"--preview"]) exit(0);

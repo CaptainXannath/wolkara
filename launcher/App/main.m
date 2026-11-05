@@ -12,6 +12,9 @@
 #import "NativeGuest.h"
 #import "SignedFileProbe.h"
 #import "StartupActivity.h"
+#import "../Voice/Dictation.h"
+#import "../Voice/ToolbarDictationController.h"
+#import "SavedTextController.h"
 #if TOLKARA_EXTERNAL_JIT_PROTOTYPE
 #import "ExternalJITCoordinator.h"
 #endif
@@ -28,6 +31,8 @@
 
 @interface AKHostSceneDelegate : UIResponder <UIWindowSceneDelegate, TKLibraryViewControllerDelegate>
 @property(nonatomic, strong) UIWindow *window;
+@property(nonatomic, strong) AKToolbarDictationController *toolbarDictation;
+@property(nonatomic, strong) WKSavedTextController *savedTextController;
 @property(nonatomic, strong) UILabel *status;
 @property(nonatomic, strong) TKLaunchProgressView *launchProgress;
 @property(nonatomic, strong) TKStartupActivityView *startupActivity;
@@ -191,6 +196,18 @@ static BOOL PreparedFromOutside(void) { return hd_may_run_unsigned_code() || ng_
     ng_reserve_arena(NULL);
 #endif
 }
+// This notification follows the toolbar's explicit "Close app" confirmation.
+- (void)closeFromToolbar:(NSNotification *)note {
+    (void)note;
+    [AKDictation.shared cancel];
+    [self.window endEditing:YES];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,2*NSEC_PER_SEC),dispatch_get_main_queue(),^{ exit(0); });
+}
+- (void)gameTextInputAppeared:(NSNotification *)note {
+    UIView *view=[note.object isKindOfClass:UIView.class] ? note.object : nil;
+    [AKDictation setGameTextTarget:view];
+    self.savedTextController.gameTextTarget=view;
+}
 - (void)sceneDidBecomeActive:(UIScene *)scene {
     (void)scene; [self reserveExecutableMemory];
 }
@@ -198,6 +215,12 @@ static BOOL PreparedFromOutside(void) { return hd_may_run_unsigned_code() || ng_
     static BOOL started;
     if (started) return;
     started = YES;
+    self.toolbarDictation=[[AKToolbarDictationController alloc] initWithDictation:AKDictation.shared];
+    self.savedTextController=[WKSavedTextController new];
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(gameTextInputAppeared:)
+        name:@"AKTouchGameTextInputDidAppear" object:nil];
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(closeFromToolbar:)
+        name:@"AKTouchCloseAppNotification" object:nil];
     NSArray<NSString *> *arguments=NSProcessInfo.processInfo.arguments;
     // Normal Wolkara launches use the route included in this build. Development
     // arguments retain the original explicit mode selection.

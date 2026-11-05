@@ -14,7 +14,7 @@ APP=build/wow-launcher/WoWFixture.app
 mkdir -p "$APP"
 xcrun --sdk iphonesimulator clang -target arm64-apple-ios17.0-simulator -fobjc-arc -O1 -g \
     -Wall -Wextra -Werror -Wno-deprecated-declarations \
-    launcher/WoW/*.m launcher/App/LaunchProgressView.m tests/test_wow_launcher_app.m -framework Foundation -framework UIKit -framework QuartzCore -framework CoreGraphics -lz \
+    launcher/WoW/*.m launcher/App/LaunchProgressView.m launcher/App/WKLocalization.m launcher/App/WolkaraForeverTheme.m launcher/App/WolkaraForeverLog.m -framework Security -framework UniformTypeIdentifiers tests/test_wow_launcher_app.m -framework Foundation -framework UIKit -framework QuartzCore -framework CoreGraphics -lz \
     -o "$APP/WoWFixture"
 cat > "$APP/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -33,7 +33,8 @@ cat > "$APP/Info.plist" <<'PLIST'
 <key>UISupportedInterfaceOrientations</key><array><string>UIInterfaceOrientationLandscapeLeft</string><string>UIInterfaceOrientationLandscapeRight</string></array>
 </dict></plist>
 PLIST
-cp LICENSE NOTICE.md "$APP/"
+for lang in en de; do cp -R "launcher/App/$lang.lproj" "$APP/"; done
+cp LICENSE NOTICE.md WolkaraForever-LICENSE ZIPFoundation-LICENSE "$APP/"
 codesign --force --sign - "$APP" > /dev/null
 xcrun simctl install "$SIM_ID" "$APP"
 LOG=$(mktemp)

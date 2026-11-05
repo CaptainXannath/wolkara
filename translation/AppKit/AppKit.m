@@ -248,7 +248,6 @@ NSEventModifierFlags AKModifiersReconciled(NSEventModifierFlags held, NSEventMod
 
 @implementation AKHostView { CGPoint _last; NSEventModifierFlags _mods; BOOL _pressedRight, _pressedLeft, _pointerInside, _softwareCursor; UIImageView *_cursorView; UIPointerInteraction *_pointer; UIPointerStyle *_gamePointerStyle; unsigned _hoverUpdates, _pointerUpdates, _cursorVisibilityReasons; NSTimeInterval _pointerReportTime;
     AKTouchControls *_touchControls;
-    AKTouchGamepad *_touchGamepad;
     BOOL _touchCursorActive, _touchCursorInitialized, _pressedMiddle;
     NSTimeInterval _lastTouchClickTime;
     CGPoint _lastTouchClickPoint;
@@ -282,25 +281,11 @@ NSEventModifierFlags AKModifiersReconciled(NSEventModifierFlags held, NSEventMod
             [_touchControls.topAnchor constraintEqualToAnchor:self.safeAreaLayoutGuide.topAnchor constant:8],
             [_touchControls.centerXAnchor constraintEqualToAnchor:self.safeAreaLayoutGuide.centerXAnchor],
         ]];
-        _touchGamepad = [[AKTouchGamepad alloc] initWithHostView:self];
-        __weak AKHostView *weakSelf = self;
-        _touchGamepad.visibilityChanged = ^(BOOL visible) {
-            AKHostView *host = weakSelf;
-            if (!host) return;
-            [host->_touchControls cancelTouches];
-            (void)visible;
-        };
-        _touchGamepad.enabled = YES;
         [self touchTrackpadChanged:_touchControls.trackpadEnabled];
     }
     return self;
 }
-- (void)didMoveToWindow {
-    [super didMoveToWindow]; [_touchGamepad refresh];
-}
-- (BOOL)nativeControlsActive { return _touchControls.keyboardVisible || _touchGamepad.configuring; }
-- (void)touchKeyboardVisibilityChanged:(BOOL)visible { _touchGamepad.keyboardVisible = visible; }
-- (void)touchControlSettings { [_touchGamepad toggleSettings]; }
+- (BOOL)nativeControlsActive { return _touchControls.configuring; }
 - (BOOL)canBecomeFirstResponder { return YES; }
 - (void)setNsWindow:(NSWindow *)window {
     _nsWindow = window;
@@ -380,14 +365,24 @@ NSEventModifierFlags AKModifiersReconciled(NSEventModifierFlags held, NSEventMod
     [self postMouse:type at:_last button:button clicks:_touchClickCount];
 }
 - (void)postTextKey:(unsigned short)code characters:(NSString *)characters unmodified:(NSString *)unmodified modifiers:(NSEventModifierFlags)modifiers {
+    [self postTextKey:code characters:characters unmodified:unmodified modifiers:modifiers privateInput:NO];
+}
+- (void)postTextKey:(unsigned short)code characters:(NSString *)characters unmodified:(NSString *)unmodified modifiers:(NSEventModifierFlags)modifiers privateInput:(BOOL)privateInput {
     for (unsigned index = 0; index < 2; index++) {
         NSEvent *event = [NSEvent new];
         event.type = index == 0 ? NSEventTypeKeyDown : NSEventTypeKeyUp;
         event.window = self.nsWindow; event.keyCode = code; event.modifierFlags = modifiers;
         event.characters = characters; event.charactersIgnoringModifiers = unmodified;
         event.timestamp = NSProcessInfo.processInfo.systemUptime;
+        if (privateInput) AKMarkPrivateInputEvent(event);
         [NSApp postEvent:event atStart:NO];
     }
+}
+- (void)touchSubmitPrivateText:(NSString *)text {
+    AKEnumerateTextKeys(text, ^(NSString *characters, NSString *unmodified, unsigned short code, NSUInteger modifiers) {
+        [self postTextKey:code characters:characters unmodified:unmodified modifiers:modifiers privateInput:YES];
+    });
+    [self postTextKey:36 characters:@"\r" unmodified:@"\r" modifiers:0 privateInput:YES];
 }
 - (void)touchInsertText:(NSString *)text {
     AKEnumerateTextKeys(text, ^(NSString *characters, NSString *unmodified, unsigned short code, NSUInteger modifiers) {
@@ -541,7 +536,7 @@ NSEventModifierFlags AKModifiersReconciled(NSEventModifierFlags held, NSEventMod
     // the window. Keep visibility tied to its actual in-window location.
     [self moveHoverTo:point inside:CGRectContainsPoint(self.bounds,point)];
 }
-- (void)dealloc { [_touchGamepad invalidate]; [NSNotificationCenter.defaultCenter removeObserver:self]; }
+- (void)dealloc { [NSNotificationCenter.defaultCenter removeObserver:self]; }
 static BOOL AKIsRight(UIEvent *ev) { return (ev.buttonMask & UIEventButtonMaskSecondary) != 0; }
 - (BOOL)handleTrackpadTouches:(NSSet<UITouch *> *)touches event:(UIEvent *)event {
     if (!_touchControls.trackpadEnabled) return NO;

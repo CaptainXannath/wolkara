@@ -82,7 +82,15 @@
     if([request isKindOfClass:NSDictionary.class] && [request[@"version"] isEqual:@TK_AUTH_PROTOCOL_VERSION] &&
        ([request[@"operation"] isEqual:@"verifyPairing"] || [request[@"operation"] isEqual:@"verifyTunnel"] || [request[@"operation"] isEqual:@"prepareAuthorization"])) {
         NSString *device=request[@"deviceIdentifier"];
-        if(![device isKindOfClass:NSString.class] || !device.length || device.length>1024) {completion(nil);return;}
+        // A reply the app can act on, never silence: the launch UI has to say
+        // that this iPad is not enrolled instead of reporting a dead provider.
+        if(![device isKindOfClass:NSString.class] || !device.length || device.length>1024) {
+            NSMutableDictionary *response=[TKRouteStatus(self.running,self.reflected,self.dropped) mutableCopy];
+            response[@"helperProbe"]=@"No enrolled device identifier; enrolment is a Mac step (tools/enroll.sh).";
+            response[@"readyForPreparation"]=@NO;
+            response[@"blockedState"]=@"notEnrolled";
+            completion([NSJSONSerialization dataWithJSONObject:response options:0 error:NULL]);return;
+        }
         // A mobile-network transition can make the local service available.
         // Recreate only a probe that failed before its first TCP connection;
         // its failure path has already invalidated and closed every resource.
@@ -93,6 +101,7 @@
                 NSMutableDictionary *response=[TKRouteStatus(self.running,self.reflected,self.dropped) mutableCopy];
                 response[@"helperProbe"]=@"Local service retry limit reached.";
                 response[@"readyForPreparation"]=@NO;
+                response[@"blockedState"]=@"serviceUnavailable";
                 completion([NSJSONSerialization dataWithJSONObject:response options:0 error:NULL]);return;
             }
             self.retiredProbes=[self.retiredProbes arrayByAddingObject:self.packetProbe];
@@ -110,6 +119,8 @@
             response[@"helperProbe"]=report;
             response[@"readyForPreparation"]=@(probe.authorizationReady);
             response[@"serviceUnavailable"]=@(probe.serviceUnavailable);
+            // nil when ready: the app must not see a stale cause beside success.
+            response[@"blockedState"]=probe.blockedState ?: [NSNull null];
             completion([NSJSONSerialization dataWithJSONObject:response options:0 error:NULL]);
         };
         if([request[@"operation"] isEqual:@"prepareAuthorization"])

@@ -1,7 +1,20 @@
-// The CoreAudio adapter's property API as Wine's Mac audio driver uses it: one
-// output device, the session's route, under the legacy default output's ID.
+// The CoreAudio adapter's property API as Wine's Mac audio driver uses it: the
+// session's route, reported under the legacy default output's ID.
+//
+// This is the platform's test with the host it now needs. Patch 0005 stopped the
+// adapter taking the audio session for itself - it asks the app for the game's
+// playback lease instead, through dlsym, because the adapter is its own image and
+// cannot link against the app's symbol. A plain `simctl spawn` has no app, so the
+// platform's version of this test asks for nothing, gets no route, and aborts at
+// its first assertion; the rest of the adapter suite then never runs.
+//
+// So this file takes the lease the way the app does. Everything the adapter must
+// answer is asserted exactly as the platform asserts it - the test is not weakened,
+// its missing host is supplied.
+//
 // Run in the simulator (tools/test_translation_sim.sh).
 #import <Foundation/Foundation.h>
+#import <AVFoundation/AVFoundation.h>
 #import <CoreAudioTypes/CoreAudioTypes.h>
 #include <assert.h>
 typedef struct { UInt32 mSelector, mScope, mElement; } Address;
@@ -9,7 +22,19 @@ extern OSStatus AudioObjectGetPropertyDataSize(UInt32, const Address *, UInt32, 
 extern OSStatus AudioObjectGetPropertyData(UInt32, const Address *, UInt32, const void *, UInt32 *, void *);
 extern OSStatus AudioObjectSetPropertyData(UInt32, const Address *, UInt32, const void *, UInt32, const void *);
 extern OSStatus AudioHardwareGetProperty(UInt32, UInt32 *, void *);
+
+// The host half of patch 0005's contract. Exported, so the adapter's
+// dlsym(RTLD_DEFAULT, "TKWolkaraForeverRequestGamePlayback") finds it.
+BOOL TKWolkaraForeverRequestGamePlayback(void) {
+    AVAudioSession *session = AVAudioSession.sharedInstance;
+    NSError *error = nil;
+    if (![session setCategory:AVAudioSessionCategoryPlayback error:&error]) return NO;
+    return [session setActive:YES error:&error];
+}
+
 int main(void) { @autoreleasepool {
+    // The app asks before it plays; the adapter answers only once it has.
+    assert(TKWolkaraForeverRequestGamePlayback());
     UInt32 legacy = 0, size = sizeof legacy;
     assert(!AudioHardwareGetProperty('dOut', &size, &legacy) && legacy);
     Address devices = {'dev#', 'glob', 0}, fallback = {'dOut', 'glob', 0};

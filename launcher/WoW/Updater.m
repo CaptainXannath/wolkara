@@ -1,5 +1,6 @@
 #import "Updater.h"
 #import "CASC.h"
+#import "UpdateLock.h"
 #include <sys/clonefile.h>
 #include <sys/file.h>
 #include <sys/stdio.h>
@@ -45,6 +46,8 @@ static BOOL ValidCapacity(NSNumber *capacity) {
 }
 @implementation TKWoWUpdater { TKWoWClient *_client; }
 - (instancetype)initWithClient:(TKWoWClient *)client { if((self=[super init]))_client=client;return self; }
+// Persist completed checks during long scans. A
+// process killed without cancellation must not lose all of its verified work.
 - (uint64_t)verificationCheckpointBytes { return 1024ULL*1024*1024; }
 - (BOOL)cancelled:(NSError **)error { return _client.cancelled? !Fail(error,@"Update paused. Reopen the app to resume."):NO; }
 - (NSNumber *)importantStorageAtPath:(NSString *)path error:(NSError **)error {
@@ -157,10 +160,9 @@ static BOOL ValidCapacity(NSNumber *capacity) {
     NSString *folder=nil;for(NSDictionary *p in TKWoWProducts())if([p[@"id"] isEqual:plan[@"product"]])folder=p[@"folder"];
     if(!folder || ![@[@"eu",@"us",@"kr",@"tw"] containsObject:plan[@"region"]] || ![@[@"enUS",@"esES",@"deDE",@"frFR",@"itIT",@"esMX",@"ptBR",@"ruRU",@"koKR",@"zhTW"] containsObject:plan[@"locale"]] || !root.isAbsolutePath || !TKWoWHashValid(plan[@"version"][@"BuildConfig"]) || !TKWoWHashValid(plan[@"version"][@"CDNConfig"]))return Fail(error,@"Invalid update target.");
     root=root.stringByResolvingSymlinksInPath;NSString *parent=root.stringByDeletingLastPathComponent;
-    NSString *work=Join(parent,@".tolkara-updates");if(!Directory(work,error))return NO;
-    if(![work.stringByResolvingSymlinksInPath isEqual:work])return Fail(error,@"Update directory must not be a symlink.");
-    int lock=open(Join(work,@"update.lock").fileSystemRepresentation,O_CREAT|O_RDWR|O_NOFOLLOW,0600);
-    if(lock<0 || flock(lock,LOCK_EX|LOCK_NB)) { if(lock>=0)close(lock);return Fail(error,@"Another update is finishing. Try again shortly."); }
+    NSString *work=Join(parent,@".tolkara-updates");
+    int lock=TKWoWAcquireUpdateLock(root,error);
+    if(lock<0)return NO;
     BOOL success=NO;TKWoWCASCStore *store=nil;
     NSError *failure=nil;
     @try {
@@ -218,8 +220,6 @@ static BOOL ValidCapacity(NSNumber *capacity) {
         records=nil;
         if(![store saveVerification:&failure])return NO;
         uint64_t loose=[plan[@"installFileBytes"] unsignedLongLongValue];
-        // Only missing CASC objects need new blocks: cloned existing data and
-        // objects already downloaded by a paused transaction are not added again.
         if(![self checkStorageAtPath:stage missingBytes:required looseBytes:loose error:&failure])return NO;
         _client.progress=progress;
         uint64_t transferBytes=required-30*(missing.length/sizeof(TKWoWDownloadEntry));
@@ -309,7 +309,7 @@ static BOOL ValidCapacity(NSNumber *capacity) {
             _verificationBytesRead=store.verificationBytesRead;_verificationBytesReused=store.verificationBytesReused;
         }
         if(!success && failure && error)*error=failure;
-        _client.progress=nil;flock(lock,LOCK_UN);close(lock);
+        _client.progress=nil;TKWoWReleaseUpdateLock(lock);
     }
 }
 @end

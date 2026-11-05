@@ -2,6 +2,7 @@
 #import <GameController/GameController.h>
 
 NS_ASSUME_NONNULL_BEGIN
+@class AKGamepadLayout;
 // Radial analog mapping with a small dead zone and clamped magnitude.
 CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size);
 // Owns only our virtual device. Physical controllers and their handlers stay
@@ -12,7 +13,12 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size);
 @property(nonatomic) BOOL keyboardVisible;
 @property(nonatomic, readonly) BOOL visible;
 @property(nonatomic, readonly) BOOL configuring;
+@property(nonatomic, readonly) BOOL editing;
+/// Shared with the toolbar so a settings save cannot overwrite moved buttons.
+@property(nonatomic, readonly) AKGamepadLayout *layout;
 @property(nonatomic, copy, nullable) void (^visibilityChanged)(BOOL visible);
+/// Keep Done and the settings sheet reachable even when a toolbar button overlaps.
+- (BOOL)configurationContainsPoint:(CGPoint)point inView:(UIView *)view;
 - (void)refresh;
 - (void)toggleSettings;
 - (void)invalidate;

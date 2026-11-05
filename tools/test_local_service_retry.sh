@@ -11,3 +11,9 @@ xcrun clang -std=c11 -Wall -Wextra -Werror -c authorization/Control/ArenaControl
 xcrun clang -std=c11 -Wall -Wextra -Werror -c authorization/DebugWire.c -o build/emulation/RetryDebugWire.o
 xcrun swiftc -module-cache-path build/swift-module-cache -warnings-as-errors -g -sanitize=address -import-objc-header authorization/Transport/TransportBridge.h authorization/Pairing/*.swift authorization/Storage/*.swift authorization/Transport/*.swift authorization/Debugger/*.swift authorization/Tunnel/LocalPacketTCPProxy.swift authorization/Tunnel/PacketServiceProbe.swift build/emulation/TunnelTLS.o build/emulation/RetryArenaControl.o build/emulation/RetryDebugWire.o tests/test_packet_service_retry.swift -o build/emulation/test_packet_service_retry
 build/emulation/test_packet_service_retry
+
+xcrun clang -fobjc-arc -Wall -Wextra -Werror -Iauthorization/App -framework Foundation \
+    authorization/App/AuthorizationBlockedState.m tests/test_authorization_blocked_state.m -o build/emulation/test_authorization_blocked_state
+build/emulation/test_authorization_blocked_state
+xcrun swiftc -module-cache-path build/swift-module-cache -warnings-as-errors -g -sanitize=address -import-objc-header authorization/Transport/TransportBridge.h authorization/Pairing/*.swift authorization/Storage/*.swift authorization/Transport/*.swift authorization/Debugger/*.swift authorization/Tunnel/LocalPacketTCPProxy.swift authorization/Tunnel/PacketServiceProbe.swift build/emulation/TunnelTLS.o build/emulation/RetryArenaControl.o build/emulation/RetryDebugWire.o tests/test_packet_service_blocked.swift -o build/emulation/test_packet_service_blocked
+build/emulation/test_packet_service_blocked

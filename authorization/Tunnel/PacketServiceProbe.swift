@@ -24,6 +24,9 @@ import Network
     private var retainAuthorization = false
     @objc private(set) var authorizationReady = false
     @objc private(set) var serviceUnavailable = false
+    // Why the last attempt refused, in the vocabulary the launch UI shows.
+    // Only a refusal sets it, so a ready session never carries a stale reason.
+    @objc private(set) var blockedState: String?
     private var serviceConnected = false
     private var proxy: LocalPacketTCPProxy?
     private var manager: TunnelConnectionManager?
@@ -78,8 +81,14 @@ import Network
             guard reservedPortFD >= 0 else { finish("Could not reserve the packet probe's local port.");return }
             do {
                 if let deviceIdentifier {
-                    guard let enrollment = try PairingKeychain().load(deviceIdentifier:deviceIdentifier) else {
-                        finish("Helper has no protected enrollment for the selected device.");return
+                    // A store that cannot be read is not a trust decision: it is
+                    // the same user action as having no record, so it carries the
+                    // same state and never a weaker one.
+                    let stored: PairingEnrollment?
+                    do { stored = try PairingKeychain().load(deviceIdentifier:deviceIdentifier) }
+                    catch { block("notEnrolled","Helper cannot read its protected enrollment store.");return }
+                    guard let enrollment = stored else {
+                        block("notEnrolled","Helper has no protected enrollment for the selected device.");return
                     }
                     authentication = PairingSession(identity:enrollment.identity)
                     self.enrollment = enrollment
@@ -179,11 +188,12 @@ import Network
                             }
                         }
                     }
-                } catch { finish(authentication == nil ? "Packet-flow service response was invalid." : "Authenticated packet-flow pairing failed verification or protocol validation.") }
+                } catch { block("developerImageUnavailable",authentication == nil ? "Packet-flow service response was invalid." : "Authenticated packet-flow pairing failed verification or protocol validation.") }
             case .failed(let reason):
                 // Only a failed initial TCP connection is eligible for a fresh
                 // probe. Never repeat pairing, capability or memory operations.
                 serviceUnavailable = !serviceConnected && (reason == .reset || reason == .timeout)
+                if serviceUnavailable { blockedState = "serviceUnavailable" }
                 finish("Packet-flow TCP connection failed (\(reason)).")
             case .peerClosed, .closed: finish("Packet-flow service closed before the handshake completed.")
             default: break
@@ -214,14 +224,14 @@ import Network
                                 let service = catalog.services["com.apple.internal.dt.remote.debugproxy"]
                                 let names = catalog.services.keys.filter { $0.contains("debug") || $0.contains("developer") || $0.contains("image") }.sorted().map { "\($0) (XPC=\(catalog.services[$0]!.usesRemoteXPC))" }.joined(separator:", ")
                                 if let service { self.probeDebugService(manager:manager,port:service.port) }
-                                else { self.finish("Helper authenticated pairing and TLS discovery; developer services: \(names).") }
-                            case .failure: self.finish("Authenticated TLS tunnel opened; discovery failed: \(discovery.diagnosticStage). TLS: \(link.diagnosticStage).")
+                                else { self.block("developerImageUnavailable","Helper authenticated pairing and TLS discovery; developer services: \(names).") }
+                            case .failure: self.block("developerImageUnavailable","Authenticated TLS tunnel opened; discovery failed: \(discovery.diagnosticStage). TLS: \(link.diagnosticStage).")
                             }
                         }
                     },onClosed:{ [weak self, weak link] _ in
-                        self?.finish("Authenticated pairing passed; TLS/CDTunnel failed: \(link?.diagnosticStage ?? "unavailable").")
+                        self?.block("developerImageUnavailable","Authenticated pairing passed; TLS/CDTunnel failed: \(link?.diagnosticStage ?? "unavailable").")
                     })
-                } catch { self.finish("Could not initialize the authenticated system TLS tunnel.") }
+                } catch { self.block("developerImageUnavailable","Could not initialize the authenticated system TLS tunnel.") }
             }
         },onClosed:{ [weak self] _ in
             guard let self else { return };self.queue.async { self.finish("The helper's private TLS packet bridge closed or failed.") }
@@ -251,7 +261,7 @@ import Network
                                     try manager.write(id,data:Data([43])) // acknowledge final RSP reply
                                     manager.cancelStream(id);self.debugStream = nil
                                     try self.arenaService.setVerifiedDebugService(manager:manager,port:port)
-                                    self.authorizationReady = true;self.deadline = self.clock + 960
+                                    self.authorizationReady = true;self.blockedState = nil;self.deadline = self.clock + 960
                                     let callback = self.completion;self.completion = nil
                                     callback?("Authenticated local debugger is ready for our app's bound memory-preparation request. No process attached yet.")
                                 } else {
@@ -262,13 +272,16 @@ import Network
                             case .nack,.badChecksum: throw PairingError.malformed
                             }
                         }
-                    case .closed,.peerClosed: self.finish("Authenticated debug service closed before its capability response.")
+                    case .closed,.peerClosed: self.block("developerImageUnavailable","Authenticated debug service closed before its capability response.")
                     default: break
                     }
-                } catch { self.finish("Authenticated debug service did not return a valid raw capability response.") }
+                } catch { self.block("developerImageUnavailable","Authenticated debug service did not return a valid raw capability response.") }
             }
-        } catch { finish("Could not open the authenticated developer debug service.") }
+        } catch { block("developerImageUnavailable","Could not open the authenticated developer debug service.") }
     }
+    // A refusal that the launch UI can tell apart from every other one. The
+    // report stays free text for the log; only this becomes a user sentence.
+    private func block(_ state: String, _ report: String) { blockedState = state; finish(report) }
     private func finish(_ report: String) {
         guard !finished else { return }; finished = true
         authorizationReady = false
