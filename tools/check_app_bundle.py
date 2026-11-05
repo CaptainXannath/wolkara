@@ -12,11 +12,12 @@ args = parser.parse_args()
 app = args.app
 info = plistlib.loads((app / "Info.plist").read_bytes())
 assert info.get("UIFileSharingEnabled"), "Documents must be visible in Files"
+assert info.get("LSSupportsOpeningDocumentsInPlace"), "Files must support moving the installation in place"
 assert info.get("NSMicrophoneUsageDescription"), "Missing microphone permission message"
 assert info.get("NSSpeechRecognitionUsageDescription"), "Missing speech permission message"
 assert not info.get("CADisableMinimumFrameDurationOnPhone", False), "Unexpected 120 Hz override"
 assert "audio" in info.get("UIBackgroundModes", []), "Missing background audio declaration"
-for name in ("LICENSE", "NOTICE.md", "WolkaraForever-LICENSE", "ZIPFoundation-LICENSE"):
+for name in ("LICENSE", "NOTICE.md", "WolkaraForever-LICENSE", "ZIPFoundation-LICENSE", "Importing WoW.txt"):
     assert (app / name).is_file(), f"Missing bundled notice: {name}"
 executable = app / info["CFBundleExecutable"]
 symbols = subprocess.check_output(["nm", "-g", str(executable)], text=True)
