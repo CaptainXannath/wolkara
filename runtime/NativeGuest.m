@@ -701,6 +701,18 @@ static void guest_abort(void) __attribute__((noreturn));
 // directories it creates and the environment variables it reads. Off by
 // default, and then the guest binds straight to libc for these.
 static bool trace_guest;
+// Experimental External JIT-only probe for the reproducible WoW TACT crash.
+// The wrapper logs low mutex pointers and then calls the real pthread API.
+static bool trace_tact_mutex;
+static atomic_uint tact_low_mutex_reports;
+// Read a diagnostic pointer without dereferencing guest-controlled addresses.
+static bool tact_read_pointer(uintptr_t address, uintptr_t *out) {
+    if (!address || !out) return false;
+    vm_size_t got=0;
+    return vm_read_overwrite(mach_task_self(),(vm_address_t)address,
+                             sizeof *out,(vm_address_t)out,&got)==KERN_SUCCESS &&
+           got==sizeof *out;
+}
 static int guest_open(const char *, int, ...);
 static int guest_openat(int, const char *, int, ...);
 static int guest_stat(const char *, struct stat *);
@@ -753,7 +765,149 @@ static void pump_shader_wait(void) { CFRunLoopRunInMode(kCFRunLoopDefaultMode,.0
     unsigned tid=(trace_guest && gsv_enabled())?trace_tid():0; \
     GWWaitRecord previous=gwt_begin(tid,name,address); \
     int result=(expression); int code=errno; gwt_end(tid,previous); errno=code; return result
+__attribute__((noinline))
 static int guest_mutex_lock(pthread_mutex_t *mutex) {
+    // A WoW 70532 TACT worker repeatedly passed 0x198 into libsystem_pthread.
+    // Capture the guest call site before the same operation faults; never fake success.
+    if (trace_tact_mutex && (uintptr_t)mutex < 0x10000) {
+        unsigned count=atomic_fetch_add_explicit(&tact_low_mutex_reports,1,memory_order_relaxed);
+        if (count<8) {
+            int previous_errno=errno;
+            uintptr_t caller=(uintptr_t)__builtin_return_address(0);
+            uintptr_t preferred=inside((const void *)caller,1)?caller-guest.slide:0;
+            LOG("[tact-probe] pthread_mutex_lock mutex=%p caller=%#lx guest_preferred=%#lx (will call real pthread)\n",
+                mutex,(unsigned long)caller,(unsigned long)preferred);
+            // Inspect the *writable alias*, never dereference the debugger's
+            // execute-only view. The on-disk WoW image may be unpacked at
+            // startup, so these are the actual post-initializer ARM64 words.
+            uintptr_t rx=(uintptr_t)guest.arena.executable;
+            size_t before=16u*4u, after=4u*4u;
+            if (guest.arena.writable && caller>=rx) {
+                size_t offset=(size_t)(caller-rx);
+                if (offset>=before && guest.arena.size>=after &&
+                    offset<=guest.arena.size-after) {
+                    uint32_t words[20];
+                    memcpy(words,(const char *)guest.arena.writable+offset-before,sizeof words);
+                    for (unsigned i=0;i<20;i++) {
+                        uintptr_t instruction=caller-before+(uintptr_t)i*4u;
+                        LOG("[tact-probe] arm64 preferred=%#lx word=%08x%s\n",
+                            (unsigned long)(instruction-guest.slide),words[i],
+                            instruction==caller-4?" <call instruction>":"");
+                    }
+                } else LOG("[tact-probe] code snapshot skipped (caller outside available arena range)\n");
+            } else LOG("[tact-probe] code snapshot skipped (no writable alias for guest caller)\n");
+
+            // Follow the AArch64 frame-pointer chain once. The saved LR in
+            // the guest caller's frame identifies the earlier function that
+            // supplied the 0x28 object pointer. Read frames via vm_read_overwrite
+            // so unexpected/unmapped stack addresses do not add another crash.
+            uintptr_t fp=(uintptr_t)__builtin_frame_address(0);
+            uintptr_t wrapper_frame[2]={0}, guest_frame[2]={0};
+            vm_size_t got=0;
+            kern_return_t kr=vm_read_overwrite(mach_task_self(),(vm_address_t)fp,
+                                                sizeof wrapper_frame,(vm_address_t)wrapper_frame,&got);
+            if (kr==KERN_SUCCESS && got==sizeof wrapper_frame &&
+                wrapper_frame[0]>fp && wrapper_frame[0]-fp<1024*1024 &&
+                !(wrapper_frame[0]&15)) {
+                got=0;
+                kr=vm_read_overwrite(mach_task_self(),(vm_address_t)wrapper_frame[0],
+                                     sizeof guest_frame,(vm_address_t)guest_frame,&got);
+                uintptr_t parent=guest_frame[1]&0x0000ffffffffffffULL;
+                if (kr==KERN_SUCCESS && got==sizeof guest_frame && inside((const void *)parent,1)) {
+                    LOG("[tact-probe] earlier guest frame=%#lx guest_preferred=%#lx (may not be the immediate caller)\n",
+                        (unsigned long)parent,(unsigned long)(parent-guest.slide));
+                    // The confirmed WoW 70532 helper at 0x102a39c9c uses:
+                    // stp x20,x19,[sp,#0x20]; stp x29,x30,[sp,#0x30]
+                    // add x29,sp,#0x30. Therefore its saved *caller* x19
+                    // is at FP-8. x19 is callee-saved in the arm64 ABI.
+                    if (preferred==0x102a39cc4ULL && wrapper_frame[0]>=8) {
+                        uintptr_t saved_x19=0;
+                        if (tact_read_pointer(wrapper_frame[0]-8,&saved_x19)) {
+                            LOG("[tact-state] saved_caller_x19=%#lx\n",(unsigned long)saved_x19);
+                            uintptr_t outer=0, field=0;
+                            if (saved_x19 && saved_x19<=(uintptr_t)-1-0x10 &&
+                                tact_read_pointer(saved_x19+0x10,&outer)) {
+                                LOG("[tact-state] *(x19+0x10)=%#lx\n",(unsigned long)outer);
+                                if (outer && outer<=(uintptr_t)-1-0x700 &&
+                                    tact_read_pointer(outer+0x700,&field))
+                                    LOG("[tact-state] *(*(x19+0x10)+0x700)=%#lx (candidate from earlier code, not proven input)\n",
+                                        (unsigned long)field);
+                                else LOG("[tact-state] second field read unavailable\n");
+                            } else LOG("[tact-state] first field read unavailable\n");
+                        } else LOG("[tact-state] saved x19 unavailable\n");
+                    }
+                    uintptr_t rx=(uintptr_t)guest.arena.executable;
+                    size_t back=64u*4u, forward=8u*4u;
+                    if (guest.arena.writable && parent>=rx) {
+                        size_t offset=(size_t)(parent-rx);
+                        if (offset>=back && guest.arena.size>=forward &&
+                            offset<=guest.arena.size-forward) {
+                            uint32_t words[72];
+                            memcpy(words,(const char *)guest.arena.writable+offset-back,sizeof words);
+                            for (unsigned i=0;i<72;i++) {
+                                uintptr_t ip=parent-back+(uintptr_t)i*4u;
+                                LOG("[tact-upstream] arm64 preferred=%#lx word=%08x%s\n",
+                                    (unsigned long)(ip-guest.slide),words[i],
+                                    ip==parent-4?" <upstream call>":"");
+                            }
+                        } else LOG("[tact-probe] upstream code snapshot outside arena bounds\n");
+                    }
+                    // The logged BL at guest-preferred 0x102a0bf0c
+                    // targets 0x102a2dcac in WoW Forever build 70532.
+                    // Snapshot this intermediate callee's actual post-init
+                    // instructions: its stack frame was omitted by the
+                    // backtrace, so frame walking alone cannot inspect it.
+                    if (preferred==0x102a39cc4ULL && guest.arena.writable) {
+                        uintptr_t target=(uintptr_t)guest.slide+0x102a2dcacULL;
+                        uintptr_t rxbase=(uintptr_t)guest.arena.executable;
+                        if (target>=rxbase) {
+                            size_t offset=(size_t)(target-rxbase);
+                            enum { COUNT=96 };
+                            if (offset<=guest.arena.size &&
+                                sizeof(uint32_t)*COUNT<=guest.arena.size-offset) {
+                                uint32_t words[COUNT];
+                                memcpy(words,(const char *)guest.arena.writable+offset,sizeof words);
+                                LOG("[tact-middle] BL target=0x102a2dcac instructions=%u (WoW build 70532)\n",(unsigned)COUNT);
+                                for (unsigned i=0;i<COUNT;i++)
+                                    LOG("[tact-middle] arm64 preferred=%#llx word=%08x%s\n",
+                                        (unsigned long long)(0x102a2dcacULL+(unsigned long long)i*4ULL),
+                                        words[i],i==0?" <entry>":"");
+                            } else LOG("[tact-middle] snapshot target outside executable arena\n");
+                        }
+                    }
+                    // Additional frame records help distinguish the recorded
+                    // return address from an actual direct caller. Capture
+                    // only bounded snapshots, and never execute guest data.
+                    uintptr_t previous_fp=wrapper_frame[0], next_fp=guest_frame[0];
+                    for (unsigned depth=2;depth<=4;depth++) {
+                        if (next_fp<=previous_fp || next_fp-previous_fp>1024*1024 || (next_fp&15)) break;
+                        uintptr_t record[2]={0};
+                        if (!tact_read_pointer(next_fp,&record[0]) ||
+                            !tact_read_pointer(next_fp+8,&record[1])) break;
+                        uintptr_t ra=record[1]&0x0000ffffffffffffULL;
+                        if (!inside((const void *)ra,1)) break;
+                        LOG("[tact-chain] depth=%u return=%#lx guest_preferred=%#lx\n",
+                            depth,(unsigned long)ra,(unsigned long)(ra-guest.slide));
+                        if (guest.arena.writable && ra>=rx) {
+                            size_t offset=(size_t)(ra-rx), back=24u*4u, after=4u*4u;
+                            if (offset>=back && guest.arena.size>=after && offset<=guest.arena.size-after) {
+                                uint32_t words[28];
+                                memcpy(words,(const char *)guest.arena.writable+offset-back,sizeof words);
+                                for (unsigned i=0;i<28;i++) {
+                                    uintptr_t ip=ra-back+(uintptr_t)i*4u;
+                                    LOG("[tact-chain-insn] depth=%u preferred=%#lx word=%08x%s\n",
+                                        depth,(unsigned long)(ip-guest.slide),words[i],
+                                        ip==ra-4?" <call>":"");
+                                }
+                            }
+                        }
+                        previous_fp=next_fp; next_fp=record[0];
+                    }
+                } else LOG("[tact-probe] upstream guest return address could not be identified\n");
+            } else LOG("[tact-probe] upstream frame unavailable (frame record not readable)\n");
+            errno=previous_errno;
+        }
+    }
     WAIT_TRACE_CALL("pthread_mutex_lock",mutex,pthread_mutex_lock(mutex));
 }
 static int guest_cond_wait(pthread_cond_t *condition,pthread_mutex_t *mutex) {
@@ -820,6 +974,7 @@ static void *hook(const char *name) {
     HOOK("mmap",guest_mmap); HOOK("mprotect",guest_mprotect); HOOK("munmap",guest_munmap);
     if (gv_enabled(&vm_budget) || gsv_enabled()) HOOK("madvise",guest_madvise);
     HOOK("memcpy",guest_memcpy); HOOK("memmove",guest_memmove); HOOK("memset",guest_memset);
+    if (trace_tact_mutex) HOOK("pthread_mutex_lock",guest_mutex_lock);
     if (gsv_enabled()) {
         HOOK("fstat",guest_fstat);
         HOOK("bzero",guest_bzero);
@@ -830,7 +985,7 @@ static void *hook(const char *name) {
         HOOK("strcmp",gsv_strcmp); HOOK("strncmp",gsv_strncmp);
         HOOK("memcmp",gsv_memcmp); HOOK("memchr",gsv_memchr); HOOK("strchr",gsv_strchr);
         if(trace_guest) {
-            HOOK("pthread_mutex_lock",guest_mutex_lock);
+            if (!trace_tact_mutex) HOOK("pthread_mutex_lock",guest_mutex_lock);
             HOOK("pthread_cond_wait",guest_cond_wait); HOOK("pthread_cond_timedwait",guest_cond_timedwait);
             HOOK("pthread_cond_timedwait_relative_np",guest_cond_relativewait);
             HOOK("pthread_rwlock_rdlock",guest_rwlock_read); HOOK("pthread_rwlock_wrlock",guest_rwlock_write);
@@ -1676,6 +1831,8 @@ bool ng_initialize(const char *path, const char *frameworks, const char *library
     external=!signed_backend && !local && (atomic_load(&use_external_authorization) ||
         [NSProcessInfo.processInfo.arguments containsObject:@"--external-authorization"]);
 #endif
+    trace_tact_mutex=external;
+    if (trace_tact_mutex) LOG("[tact-probe] External JIT mutex diagnostics armed; low addresses will be logged without changing lock semantics\n");
     if (!signed_backend) {
         // Only what certainly cannot fit is refused; the rest is the device's answer.
         size_t limit=nc_launch_limit(), available=nc_available_memory();
