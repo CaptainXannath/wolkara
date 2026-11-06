@@ -31,107 +31,119 @@ static void Capture(UIView *host,NSString *name) {
     NSString *documents=NSSearchPathForDirectoriesInDomains(NSDocumentDirectory,NSUserDomainMask,YES).firstObject;
     [UIImagePNGRepresentation(image) writeToFile:[documents stringByAppendingPathComponent:name] atomically:YES];
 }
+@interface AKAbilityTouch : UITouch
+@property CGPoint point;
+@property(nonatomic,weak) UIView *reference;
+@end
+@implementation AKAbilityTouch
+- (CGPoint)locationInView:(UIView *)view { return [self.reference convertPoint:self.point toView:view]; }
+@end
+static AKAbilityTouch *StartCircle(UIControl *circle,UIView *host) {
+    AKAbilityTouch *touch=[AKAbilityTouch new]; touch.reference=host;
+    touch.point=[circle convertPoint:CGPointMake(circle.bounds.size.width/2,circle.bounds.size.height/2) toView:host];
+    assert([circle beginTrackingWithTouch:touch withEvent:nil]); return touch;
+}
+static void CircleTap(UIControl *circle,UIView *host) {
+    AKAbilityTouch *touch=StartCircle(circle,host); [circle endTrackingWithTouch:touch withEvent:nil];
+}
 void TestTouchAbilitiesUI(UIView *host,AKTouchGamepad *manager,GCVirtualController *controller) {
     [NSUserDefaults.standardUserDefaults removeObjectForKey:@"WolkaraTouchAbilitiesV1"];
     [manager toggleSettings]; Tap(host,@"wolkara.controls.abilities");
     assert(manager.configuring && manager.editing);
-    UIView *first=Find(host,@"wolkara.ability.0.up"); assert(first);
+    UIControl *first=(id)Find(host,@"wolkara.ability.0.up"); assert(first);
     AKTouchActionOverlay *overlay=(id)first.superview;
-    Tap(host,@"wolkara.abilities.reset"); first=Find(host,@"wolkara.ability.0.up"); [overlay layoutIfNeeded];
+    Tap(host,@"wolkara.abilities.reset"); first=(id)Find(host,@"wolkara.ability.0.up"); [overlay layoutIfNeeded];
     UISwitch *enabled=(id)Find(host,@"wolkara.abilities.enabled"); enabled.on=YES;
     [enabled sendActionsForControlEvents:UIControlEventValueChanged];
     GCExtendedGamepad *pad=controller.controller.extendedGamepad;
-    [(UIControl *)first sendActionsForControlEvents:UIControlEventTouchDown]; Drain(); assert(!pad.dpad.up.pressed);
+    AKAbilityTouch *editingTouch=[AKAbilityTouch new];
+    assert(![first beginTrackingWithTouch:editingTouch withEvent:nil]); assert(!pad.dpad.up.pressed);
     UISlider *size=(id)Find(host,@"wolkara.abilities.size");
     CGRect before=first.frame; size.value=1.3; [size sendActionsForControlEvents:UIControlEventValueChanged]; [overlay layoutIfNeeded];
     assert(fabs(first.frame.size.width/before.size.width-1.3)<.01);
     AKAbilityTestPan *pan=[AKAbilityTestPan new]; [first addGestureRecognizer:pan]; pan.phase=UIGestureRecognizerStateBegan;
     pan.movement=CGPointMake(12,-10); CGPoint old=overlay.layout.center; [overlay drag:pan];
     assert(overlay.layout.center.x>old.x && overlay.layout.center.y<old.y);
-    UISegmentedControl *mode=(id)Find(host,@"wolkara.abilities.mode"); mode.selectedSegmentIndex=1;
-    [mode sendActionsForControlEvents:UIControlEventValueChanged];
+    UISegmentedControl *mode=(id)Find(host,@"wolkara.abilities.mode"); assert(mode.numberOfSegments==3);
+    mode.selectedSegmentIndex=1; [mode sendActionsForControlEvents:UIControlEventValueChanged];
+    NSMutableArray *positions=[NSMutableArray new];
+    for (AKTouchAction *action in overlay.layout.actions) [positions addObject:[NSValue valueWithCGPoint:action.position]];
+    pan.movement=CGPointMake(10,5); [overlay drag:pan];
+    for (NSUInteger i=0;i<overlay.layout.actions.count;i++)
+        assert(CGPointEqualToPoint(overlay.layout.actions[i].position,[positions[i] CGPointValue])==(i>=4));
+    CGFloat oldSize=overlay.layout.actions[0].diameter;
+    size.value=oldSize*1.2; [size sendActionsForControlEvents:UIControlEventValueChanged];
+    assert(fabs(overlay.layout.actions[0].diameter-oldSize*1.2)<.01);
+    assert(overlay.layout.actions[4].diameter==42);
+    Capture(host,@"abilities-editor.png");
+    mode.selectedSegmentIndex=2; [mode sendActionsForControlEvents:UIControlEventValueChanged];
     CGPoint other=overlay.layout.actions[1].position,position=overlay.layout.actions[0].position;
     pan.movement=CGPointMake(10,5); [overlay drag:pan];
     assert(!CGPointEqualToPoint(position,overlay.layout.actions[0].position)); assert(CGPointEqualToPoint(other,overlay.layout.actions[1].position));
     size.value=65; [size sendActionsForControlEvents:UIControlEventValueChanged]; assert(overlay.layout.actions[0].diameter==65);
     [first removeGestureRecognizer:pan];
-    Capture(host,@"abilities-editor.png");
     Tap(host,@"wolkara.abilities.done"); assert(!manager.configuring && !manager.editing);
     AKTouchActionLayout *saved=[[AKTouchActionLayout alloc] initWithDefaults:NSUserDefaults.standardUserDefaults];
-    assert(saved.enabled && saved.actions[0].diameter==65);
-    // Actual GCVirtualController input, all 32 default combinations.
-    for (AKTouchAction *action in overlay.layout.actions) {
-        UIControl *circle=(id)Find(host,[@"wolkara.ability." stringByAppendingString:action.identifier]);
-        assert(circle && !circle.hidden && !overlay.hidden);
-        [circle sendActionsForControlEvents:UIControlEventTouchDown]; Drain();
-        assert(pad.leftTrigger.pressed==!!(action.modifiers&1)); assert(pad.rightTrigger.pressed==!!(action.modifiers&2));
-        NSDictionary *buttons=@{@"A":pad.buttonA,@"B":pad.buttonB,@"X":pad.buttonX,@"Y":pad.buttonY,
-            @"up":pad.dpad.up,@"right":pad.dpad.right,@"down":pad.dpad.down,@"left":pad.dpad.left};
-        assert(((GCControllerButtonInput *)buttons[action.button]).pressed);
-        [circle sendActionsForControlEvents:UIControlEventTouchCancel]; Drain();
-        assert(!pad.leftTrigger.pressed&&!pad.rightTrigger.pressed&&!((GCControllerButtonInput *)buttons[action.button]).pressed);
-    }
-    // Observe delivery, not only the final profile. Before the fix the LT
-    // callback already saw X held, and X-up already saw LT released.
+    assert(saved.enabled && saved.actions[0].diameter==65 && [saved groupForAction:saved.actions[0]].count==4);
+    // Real tracking, not sendActions: holding/jitter cannot press a modifier.
+    // Only lifting a tap commits one chord; dragging and returning is sticky.
     for (AKTouchAction *action in overlay.layout.actions) {
         UIControl *circle=(id)Find(host,[@"wolkara.ability." stringByAppendingString:action.identifier]);
         NSDictionary *buttons=@{@"A":pad.buttonA,@"B":pad.buttonB,@"X":pad.buttonX,@"Y":pad.buttonY,
             @"up":pad.dpad.up,@"right":pad.dpad.right,@"down":pad.dpad.down,@"left":pad.dpad.left};
         GCControllerButtonInput *target=buttons[action.button];
         __block NSUInteger downs=0,ups=0,modifierDowns=0,modifierUps=0;
-        NSMutableArray *trace=[NSMutableArray new];
         GCControllerButtonValueChangedHandler modifier=^(GCControllerButtonInput *button,float value,BOOL pressed) {
-            (void)button; (void)value;
-            assert(!target.pressed); // Distinct modifier-only phases on both sides.
+            (void)button; (void)value; assert(!target.pressed);
             if (pressed) modifierDowns++; else modifierUps++;
-            [trace addObject:pressed?@"modifier down":@"modifier up"];
         };
         pad.leftTrigger.pressedChangedHandler=modifier; pad.rightTrigger.pressedChangedHandler=modifier;
         target.pressedChangedHandler=^(GCControllerButtonInput *button,float value,BOOL pressed) {
             (void)button; (void)value;
-            assert(pad.leftTrigger.pressed==!!(action.modifiers&1));
-            assert(pad.rightTrigger.pressed==!!(action.modifiers&2));
+            assert(pad.leftTrigger.pressed==!!(action.modifiers&1)); assert(pad.rightTrigger.pressed==!!(action.modifiers&2));
             if (pressed) downs++; else ups++;
-            [trace addObject:pressed?@"button down":@"button up"];
         };
-        // A tap entirely within one UIKit turn still delivers one ability.
-        [circle sendActionsForControlEvents:UIControlEventTouchDown];
-        [circle sendActionsForControlEvents:UIControlEventTouchUpInside]; Drain(); Drain();
+        AKAbilityTouch *touch=StartCircle(circle,host); Drain();
+        assert(!downs && !modifierDowns && !target.pressed && !pad.leftTrigger.pressed && !pad.rightTrigger.pressed);
+        touch.point=CGPointMake(touch.point.x+2,touch.point.y+1); [circle continueTrackingWithTouch:touch withEvent:nil];
+        [circle endTrackingWithTouch:touch withEvent:nil]; Drain(); Drain();
         assert(downs==1 && ups==1);
         NSUInteger modifiers=!!(action.modifiers&1)+!!(action.modifiers&2);
         assert(modifierDowns==modifiers && modifierUps==modifiers);
-        if ([action.identifier isEqual:@"1.X"]) NSLog(@"CHORD_PHASE_TRACE=%@",trace);
-        target.pressedChangedHandler=nil;
-        pad.leftTrigger.pressedChangedHandler=nil; pad.rightTrigger.pressedChangedHandler=nil;
+        // A fast tap uses exactly the same delivery phases.
+        CircleTap(circle,host); Drain(); Drain(); assert(downs==2 && ups==2);
+        touch=StartCircle(circle,host); CGPoint origin=touch.point; Drain();
+        touch.point=CGPointMake(origin.x+18,origin.y+10); [circle continueTrackingWithTouch:touch withEvent:nil];
+        touch.point=origin; [circle continueTrackingWithTouch:touch withEvent:nil];
+        [circle endTrackingWithTouch:touch withEvent:nil]; Drain();
+        assert(downs==2 && ups==2 && modifierDowns==2*modifiers && modifierUps==2*modifiers);
+        touch=StartCircle(circle,host); [circle cancelTrackingWithEvent:nil];
+        [circle endTrackingWithTouch:touch withEvent:nil]; Drain(); assert(downs==2);
+        target.pressedChangedHandler=nil; pad.leftTrigger.pressedChangedHandler=nil; pad.rightTrigger.pressedChangedHandler=nil;
     }
-    // A cancelled gesture never becomes a delayed ability, even after lift.
+    // Settings cancel both a candidate touch and a committed but pending tap.
     UIControl *pending=(id)Find(host,@"wolkara.ability.1.X");
     __block NSUInteger latePresses=0;
     pad.buttonX.pressedChangedHandler=^(GCControllerButtonInput *button,float value,BOOL pressed) {
         (void)button; (void)value; if (pressed) latePresses++;
     };
-    [pending sendActionsForControlEvents:UIControlEventTouchDown];
-    [pending sendActionsForControlEvents:UIControlEventTouchDragExit]; Drain();
-    assert(!latePresses && !pad.leftTrigger.pressed);
-    [pending sendActionsForControlEvents:UIControlEventTouchDown];
-    [pending sendActionsForControlEvents:UIControlEventTouchUpInside];
-    [manager toggleSettings]; Drain();
-    assert(!latePresses && !pad.leftTrigger.pressed && !pad.buttonX.pressed);
-    [manager toggleSettings]; pad.buttonX.pressedChangedHandler=nil;
+    AKAbilityTouch *resizedTouch=StartCircle(pending,host); CGRect originalBounds=overlay.bounds;
+    overlay.bounds=CGRectInset(originalBounds,2,2); [overlay layoutSubviews];
+    [pending endTrackingWithTouch:resizedTouch withEvent:nil]; Drain(); assert(!latePresses);
+    overlay.bounds=originalBounds; [overlay layoutSubviews];
+    AKAbilityTouch *touch=StartCircle(pending,host); [manager toggleSettings];
+    [pending endTrackingWithTouch:touch withEvent:nil]; Drain(); assert(!latePresses);
+    [manager toggleSettings]; CircleTap(pending,host); [manager toggleSettings]; Drain();
+    assert(!latePresses && !pad.leftTrigger.pressed && !pad.buttonX.pressed); [manager toggleSettings];
     UIControl *lt=(id)Find(host,[@"tolkara.gamepad." stringByAppendingString:GCInputLeftTrigger]);
     UIControl *rt=(id)Find(host,[@"tolkara.gamepad." stringByAppendingString:GCInputRightTrigger]);
-    UIControl *x=(id)Find(host,@"wolkara.ability.1.X");
-    [lt sendActionsForControlEvents:UIControlEventTouchDown]; [x sendActionsForControlEvents:UIControlEventTouchDown]; Drain();
-    assert(pad.leftTrigger.pressed&&pad.buttonX.pressed); [x sendActionsForControlEvents:UIControlEventTouchUpInside]; Drain();
-    assert(pad.leftTrigger.pressed&&!pad.buttonX.pressed); [lt sendActionsForControlEvents:UIControlEventTouchUpInside];
-    [rt sendActionsForControlEvents:UIControlEventTouchDown]; [x sendActionsForControlEvents:UIControlEventTouchDown]; Drain();
-    assert(pad.rightTrigger.pressed&&!pad.leftTrigger.pressed&&!pad.buttonX.pressed);
-    [x sendActionsForControlEvents:UIControlEventTouchUpInside]; [rt sendActionsForControlEvents:UIControlEventTouchUpInside];
-    [x sendActionsForControlEvents:UIControlEventTouchDown]; Drain(); assert(pad.buttonX.pressed);
-    [manager toggleSettings]; Drain(); assert(!pad.buttonX.pressed&&!pad.leftTrigger.pressed);
-    Tap(host,@"wolkara.controls.abilities");
-    Tap(host,@"wolkara.abilities.done");
-    // Reference preview stays local to this synthetic fixture, never in the app/repository.
+    [lt sendActionsForControlEvents:UIControlEventTouchDown]; Drain(); CircleTap(pending,host); Drain();
+    assert(latePresses==1 && pad.leftTrigger.pressed && !pad.buttonX.pressed);
+    [lt sendActionsForControlEvents:UIControlEventTouchUpInside]; Drain();
+    [rt sendActionsForControlEvents:UIControlEventTouchDown]; CircleTap(pending,host); Drain();
+    assert(latePresses==1 && pad.rightTrigger.pressed && !pad.leftTrigger.pressed);
+    assert(pending.layer.borderWidth==2); // A rejected tap remains visibly marked.
+    [rt sendActionsForControlEvents:UIControlEventTouchUpInside]; Drain(); pad.buttonX.pressedChangedHandler=nil;
     AKTouchActionOverlay *preview=[[AKTouchActionOverlay alloc] initWithFrame:CGRectMake(0,0,1280,900)];
     [preview resetLayout]; preview.layout.enabled=YES; preview.layout.borderOpacity=.7; preview.active=YES; [preview layoutIfNeeded];
     UIView *canvas=[[UIView alloc] initWithFrame:preview.bounds];
@@ -139,5 +151,5 @@ void TestTouchAbilitiesUI(UIView *host,AKTouchGamepad *manager,GCVirtualControll
     if (reference) { UIImageView *background=[[UIImageView alloc] initWithImage:[UIImage imageWithContentsOfFile:reference]]; background.frame=canvas.bounds; [canvas addSubview:background]; }
     [canvas addSubview:preview]; Capture(canvas,@"abilities-reference.png");
     overlay.layout.enabled=NO; [overlay.layout save]; overlay.active=NO;
-    puts("TOUCH_ABILITIES_UI_PASS: editor, whole/individual adjustments, persistence, 32 held chords and 32 quick-tap callback sequences, modifier delivery phases, incompatible chord rejection and pending-input cancellation.");
+    puts("TOUCH_ABILITIES_UI_PASS: three edit modes, independent groups, persistence, 32 tap-on-lift and quick-tap sequences, no input during hold/drag/cancel, manual ownership and settings cancellation.");
 }

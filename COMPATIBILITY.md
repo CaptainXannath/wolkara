@@ -302,3 +302,21 @@ synthetic controller fixture; cancellation discards pending presses, including
 several overdue presses cancelled together. The signed update was installed over
 the existing Wolkara app, together with the direct-camera cursor-warp correction;
 its process remained running after launch. Gameplay confirmation is still pending.
+
+## Touch intent and independent ability groups (2026-11-06)
+
+The user reported that restarting a camera drag elsewhere still jumped, that UI
+scaling needed independent four-button groups, and that dragging over an ability
+should not activate it. The new fixture reproduced an absolute-position change
+on touch-down even with zero event delta; the previous fix covered only deltas.
+
+Mouse-off touches now wait for tap/drag intent. Drags keep the existing cursor
+anchor from their first event, including before capture; taps click on lift.
+Ability circles also commit on lift, while movement hands off to the camera or
+trackpad without a controller press. Eight saved four-button groups can move and
+resize independently; existing layouts migrate without resetting their positions.
+
+Synthetic tests pass cursor polling/restarts, circle-to-host drag handoff, all 32
+tap/quick-tap sequences, drag/cancel suppression, group geometry and persistence.
+The signed update was installed in place on the Duo and its process was running
+after launch. Physical gameplay confirmation of these three changes is pending.

@@ -1,6 +1,8 @@
 // Synthetic UIKit touches only; no game is loaded or controlled by this fixture.
 #import "AppKit.h"
 #import "TouchControls.h"
+#import "TouchGamepad.h"
+#import "TouchActionOverlay.h"
 #include <assert.h>
 #include <math.h>
 
@@ -11,7 +13,7 @@
 @property(nonatomic,weak) UIView *host;
 @end
 @implementation CameraTouch
-- (CGPoint)locationInView:(UIView *)view { (void)view; return self.point; }
+- (CGPoint)locationInView:(UIView *)view { return self.host ? [self.host convertPoint:self.point toView:view] : self.point; }
 - (UITouchPhase)phase { return self.testPhase; }
 - (UITouchType)type { return self.testType; }
 - (UIView *)view { return self.host; }
@@ -63,100 +65,110 @@ static void Send(UIView *host, CameraEvent *event, CameraTouch *touch, UITouchPh
 static void CheckCamera(CGSize size, CGPoint start, BOOL right) {
     AKMouseSetCaptured(false);
     NSWindow *window=[[NSWindow alloc] initWithContentRect:(CGRect){CGPointZero,size} styleMask:0 backing:2 defer:NO];
-    UIView *host=[[NSClassFromString(@"AKHostView") alloc] initWithFrame:(CGRect){CGPointZero,size}];
+    UIView<AKTouchDragHost> *host=[[NSClassFromString(@"AKHostView") alloc] initWithFrame:(CGRect){CGPointZero,size}];
     [host setValue:window forKey:@"nsWindow"];
     AKTouchControls *controls=[host valueForKey:@"_touchControls"]; controls.trackpadEnabled=NO;
     [host layoutSubviews]; Empty();
-    CameraTouch *finger=[CameraTouch new]; finger.host=host; finger.testType=UITouchTypeDirect;
+    CameraTouch *finger=[CameraTouch new]; finger.host=host;
     CameraEvent *event=[CameraEvent new]; event.touches=[NSSet setWithObject:finger];
     event.buttons=right ? UIEventButtonMaskSecondary : 0;
     NSEventType down=right ? NSEventTypeRightMouseDown : NSEventTypeLeftMouseDown;
     NSEventType drag=right ? NSEventTypeRightMouseDragged : NSEventTypeLeftMouseDragged;
     NSEventType up=right ? NSEventTypeRightMouseUp : NSEventTypeLeftMouseUp;
-    Send(host,event,finger,UITouchPhaseBegan,start);
-    assert(CheckEvent(down,start,size,0,0).buttonNumber==(right ? 1 : 0));
-
-    // The game captures and warps its cursor after the down event. This must
-    // not change the next delta, whatever the finger's starting position.
-    CGPoint center=CGPointMake(size.width/2,size.height/2);
-    AKMouseSetCaptured(true); Warp(center);
+    CGPoint center=CGPointMake(size.width/2,size.height/2); Warp(center);
+    CGPoint anchor=CGPointMake(window.mouseLocationOutsideOfEventStream.x,size.height-window.mouseLocationOutsideOfEventStream.y);
+    CGPoint screen=NSEvent.mouseLocation;
+    // Touch-down and small jitter never change either polled position or events.
+    Send(host,event,finger,UITouchPhaseBegan,start); Empty();
+    Send(host,event,finger,UITouchPhaseMoved,CGPointMake(start.x+3,start.y+2)); Empty();
+    assert(CGPointEqualToPoint(window.mouseLocationOutsideOfEventStream,CGPointMake(anchor.x,size.height-anchor.y)));
+    assert(CGPointEqualToPoint(NSEvent.mouseLocation,screen));
     CGPoint moved=CGPointMake(start.x+10,start.y+5);
     Send(host,event,finger,UITouchPhaseMoved,moved);
-    CheckEvent(drag,center,size,10,5);
-    // Repeated warps, including an edge, leave motion unclipped and continuous.
-    CGPoint edge=CGPointMake(size.width-1,size.height-1); Warp(edge);
+    assert(CheckEvent(down,anchor,size,0,0).buttonNumber==(right?1:0));
+    CheckEvent(drag,anchor,size,10,5);
+    // Capture can arrive late. Relative motion already works before it arrives.
+    AKMouseSetCaptured(true); CGPoint edge=CGPointMake(size.width-1,size.height-1); Warp(edge);
     Send(host,event,finger,UITouchPhaseMoved,moved); Empty();
     moved=CGPointMake(moved.x+4,moved.y-3);
     Send(host,event,finger,UITouchPhaseMoved,moved); CheckEvent(drag,edge,size,4,-3);
-
     CameraTouch *other=[CameraTouch new]; other.host=host;
     event.touches=[NSSet setWithObjects:finger,other,nil];
     Send(host,event,other,UITouchPhaseBegan,CGPointMake(20,20)); Empty();
     Send(host,event,other,UITouchPhaseMoved,CGPointMake(800,500)); Empty();
     Send(host,event,other,UITouchPhaseEnded,CGPointMake(800,500)); Empty();
-
-    // Keep relative semantics through a release/re-capture during this drag.
     AKMouseSetCaptured(false);
     moved=CGPointMake(moved.x-6,moved.y+8);
     Send(host,event,finger,UITouchPhaseMoved,moved); CheckEvent(drag,edge,size,-6,8);
     Send(host,event,finger,UITouchPhaseEnded,moved); CheckEvent(up,edge,size,0,0); Empty();
-
-    // Ordinary UI drags and taps still land under the finger, with zero delta
-    // on button transitions, even if UIKit's final up sample moved slightly.
     event.touches=[NSSet setWithObject:finger];
-    Send(host,event,finger,UITouchPhaseBegan,start); CheckEvent(down,start,size,0,0);
-    moved=CGPointMake(start.x+12,start.y-7);
-    Send(host,event,finger,UITouchPhaseMoved,moved); CheckEvent(drag,moved,size,12,-7);
-    CGPoint end=CGPointMake(moved.x+2,moved.y+1);
-    Send(host,event,finger,UITouchPhaseEnded,end); CheckEvent(up,end,size,0,0); Empty();
-
-    // A touch starting while captured must not teleport the guest cursor.
-    AKMouseSetCaptured(true); Warp(center);
-    Send(host,event,finger,UITouchPhaseBegan,start); CheckEvent(down,center,size,0,0);
-    Send(host,event,finger,UITouchPhaseCancelled,moved); CheckEvent(up,center,size,0,0);
-    Send(host,event,finger,UITouchPhaseMoved,end); Empty();
-
-    // Settings, focus loss and mode/viewport changes release the owned button
-    // exactly once and consume the cancelled gesture's remaining samples.
+    // Lifting and restarting far away must keep the last guest anchor too.
+    CGPoint restart=CGPointMake(size.width-start.x,size.height-start.y);
+    screen=NSEvent.mouseLocation;
+    Send(host,event,finger,UITouchPhaseBegan,restart); Empty(); assert(CGPointEqualToPoint(screen,NSEvent.mouseLocation));
+    Send(host,event,finger,UITouchPhaseMoved,CGPointMake(restart.x-12,restart.y-8));
+    CheckEvent(down,edge,size,0,0); CheckEvent(drag,edge,size,-12,-8);
+    Send(host,event,finger,UITouchPhaseEnded,restart); CheckEvent(up,edge,size,0,0);
+    // A tap still clicks its screen position, but only after intent is known.
+    Send(host,event,finger,UITouchPhaseBegan,start); Empty();
+    CGPoint tap=CGPointMake(start.x+2,start.y+1);
+    Send(host,event,finger,UITouchPhaseEnded,tap);
+    CheckEvent(NSEventTypeMouseMoved,tap,size,0,0); CheckEvent(down,tap,size,0,0); CheckEvent(up,tap,size,0,0); Empty();
+    Send(host,event,finger,UITouchPhaseBegan,start); Empty();
+    Send(host,event,finger,UITouchPhaseCancelled,start); Empty();
+    // Cancellation after a drag releases once; no stale sample becomes a tap.
     for (unsigned reason=0;reason<4;reason++) {
-        Send(host,event,finger,UITouchPhaseBegan,start); CheckEvent(down,center,size,0,0);
+        Warp(center);
+        Send(host,event,finger,UITouchPhaseBegan,start); Empty();
+        Send(host,event,finger,UITouchPhaseMoved,moved);
+        CheckEvent(down,center,size,0,0); CheckEvent(drag,center,size,moved.x-start.x,moved.y-start.y);
         switch (reason) {
             case 0: [controls cancelTouches]; break;
             case 1: [NSNotificationCenter.defaultCenter postNotificationName:UIApplicationWillResignActiveNotification object:nil]; break;
             case 2: controls.trackpadEnabled=YES; break;
             case 3: host.bounds=(CGRect){CGPointZero,CGSizeMake(size.width-10,size.height-10)}; [host layoutSubviews]; break;
         }
-        CheckEvent(up,center,host.bounds.size,0,0);
-        [controls cancelTouches]; Empty();
+        CheckEvent(up,center,host.bounds.size,0,0); [controls cancelTouches]; Empty();
         Send(host,event,finger,UITouchPhaseMoved,moved); Empty();
         event.touches=[NSSet setWithObjects:finger,other,nil];
-        Send(host,event,other,UITouchPhaseBegan,CGPointMake(80,80)); Empty();
-        Send(host,event,other,UITouchPhaseMoved,CGPointMake(200,200)); Empty();
-        Send(host,event,other,UITouchPhaseEnded,CGPointMake(200,200)); Empty();
-        event.touches=[NSSet setWithObject:finger];
-        Send(host,event,finger,UITouchPhaseEnded,moved); Empty();
-        controls.trackpadEnabled=NO;
-        host.bounds=(CGRect){CGPointZero,size}; [host layoutSubviews]; Warp(center); Empty();
+        Send(host,event,other,UITouchPhaseBegan,start); Send(host,event,other,UITouchPhaseMoved,moved); Empty();
+        Send(host,event,other,UITouchPhaseEnded,moved); Empty();
+        event.touches=[NSSet setWithObject:finger]; Send(host,event,finger,UITouchPhaseEnded,moved); Empty();
+        controls.trackpadEnabled=NO; host.bounds=(CGRect){CGPointZero,size}; [host layoutSubviews]; Empty();
     }
-
-    // If UIKit omits an end after losing focus, a fresh gesture can still start.
-    Send(host,event,finger,UITouchPhaseBegan,start); CheckEvent(down,center,size,0,0);
-    [controls cancelTouches]; CheckEvent(up,center,size,0,0);
+    // A dropped UIKit end after focus loss cannot poison the next gesture.
+    Send(host,event,finger,UITouchPhaseBegan,start); [controls cancelTouches]; Empty();
     event.touches=[NSSet setWithObject:other];
-    Send(host,event,other,UITouchPhaseBegan,start); CheckEvent(down,center,size,0,0);
-    Send(host,event,other,UITouchPhaseEnded,start); CheckEvent(up,center,size,0,0);
-    AKMouseSetCaptured(false);
-
-    // The trackpad and indirect pointer paths retain their existing behavior.
-    controls.trackpadEnabled=YES;
-    id<AKTouchControlsDelegate> delegate=(id)host;
-    AKMouseSetCaptured(true); Warp(center);
-    [delegate touchMoveBy:CGPointMake(9,-4)]; CheckEvent(NSEventTypeMouseMoved,center,size,9,-4);
+    Send(host,event,other,UITouchPhaseBegan,start); Send(host,event,other,UITouchPhaseCancelled,start); Empty();
+    // A real circle tracking gesture hands off to the host, in both mouse modes.
+    AKTouchActionOverlay *overlay=[[AKTouchActionOverlay alloc] initWithFrame:host.bounds]; [host addSubview:overlay];
+    [overlay.layout reset]; overlay.layout.enabled=YES; overlay.active=YES; [overlay layoutIfNeeded];
+    __block NSUInteger presses=0;
+    overlay.press=^BOOL(AKTouchAction *a) { (void)a; presses++; return YES; };
+    __weak AKTouchActionOverlay *weakOverlay=overlay;
+    overlay.beginDrag=^BOOL(UITouch *touch,CGPoint origin) { return [host ak_beginTouchDrag:touch origin:[weakOverlay convertPoint:origin toView:host]]; };
+    overlay.moveDrag=^(UITouch *touch) { [host ak_moveTouchDrag:touch]; };
+    overlay.endDrag=^(UITouch *touch,BOOL cancelled) { [host ak_endTouchDrag:touch cancelled:cancelled]; };
+    UIControl *circle=(id)overlay.subviews.firstObject;
+    for (unsigned mouse=0;mouse<2;mouse++) {
+        controls.trackpadEnabled=mouse; Warp(center);
+        CGPoint origin=[circle convertPoint:CGPointMake(circle.bounds.size.width/2,circle.bounds.size.height/2) toView:host];
+        finger.point=origin; assert([circle beginTrackingWithTouch:finger withEvent:nil]); Empty();
+        finger.point=CGPointMake(origin.x+12,origin.y+9); [circle continueTrackingWithTouch:finger withEvent:nil];
+        if (!mouse) { CheckEvent(NSEventTypeLeftMouseDown,center,size,0,0); CheckEvent(NSEventTypeLeftMouseDragged,center,size,12,9); }
+        else CheckEvent(NSEventTypeMouseMoved,CGPointMake(center.x+12,center.y+9),size,12,9);
+        [circle endTrackingWithTouch:finger withEvent:nil];
+        if (!mouse) CheckEvent(NSEventTypeLeftMouseUp,center,size,0,0);
+        Empty(); assert(!presses);
+    }
+    overlay.beginDrag=nil; overlay.moveDrag=nil; overlay.endDrag=nil; [overlay removeFromSuperview];
+    // Trackpad and indirect pointer behavior remains unchanged.
+    controls.trackpadEnabled=YES; AKMouseSetCaptured(true); Warp(center);
+    [(id<AKTouchControlsDelegate>)host touchMoveBy:CGPointMake(9,-4)]; CheckEvent(NSEventTypeMouseMoved,center,size,9,-4);
     AKMouseSetCaptured(false); controls.trackpadEnabled=NO;
     other.testType=UITouchTypeIndirectPointer;
     Send(host,event,other,UITouchPhaseBegan,start); CheckEvent(down,start,size,0,0);
-    Send(host,event,other,UITouchPhaseMoved,moved);
-    CheckEvent(drag,moved,size,moved.x-start.x,moved.y-start.y);
+    Send(host,event,other,UITouchPhaseMoved,moved); CheckEvent(drag,moved,size,moved.x-start.x,moved.y-start.y);
     Send(host,event,other,UITouchPhaseEnded,moved); CheckEvent(up,moved,size,0,0); Empty();
 }
 int main(void) { @autoreleasepool {

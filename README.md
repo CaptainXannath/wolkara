@@ -52,8 +52,8 @@ WoW gameplay under this capability set remain untested.
   game data. Updates preserve settings and addons.
 - Apple's keyboard with iOS autocorrection and dismissal after Send, plus a
   touch trackpad with two-finger scrolling.
-- Direct camera dragging with mouse mode off keeps finger movement independent
-  of the game's cursor recentering; ordinary taps still target their screen position.
+- Direct camera dragging with mouse mode off keeps the cursor anchored when a
+  finger lifts and restarts elsewhere; taps click their screen position on lift.
 - A microphone button opens chat and transcribes speech into a visible local draft.
   Review or edit it before ✓ sends; × discards. Recognition callbacks never type
   into the game. On-device Apple Speech availability and permissions are required.
@@ -61,8 +61,9 @@ WoW gameplay under this capability set remain untested.
   uses this device's Keychain, not the clipboard, config files or input logs.
 - Physical controller support and an on-screen controller when none is connected.
 - Optional touch zones over action bars, with editable controller shortcuts,
-  individual circle sizing and whole-layout movement/scaling. The initial layout
+  individual circle sizing, independent groups of four and whole-layout movement/scaling. The initial layout
   has neutral, LT, RT and LT+RT groups; enable it in Settings → Touch abilities.
+  Taps activate on lift; drags over circles control the camera/pointer without activating an ability.
 - Movable touch controls, opacity and size settings, shoulder-position swapping,
   an alignment grid and haptics. The mouse/keyboard/microphone/key toolbar also
   moves in Edit layout. Compact settings require no scrolling.

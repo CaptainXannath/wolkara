@@ -4,6 +4,14 @@
 static NSString *const ActionsKey=@"WolkaraTouchAbilitiesV1";
 static CGFloat Bounded(CGFloat x,CGFloat low,CGFloat high,CGFloat fallback) { return isfinite(x)?MAX(low,MIN(high,x)):fallback; }
 static CGFloat Number(id value,CGFloat fallback) { return [value isKindOfClass:NSNumber.class]?[value doubleValue]:fallback; }
+static NSString *DefaultGroup(NSString *identifier) {
+    NSArray *parts=[identifier componentsSeparatedByString:@"."];
+    if (parts.count==2 && [@[@"0",@"1",@"2",@"3"] containsObject:parts[0]]) {
+        if ([@[@"up",@"right",@"down",@"left"] containsObject:parts[1]]) return [parts[0] stringByAppendingString:@".dpad"];
+        if ([@[@"Y",@"B",@"A",@"X"] containsObject:parts[1]]) return [parts[0] stringByAppendingString:@".face"];
+    }
+    return identifier;
+}
 @implementation AKTouchAction
 - (NSString *)label {
     NSString *prefix=@[@"",@"LT + ",@"RT + ",@"LT + RT + "][MIN(self.modifiers,3)];
@@ -34,6 +42,8 @@ static CGFloat Number(id value,CGFloat fallback) { return [value isKindOfClass:N
             if (![identifier isKindOfClass:NSString.class] || !identifier.length || identifier.length>80 ||
                 [ids containsObject:identifier] || ![@[@"A",@"B",@"X",@"Y",@"up",@"right",@"down",@"left"] containsObject:button]) continue;
             AKTouchAction *a=[AKTouchAction new]; a.identifier=identifier; a.button=button;
+            id group=item[@"group"];
+            a.groupIdentifier=[group isKindOfClass:NSString.class] && [group length]>0 && [group length]<=80 ? group : DefaultGroup(identifier);
             a.modifiers=(NSUInteger)Bounded(Number(item[@"modifiers"],0),0,3,0);
             a.position=CGPointMake(Bounded(Number(item[@"x"],0),-1200,1200,0),Bounded(Number(item[@"y"],0),-900,900,0));
             a.diameter=Bounded(Number(item[@"diameter"],36),20,160,36); a.enabled=Number(item[@"enabled"],1)!=0;
@@ -58,6 +68,7 @@ static CGFloat Number(id value,CGFloat fallback) { return [value isKindOfClass:N
         CGPoint p=centers[group][i/4]; CGFloat dx=group?32:43,dy=group?18:23;
         if (i%4==0) p.y-=dy; else if (i%4==1) p.x+=dx; else if (i%4==2) p.y+=dy; else p.x-=dx;
         AKTouchAction *a=[AKTouchAction new]; a.identifier=[NSString stringWithFormat:@"%lu.%@",(unsigned long)group,keys[i]];
+        a.groupIdentifier=DefaultGroup(a.identifier);
         a.button=keys[i]; a.modifiers=group; a.position=CGPointMake(p.x-640,p.y-700); a.diameter=group?32:42; a.enabled=YES;
         [_items addObject:a];
     }
@@ -90,21 +101,60 @@ static CGFloat Number(id value,CGFloat fallback) { return [value isKindOfClass:N
     p=[self originInBounds:bounds unit:unit]; self.center=CGPointMake((p.x-bounds.origin.x)/bounds.size.width,(p.y-bounds.origin.y)/bounds.size.height);
 }
 - (void)moveAction:(AKTouchAction *)action by:(CGPoint)delta inBounds:(CGRect)bounds {
+    if (action) [self moveActions:@[action] by:delta inBounds:bounds];
+}
+- (NSArray<AKTouchAction *> *)groupForAction:(AKTouchAction *)action {
+    if (!action) return @[];
+    NSMutableArray *group=[NSMutableArray new];
+    for (AKTouchAction *item in _items) if ([item.groupIdentifier isEqual:action.groupIdentifier]) [group addObject:item];
+    return group;
+}
+- (void)moveButtonGroupForAction:(AKTouchAction *)action by:(CGPoint)delta inBounds:(CGRect)bounds {
+    [self moveActions:[self groupForAction:action] by:delta inBounds:bounds];
+}
+- (void)moveActions:(NSArray<AKTouchAction *> *)actions by:(CGPoint)delta inBounds:(CGRect)bounds {
     CGFloat unit=[self unitScaleInBounds:bounds]; if (unit<=0) return;
-    CGRect frame=[self frameForAction:action inBounds:bounds];
+    CGRect frame=CGRectNull;
+    for (AKTouchAction *item in actions) frame=CGRectUnion(frame,[self frameForAction:item inBounds:bounds]);
+    if (CGRectIsNull(frame)) return;
+    // Freeze the actual anchor before changing extents. Otherwise clamping an
+    // edited group can silently translate the untouched groups too.
+    CGPoint anchor=[self originInBounds:bounds unit:unit];
+    self.center=CGPointMake((anchor.x-bounds.origin.x)/bounds.size.width,(anchor.y-bounds.origin.y)/bounds.size.height);
     CGFloat x=Bounded(frame.origin.x+delta.x,CGRectGetMinX(bounds)+4,CGRectGetMaxX(bounds)-frame.size.width-4,frame.origin.x);
     CGFloat y=Bounded(frame.origin.y+delta.y,CGRectGetMinY(bounds)+4,CGRectGetMaxY(bounds)-frame.size.height-4,frame.origin.y);
-    action.position=CGPointMake(action.position.x+(x-frame.origin.x)/unit,action.position.y+(y-frame.origin.y)/unit);
+    for (AKTouchAction *item in actions) item.position=CGPointMake(item.position.x+(x-frame.origin.x)/unit,item.position.y+(y-frame.origin.y)/unit);
+}
+- (void)resizeButtonGroupForAction:(AKTouchAction *)action diameter:(CGFloat)diameter inBounds:(CGRect)bounds {
+    NSArray *group=[self groupForAction:action]; CGFloat unit=[self unitScaleInBounds:bounds];
+    if (!group.count || unit<=0) return;
+    CGRect frame=CGRectNull; CGFloat low=0,high=INFINITY;
+    for (AKTouchAction *item in group) {
+        frame=CGRectUnion(frame,[self frameForAction:item inBounds:bounds]);
+        low=MAX(low,20/item.diameter); high=MIN(high,160/item.diameter);
+    }
+    CGPoint middle=CGPointMake(CGRectGetMidX(frame),CGRectGetMidY(frame));
+    high=MIN(high,2*MIN(middle.x-CGRectGetMinX(bounds)-4,CGRectGetMaxX(bounds)-4-middle.x)/frame.size.width);
+    high=MIN(high,2*MIN(middle.y-CGRectGetMinY(bounds)-4,CGRectGetMaxY(bounds)-4-middle.y)/frame.size.height);
+    CGFloat factor=Bounded(diameter/action.diameter,low,high,1);
+    CGPoint anchor=[self originInBounds:bounds unit:unit];
+    self.center=CGPointMake((anchor.x-bounds.origin.x)/bounds.size.width,(anchor.y-bounds.origin.y)/bounds.size.height);
+    CGPoint center=CGPointMake((middle.x-anchor.x)/unit,(middle.y-anchor.y)/unit);
+    for (AKTouchAction *item in group) {
+        item.position=CGPointMake(center.x+(item.position.x-center.x)*factor,center.y+(item.position.y-center.y)*factor);
+        item.diameter*=factor;
+    }
 }
 - (AKTouchAction *)addAction {
     if (_items.count>=64) return nil;
     AKTouchAction *a=[AKTouchAction new]; a.identifier=NSUUID.UUID.UUIDString; a.button=@"A"; a.diameter=36; a.enabled=YES;
+    a.groupIdentifier=a.identifier;
     [_items addObject:a]; return a;
 }
 - (void)removeAction:(AKTouchAction *)action { if (action) [_items removeObject:action]; }
 - (void)save {
     NSMutableArray *actions=[NSMutableArray new];
-    for (AKTouchAction *a in _items) [actions addObject:@{@"id":a.identifier,@"button":a.button,@"modifiers":@(a.modifiers),@"x":@(a.position.x),@"y":@(a.position.y),@"diameter":@(a.diameter),@"enabled":@(a.enabled)}];
+    for (AKTouchAction *a in _items) [actions addObject:@{@"id":a.identifier,@"group":a.groupIdentifier?:a.identifier,@"button":a.button,@"modifiers":@(a.modifiers),@"x":@(a.position.x),@"y":@(a.position.y),@"diameter":@(a.diameter),@"enabled":@(a.enabled)}];
     [_defaults setObject:@{@"enabled":@(self.enabled),@"scale":@(self.scale),@"border":@(self.borderOpacity),@"x":@(self.center.x),@"y":@(self.center.y),@"actions":actions} forKey:ActionsKey];
 }
 @end

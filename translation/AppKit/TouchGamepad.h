@@ -3,6 +3,13 @@
 
 NS_ASSUME_NONNULL_BEGIN
 @class AKGamepadLayout;
+enum { AKTouchDragThreshold = 8 };
+// Ability circles hand an intentional drag to the host without a gamepad press.
+@protocol AKTouchDragHost <NSObject>
+- (BOOL)ak_beginTouchDrag:(UITouch *)touch origin:(CGPoint)origin;
+- (void)ak_moveTouchDrag:(UITouch *)touch;
+- (void)ak_endTouchDrag:(UITouch *)touch cancelled:(BOOL)cancelled;
+@end
 // Radial analog mapping with a small dead zone and clamped magnitude.
 CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size);
 // Owns only our virtual device. Physical controllers and their handlers stay
