@@ -576,3 +576,6 @@
 "touch.gamepad.value.full" = "Full";
 "touch.gamepad.value.simple" = "Simple";
 "touch.gamepad.toggleEnabled" = "Turn touch controller on or off";
+
+"touch.gamepad.leftStick.hint" = "Double-tap for L3.";
+"touch.gamepad.rightStick.hint" = "Double-tap for R3.";

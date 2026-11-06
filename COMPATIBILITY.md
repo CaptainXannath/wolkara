@@ -424,8 +424,8 @@ after launch. Physical gameplay confirmation of these three changes is pending.
   reproduced an absolute hover update overwriting the anchor while a finger
   owned the gesture. Both failed before and pass after their respective fixes.
   The four-viewport fixture also covers repeated drags, capture/release,
-  cancellation, resizing, trackpad mode and ability-circle handoff. Physical
-  confirmation of the intermittent restart jerk remains pending.
+  cancellation, resizing, trackpad mode and ability-circle handoff. The user
+  subsequently confirmed that the combined update works correctly on the Duo.
 - Ported the optional performance HUD from WolkaraForever (including late Metal
   lookup/enable from `227b69e`), with attribution retained. The in-game controls settings own
   its persisted toggle. Frame rate comes from Metal presentation timestamps;
@@ -440,5 +440,31 @@ after launch. Physical gameplay confirmation of these three changes is pending.
   The installed build also retains previously verified local audio/toolbar work;
   that unrelated work is excluded from this PR's new changes.
 - Installed in place over Wi-Fi after the user closed Wolkara; normal launcher
-  process confirmed. Game data was preserved. Physical validation of English
-  dictation, repeated camera starts and game FPS is pending the user's check.
+  process confirmed. Game data was preserved. The user subsequently reported
+  that the combined update works perfectly; no numeric device FPS was supplied.
+
+## Double-tap stick clicks (2026-11-06)
+
+- Double-tapping the left/right stick sends one L3/R3 press and release. The
+  lower-right safe-area quadrant also accepts R3 on bare game content while the
+  virtual controller is visible, including Simple mode. Toolbar, ability circles,
+  other UIKit controls, indirect pointers and settings/editing are excluded.
+  Dragging at the existing eight-point threshold defeats tap recognition;
+  joystick lifts remain immediate. UIKit delays background tap endings to
+  distinguish a single click from R3, cancelling the taps when R3 is recognized.
+- Apple's native hidden virtual controller did not expose either stick button in
+  the simulator, even when requested. A scoped compatibility extension provides
+  the missing buttons using public writable controller snapshots. Only registered
+  touch controllers are extended; their identity, axes and existing buttons remain
+  intact. Discovery, dictionaries, per-button/profile callbacks and captures expose
+  the added buttons. Physical/unregistered controllers and snapshots are excluded.
+- Native-controller fixture checks pass for initial discovery, polling, callbacks,
+  captures, pulse release and settings/mode cancellation. A separate unregistered
+  native-controller fixture confirms isolation. Full controls/32 ability-chord,
+  lifecycle and direct-camera regressions also pass. These synthetic tests do not
+  prove physical double-tap recognition or in-game L3/R3 behavior; device validation
+  remains pending.
+- Signed Release build and bundle validation pass, including the new controller
+  bridge in the packaged AppKit adapter. Installed in place over Wi-Fi after the
+  exact-bundle guard confirmed Wolkara was closed; normal launch confirmed and
+  game data preserved.

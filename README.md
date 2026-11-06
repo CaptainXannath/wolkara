@@ -66,7 +66,9 @@ WoW gameplay under this capability set remain untested.
   Tap the controller toolbar button to switch Full/Simple; hold to turn it on/off.
   Simple keeps the left stick, LB/RB and menu, hiding both button rings, the right stick
   and LT/RT. LB/RB positions are saved separately for Simple and Full.
-  Touch ability circles remain available.
+  Touch ability circles remain available. Double-tap the left stick for L3 or the
+  right stick for R3. With the touch controller active, double-tapping bare game
+  content in the lower-right quadrant also sends R3, including in Simple mode.
 - Optional touch zones over action bars, with editable controller shortcuts (including LB/RB),
   individual circle sizing, independent groups of four and whole-layout movement/scaling. The initial layout
   has neutral, LT, RT and LT+RT groups; enable it in Settings → Touch abilities.
