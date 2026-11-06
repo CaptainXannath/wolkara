@@ -142,7 +142,7 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     UIView *_settings;
     UIButton *_editDone;
     UILabel *_hint;
-    UISwitch *_editSwitch, *_hapticsSwitch, *_swapShouldersSwitch;
+    UISwitch *_editSwitch, *_hapticsSwitch, *_swapShouldersSwitch, *_performanceSwitch;
     UIStackView *_settingsColumns;
     NSArray<UISlider *> *_sliders;
     NSArray<UILabel *> *_values;
@@ -415,6 +415,13 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     UIStackView *hapticsRow = [[UIStackView alloc] initWithArrangedSubviews:@[[self label:AKHostLocalized(@"touch.settings.haptics")],_hapticsSwitch]];
     hapticsRow.axis = UILayoutConstraintAxisHorizontal; hapticsRow.alignment = UIStackViewAlignmentCenter;
     [options addArrangedSubview:hapticsRow];
+    _performanceSwitch = [UISwitch new]; _performanceSwitch.on = _preferences.performanceOverlayEnabled;
+    _performanceSwitch.accessibilityLabel = AKHostLocalized(@"touch.settings.overlay.detail");
+    _performanceSwitch.accessibilityIdentifier = @"wolkara.controls.performance";
+    [_performanceSwitch addTarget:self action:@selector(performanceChanged:) forControlEvents:UIControlEventValueChanged];
+    UIStackView *performanceRow = [[UIStackView alloc] initWithArrangedSubviews:@[[self label:AKHostLocalized(@"touch.settings.overlay.detail")],_performanceSwitch]];
+    performanceRow.axis = UILayoutConstraintAxisHorizontal; performanceRow.alignment = UIStackViewAlignmentCenter;
+    [options addArrangedSubview:performanceRow];
     _editSwitch = [UISwitch new]; _editSwitch.accessibilityLabel = AKHostLocalized(@"touch.settings.edit");
     _editSwitch.accessibilityIdentifier = @"wolkaraforever.controls.edit";
     [_editSwitch addTarget:self action:@selector(beginEditing:) forControlEvents:UIControlEventValueChanged];
@@ -468,10 +475,13 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     if (self.configurationChanged) self.configurationChanged();
 }
 
+- (void)performanceChanged:(UISwitch *)sender {
+    _preferences.performanceOverlayEnabled = sender.on; [_preferences save];
+}
 - (void)beginEditing:(UISwitch *)sender {
     if (!sender.on) return;
     [self reset]; _editing = YES; [_settings removeFromSuperview]; _settings = nil;
-    _sliders = nil; _values = nil; _editSwitch = nil; _hapticsSwitch = nil; _swapShouldersSwitch = nil; _settingsColumns = nil;
+    _sliders = nil; _values = nil; _editSwitch = nil; _hapticsSwitch = nil; _swapShouldersSwitch = nil; _performanceSwitch = nil; _settingsColumns = nil;
     [self updateAppearance]; if (self.configurationChanged) self.configurationChanged();
 }
 - (void)editAbilities {
@@ -483,12 +493,13 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     [self reset]; [_preferences reset];
     _sliders[0].value = 1-_preferences.opacity; _sliders[1].value = _preferences.rearScale; _sliders[2].value = _preferences.frontScale;
     _hapticsSwitch.on = _preferences.hapticsEnabled; _swapShouldersSwitch.on = !_preferences.swapShoulders;
+    _performanceSwitch.on = _preferences.performanceOverlayEnabled;
     [self updateValues]; [self updateAppearance];
 }
 - (void)finishConfiguration {
     [_actions finishEditing];
     [self reset]; [_preferences save]; _editing = NO; [_dragOrigins removeAllObjects];
-    [_settings removeFromSuperview]; _settings = nil; _sliders = nil; _values = nil; _editSwitch = nil; _hapticsSwitch = nil; _swapShouldersSwitch = nil; _settingsColumns = nil;
+    [_settings removeFromSuperview]; _settings = nil; _sliders = nil; _values = nil; _editSwitch = nil; _hapticsSwitch = nil; _swapShouldersSwitch = nil; _performanceSwitch = nil; _settingsColumns = nil;
     [self updateAppearance]; if (self.configurationChanged) self.configurationChanged();
 }
 - (void)reset {

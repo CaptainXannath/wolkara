@@ -558,6 +558,8 @@
 "touch.dictation.sendButton" = "Senden";
 "touch.dictation.send.hint" = "Sendet den geprüften Entwurf, drückt einmal die Eingabetaste und schließt den Chat mit Esc.";
 "touch.dictation.draft.label" = "Diktatentwurf";
+"touch.dictation.language" = "Diktatsprache";
+"touch.dictation.language.note" = "Wähle deine gesprochene Sprache. Ein Wechsel beginnt einen neuen Entwurf.";
 
 // Saved text toolbar key
 "touch.savedText.title" = "Schlüssel";

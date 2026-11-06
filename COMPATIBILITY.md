@@ -405,3 +405,40 @@ after launch. Physical gameplay confirmation of these three changes is pending.
   Signed Release build and bundle validation pass. Installed in place on the
   Duo after the user closed Wolkara; normal launch confirmed, game data kept.
   Physical confirmation of the new default alignment remains pending.
+
+## Dictation language, camera restart and performance overlay (2026-11-06)
+
+- The previous punctuation/task-hint trial did **not** fix the English title-case
+  draft on the Duo, according to the user's screenshot. A synthetic English
+  recording through on-device `es-ES` recognition reproduced title-cased words
+  and recognition mistakes; the same audio through `en-US` returned normal
+  sentence case. This supports the locale diagnosis without claiming to have
+  inspected the recognizer's locale on the user's device.
+- The draft now displays its speech language. English, Spanish and configured
+  keyboard languages are selectable; the selection persists. A language change
+  clears the draft and restarts only recognition, invalidating late results.
+  It adds no Return/Esc or guest text. Transcript casing is not rewritten, and
+  sending still requires explicit review. Native Speech punctuation is retained.
+- Direct camera regression now invokes the real `CGWarpMouseCursorPosition`
+  wrapper: uncaptured restore warps previously failed. A second regression
+  reproduced an absolute hover update overwriting the anchor while a finger
+  owned the gesture. Both failed before and pass after their respective fixes.
+  The four-viewport fixture also covers repeated drags, capture/release,
+  cancellation, resizing, trackpad mode and ability-circle handoff. Physical
+  confirmation of the intermittent restart jerk remains pending.
+- Ported the optional performance HUD from WolkaraForever (including late Metal
+  lookup/enable from `227b69e`), with attribution retained. The in-game controls settings own
+  its persisted toggle. Frame rate comes from Metal presentation timestamps;
+  GPU timing covers the presenting command buffer only. No display-link FPS
+  substitute, 120 Hz override, render preset or frame readback is enabled.
+  Hidden/background HUDs stop polling and per-frame statistics. Invalid,
+  duplicate and stale samples are rejected; re-enabling resets old history.
+- Validation: 43 toolbar-controller checks, language/draft UIKit checks, direct
+  camera regressions, HUD toggle/late-load/hide-show and synthetic 60/30 FPS
+  interval tests, the emulation/sanitizer suite, signed Release build and app
+  bundle checks passed. Synthetic metrics do not establish game FPS on the Duo.
+  The installed build also retains previously verified local audio/toolbar work;
+  that unrelated work is excluded from this PR's new changes.
+- Installed in place over Wi-Fi after the user closed Wolkara; normal launcher
+  process confirmed. Game data was preserved. Physical validation of English
+  dictation, repeated camera starts and game FPS is pending the user's check.

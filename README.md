@@ -13,7 +13,8 @@ The upstream history, MIT license and [third-party notices](NOTICE.md) are retai
 Selected improvements from [WolkaraForever](https://github.com/jklock/wolkaraforever)
 by **John Klockenkemper ([jklock](https://github.com/jklock)) and its contributors**
 are integrated here: addon management, settings backups, audio-session coordination,
-localization infrastructure, background pacing and build optimizations. Thank you
+localization infrastructure, background pacing, the optional performance overlay
+and build optimizations. Thank you
 for that work. Wolkara's native keyboard, reviewed dictation, movable toolbar and
 saved-text key include the refinements developed and tested together on iPhone.
 The imported MIT [license](WolkaraForever-LICENSE) is retained and shipped in the app.
@@ -56,7 +57,9 @@ WoW gameplay under this capability set remain untested.
   finger lifts and restarts elsewhere; taps click their screen position on lift.
 - A microphone button opens chat and transcribes speech into a visible local draft.
   Review or edit it before ✓ sends; × discards. Recognition callbacks never type
-  into the game. On-device Apple Speech availability and permissions are required.
+  into the game. Choose the spoken language in the draft (remembered between sessions);
+  changing language starts a fresh draft without reopening chat. On-device Apple
+  Speech availability and permissions are required.
 - A key button: tap to edit a saved value; hold to type it and send once. Storage
   uses this device's Keychain, not the clipboard, config files or input logs.
 - Physical controller support and an on-screen controller when none is connected.
@@ -70,7 +73,12 @@ WoW gameplay under this capability set remain untested.
   Taps activate on lift; drags over circles control the camera/pointer without activating an ability.
 - Movable touch controls, opacity and size settings, shoulder-position swapping,
   an alignment grid and haptics. The mouse/keyboard/microphone/key toolbar also
-  moves in Edit layout. Compact settings require no scrolling.
+  moves in Edit layout.
+- An optional performance overlay in the in-game control settings shows presented
+  FPS, frame intervals, GPU timing, thermal state, memory and battery. Tap to expand
+  or collapse; drag to reposition. Monitoring stops when hidden or backgrounded;
+  it does not raise the rendering limit. GPU timing covers the presenting command
+  buffer, not all GPU work in the system.
 - Settings → Game tools: import/manage addon ZIPs, browse CurseForge with your own
   API key, back up/restore WTF + Interface, enable gamepad, or reset graphics.
   Tools follow the selected edition. Imports require a matching TOC Interface
