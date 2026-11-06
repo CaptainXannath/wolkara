@@ -18,6 +18,10 @@ Simple keeps the left analog stick without its directional ring, LB/RB, the menu
 button and enabled touch ability circles. It hides the right stick, A/B/X/Y ring
 and LT/RT. Move LB/RB in Settings → Edit layout while Simple is selected to save
 their positions separately from Full; each mode restores its own placement.
+By default, Simple places LB/RB over the green/red target icons above the neutral
+abilities in the reference screenshot. They follow the ability block's position
+and scale until moved manually; saved positions take priority. Full mode's
+shoulder swapping does not swap these default targets.
 Hidden areas pass touches to the camera or pointer. Changing the
 mode releases held inputs without reconnecting the controller or altering saved
 positions. Use Full to edit controls that are hidden in Simple.

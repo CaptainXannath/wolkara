@@ -391,3 +391,17 @@ after launch. Physical gameplay confirmation of these three changes is pending.
   sleep/scene fixtures and signed Release bundle validation pass. Installed in
   place on the Duo after confirming Wolkara was closed; normal launcher process
   confirmed and existing game data preserved. In-game folding remains unverified.
+
+## Simple-mode shoulder defaults (2026-11-06)
+
+- Default LB/RB centers in Simple now match the green/red target icons in the
+  user's 1280x900 reference: (507,568) and (772,568), above the neutral abilities.
+  They use the ability block's viewport transform, including its position and
+  scale, while retaining the configurable shoulder-button size and safe-area
+  clamping. Saved Simple positions still override the defaults; Full positions
+  and shoulder swapping remain independent.
+- Existing ability-layout and virtual-controller UI regressions pass, including
+  input delivery, Full/Simple switching, editing, persistence and slot swapping.
+  Signed Release build and bundle validation pass. Installed in place on the
+  Duo after the user closed Wolkara; normal launch confirmed, game data kept.
+  Physical confirmation of the new default alignment remains pending.

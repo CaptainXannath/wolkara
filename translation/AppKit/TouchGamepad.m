@@ -271,6 +271,14 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
 - (void)place:(NSString *)name frame:(CGRect)frame baseSize:(CGSize)base safe:(CGRect)safe {
     NSString *control = [self positionName:name];
     UIView *item = _items[control];
+    if (_simple && [@[@"LB",@"RB"] containsObject:control]) {
+        // Green/red target icons above the neutral abilities in the 1280x900
+        // reference. Follow the ability block's anchor and scale, regardless
+        // of Full's shoulder swap. Explicit Simple positions still win below.
+        CGPoint reference = CGPointMake([control isEqual:@"LB"] ? 507-640 : 772-640,568-700);
+        CGPoint center = [_actions.layout pointForPosition:reference inBounds:self.bounds];
+        frame.origin = CGPointMake(center.x-frame.size.width/2,center.y-frame.size.height/2);
+    }
     CGRect placed = [_preferences frameForItem:[self preferenceKeyForControl:control] defaultFrame:frame inBounds:safe];
     item.transform = CGAffineTransformIdentity; item.bounds = (CGRect){CGPointZero,base};
     item.center = CGPointMake(CGRectGetMidX(placed),CGRectGetMidY(placed));
