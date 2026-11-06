@@ -161,6 +161,8 @@ static UIView *FindToolbarView(UIView *view, NSString *identifier) {
 - (CGRect)toolbarBounds;
 - (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer *)pan;
 - (void)holdSavedText:(UILongPressGestureRecognizer *)press;
+- (void)holdGamepad:(UILongPressGestureRecognizer *)press;
+- (BOOL)toggleGamepadEnabled;
 @end
 
 @interface AKSavedTextTestHold : UILongPressGestureRecognizer
@@ -169,6 +171,38 @@ static UIView *FindToolbarView(UIView *view, NSString *identifier) {
 @implementation AKSavedTextTestHold
 - (UIGestureRecognizerState)state { return _testState; }
 @end
+static void TestControllerModes(AKTouchControls *controls) {
+    NSUserDefaults *defaults=NSUserDefaults.standardUserDefaults;
+    id savedEnabled=[defaults objectForKey:@"TKTouchGamepadEnabled"],savedSimple=[defaults objectForKey:@"TKTouchGamepadSimple"];
+    UIButton *button=[controls valueForKey:@"_gamepadButton"];
+    void (^tap)(void)=^{ [button sendActionsForControlEvents:UIControlEventTouchDown]; [button sendActionsForControlEvents:UIControlEventTouchUpInside]; };
+    if (!controls.gamepadEnabled) [controls toggleGamepadEnabled];
+    if ([[controls valueForKey:@"_gamepadSimple"] boolValue]) tap();
+    tap(); assert(controls.gamepadEnabled && [[controls valueForKey:@"_gamepadSimple"] boolValue]);
+    assert([defaults boolForKey:@"TKTouchGamepadSimple"]);
+    assert([controls gestureRecognizerShouldBegin:[controls valueForKey:@"_gamepadHold"]]);
+    AKSavedTextTestHold *hold=[AKSavedTextTestHold new]; hold.testState=UIGestureRecognizerStateBegan;
+    [button sendActionsForControlEvents:UIControlEventTouchDown];
+    [controls holdGamepad:hold]; [controls holdGamepad:hold];
+    hold.testState=UIGestureRecognizerStateEnded; [controls holdGamepad:hold];
+    [button sendActionsForControlEvents:UIControlEventTouchUpInside];
+    assert(!controls.gamepadEnabled && [[controls valueForKey:@"_gamepadSimple"] boolValue]);
+    tap(); assert(!controls.gamepadEnabled && ![[controls valueForKey:@"_gamepadSimple"] boolValue]);
+    hold.testState=UIGestureRecognizerStateBegan;
+    [button sendActionsForControlEvents:UIControlEventTouchDown]; [controls holdGamepad:hold];
+    [button sendActionsForControlEvents:UIControlEventTouchUpInside];
+    assert(controls.gamepadEnabled && ![[controls valueForKey:@"_gamepadSimple"] boolValue]);
+    AKTouchControls *reload=[[AKTouchControls alloc] initWithFrame:controls.bounds];
+    assert(reload.gamepadEnabled && ![[reload valueForKey:@"_gamepadSimple"] boolValue]);
+    assert(button.accessibilityCustomActions.count==1);
+    if ([savedSimple boolValue]) tap();
+    if (savedEnabled && ![savedEnabled boolValue]) [controls toggleGamepadEnabled];
+    for (NSString *key in @[@"TKTouchGamepadEnabled",@"TKTouchGamepadSimple"]) {
+        id value=[key isEqual:@"TKTouchGamepadEnabled"]?savedEnabled:savedSimple;
+        if (value) [defaults setObject:value forKey:key]; else [defaults removeObjectForKey:key];
+    }
+    puts("CONTROLLER_MODE_GESTURES_PASS: tap changes layout, hold toggles enabled once, no trailing tap, persistence and accessibility action.");
+}
 @interface AKSavedTextTestStore : NSObject <WKSavedTextStorage>
 @property NSString *value;
 @property BOOL refuse;
@@ -614,6 +648,7 @@ static void AKSavedTextSettle(UIViewController *presenter) {
                 [reference becomeFirstResponder];
                 return;
             }
+            if (selfTest) TestControllerModes(controls);
             [controls toggleKeyboard];
             if (!selfTest) return;
             [NSTimer scheduledTimerWithTimeInterval:1 repeats:NO block:^(NSTimer *timer) {

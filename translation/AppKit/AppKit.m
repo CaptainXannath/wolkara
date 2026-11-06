@@ -420,6 +420,7 @@ NSEventModifierFlags AKModifiersReconciled(NSEventModifierFlags held, NSEventMod
     if (_directPressed && AKMouseIsCaptured()) _directRelative = YES;
     _last=CGPointMake([notification.userInfo[@"x"] doubleValue],[notification.userInfo[@"y"] doubleValue]);
     self.nsWindow.ak_mouseLocation=CGPointMake(_last.x,self.bounds.size.height-_last.y);
+    mouseScreenLocation=[self.nsWindow convertPointToScreen:self.nsWindow.ak_mouseLocation];
 }
 - (void)mouseConnected:(NSNotification *)notification { [self installMouse:notification.object]; [self captureChanged:nil]; }
 - (void)installMouse:(GCMouse *)mouse {
@@ -589,8 +590,19 @@ static UITouch *AKDirectTouch(NSSet<UITouch *> *touches) {
     _directFingerLast = point;
     if (CGPointEqualToPoint(delta, CGPointZero)) return;
     if (_directTrackpad) [self touchMoveBy:delta];
-    else [self postMouse:_directButton ? NSEventTypeRightMouseDragged : NSEventTypeLeftMouseDragged
-                     at:_last button:_directButton clicks:1 delta:delta];
+    else {
+        // Until capture, clients may detect motion from cursor position rather
+        // than deltaX/Y. Freezing that position can leave subsequent swipes inert.
+        // Accumulate from the existing cursor, never the finger's new origin;
+        // once captured, preserve the requested anchor and send raw deltas.
+        CGPoint cursor = _last;
+        if (!AKMouseIsCaptured()) {
+            cursor.x = MAX(0, MIN(self.bounds.size.width, cursor.x + delta.x));
+            cursor.y = MAX(0, MIN(self.bounds.size.height, cursor.y + delta.y));
+        }
+        [self postMouse:_directButton ? NSEventTypeRightMouseDragged : NSEventTypeLeftMouseDragged
+                     at:cursor button:_directButton clicks:1 delta:delta];
+    }
 }
 - (void)ak_endTouchDrag:(UITouch *)touch cancelled:(BOOL)cancelled {
     if (touch != _directTouch) return;

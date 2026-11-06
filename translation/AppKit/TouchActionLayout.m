@@ -40,7 +40,7 @@ static NSString *DefaultGroup(NSString *identifier) {
             if (![item isKindOfClass:NSDictionary.class]) continue;
             NSString *identifier=item[@"id"], *button=item[@"button"];
             if (![identifier isKindOfClass:NSString.class] || !identifier.length || identifier.length>80 ||
-                [ids containsObject:identifier] || ![@[@"A",@"B",@"X",@"Y",@"up",@"right",@"down",@"left"] containsObject:button]) continue;
+                [ids containsObject:identifier] || ![@[@"A",@"B",@"X",@"Y",@"LB",@"RB",@"up",@"right",@"down",@"left"] containsObject:button]) continue;
             AKTouchAction *a=[AKTouchAction new]; a.identifier=identifier; a.button=button;
             id group=item[@"group"];
             a.groupIdentifier=[group isKindOfClass:NSString.class] && [group length]>0 && [group length]<=80 ? group : DefaultGroup(identifier);

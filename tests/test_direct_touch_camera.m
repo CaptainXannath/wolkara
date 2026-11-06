@@ -28,9 +28,9 @@
 - (UIKeyModifierFlags)modifierFlags { return 0; }
 - (NSTimeInterval)timestamp { return NSProcessInfo.processInfo.systemUptime; }
 @end
-static NSEvent *Next(void) {
+static NSEvent *Next(unsigned line) {
     NSEvent *e=[NSApp nextEventMatchingMask:UINT64_MAX untilDate:NSDate.distantPast inMode:NSDefaultRunLoopMode dequeue:YES];
-    assert(e); return e;
+    if (!e) { fprintf(stderr,"Missing camera event at fixture line %u\n",line); abort(); } return e;
 }
 static void Empty(void) {
     assert(![NSApp nextEventMatchingMask:UINT64_MAX untilDate:NSDate.distantPast inMode:NSDefaultRunLoopMode dequeue:YES]);
@@ -44,13 +44,14 @@ static void CheckDelta(NSEvent *e,CGFloat dx,CGFloat dy) {
         abort();
     }
 }
-static NSEvent *CheckEvent(NSEventType type, CGPoint point, CGSize size, CGFloat dx, CGFloat dy) {
-    NSEvent *e=Next();
+static NSEvent *CheckEventAt(NSEventType type, CGPoint point, CGSize size, CGFloat dx, CGFloat dy, unsigned line) {
+    NSEvent *e=Next(line);
     assert(e.type==type);
     assert(CGPointEqualToPoint(e.locationInWindow,CGPointMake(point.x,size.height-point.y)));
     CheckDelta(e,dx,dy);
     return e;
 }
+#define CheckEvent(t,p,s,x,y) CheckEventAt(t,p,s,x,y,__LINE__)
 static void Send(UIView *host, CameraEvent *event, CameraTouch *touch, UITouchPhase phase, CGPoint point) {
     touch.point=point; touch.testPhase=phase;
     NSSet *changed=[NSSet setWithObject:touch];
@@ -61,6 +62,14 @@ static void Send(UIView *host, CameraEvent *event, CameraTouch *touch, UITouchPh
         case UITouchPhaseCancelled: [host touchesCancelled:changed withEvent:event]; break;
         default: abort();
     }
+}
+static CGPoint CursorMoved(CGPoint anchor, CGFloat dx, CGFloat dy, CGSize size) {
+    return CGPointMake(MAX(0,MIN(size.width,anchor.x+dx)), MAX(0,MIN(size.height,anchor.y+dy)));
+}
+static void CheckPolled(NSWindow *window, CGPoint point, CGSize size) {
+    CGPoint local=CGPointMake(point.x,size.height-point.y);
+    assert(CGPointEqualToPoint(window.mouseLocationOutsideOfEventStream,local));
+    assert(CGPointEqualToPoint(NSEvent.mouseLocation,[window convertPointToScreen:local]));
 }
 static void CheckCamera(CGSize size, CGPoint start, BOOL right) {
     AKMouseSetCaptured(false);
@@ -86,9 +95,10 @@ static void CheckCamera(CGSize size, CGPoint start, BOOL right) {
     CGPoint moved=CGPointMake(start.x+10,start.y+5);
     Send(host,event,finger,UITouchPhaseMoved,moved);
     assert(CheckEvent(down,anchor,size,0,0).buttonNumber==(right?1:0));
-    CheckEvent(drag,anchor,size,10,5);
+    CheckEvent(drag,CursorMoved(anchor,10,5,size),size,10,5);
+    CheckPolled(window,CursorMoved(anchor,10,5,size),size);
     // Capture can arrive late. Relative motion already works before it arrives.
-    AKMouseSetCaptured(true); CGPoint edge=CGPointMake(size.width-1,size.height-1); Warp(edge);
+    AKMouseSetCaptured(true); CGPoint edge=CGPointMake(size.width-1,size.height-1); Warp(edge); CheckPolled(window,edge,size);
     Send(host,event,finger,UITouchPhaseMoved,moved); Empty();
     moved=CGPointMake(moved.x+4,moved.y-3);
     Send(host,event,finger,UITouchPhaseMoved,moved); CheckEvent(drag,edge,size,4,-3);
@@ -99,6 +109,7 @@ static void CheckCamera(CGSize size, CGPoint start, BOOL right) {
     Send(host,event,other,UITouchPhaseEnded,CGPointMake(800,500)); Empty();
     AKMouseSetCaptured(false);
     moved=CGPointMake(moved.x-6,moved.y+8);
+    edge=CursorMoved(edge,-6,8,size);
     Send(host,event,finger,UITouchPhaseMoved,moved); CheckEvent(drag,edge,size,-6,8);
     Send(host,event,finger,UITouchPhaseEnded,moved); CheckEvent(up,edge,size,0,0); Empty();
     event.touches=[NSSet setWithObject:finger];
@@ -107,7 +118,7 @@ static void CheckCamera(CGSize size, CGPoint start, BOOL right) {
     screen=NSEvent.mouseLocation;
     Send(host,event,finger,UITouchPhaseBegan,restart); Empty(); assert(CGPointEqualToPoint(screen,NSEvent.mouseLocation));
     Send(host,event,finger,UITouchPhaseMoved,CGPointMake(restart.x-12,restart.y-8));
-    CheckEvent(down,edge,size,0,0); CheckEvent(drag,edge,size,-12,-8);
+    CheckEvent(down,edge,size,0,0); edge=CursorMoved(edge,-12,-8,size); CheckEvent(drag,edge,size,-12,-8);
     Send(host,event,finger,UITouchPhaseEnded,restart); CheckEvent(up,edge,size,0,0);
     // A tap still clicks its screen position, but only after intent is known.
     Send(host,event,finger,UITouchPhaseBegan,start); Empty();
@@ -121,14 +132,15 @@ static void CheckCamera(CGSize size, CGPoint start, BOOL right) {
         Warp(center);
         Send(host,event,finger,UITouchPhaseBegan,start); Empty();
         Send(host,event,finger,UITouchPhaseMoved,moved);
-        CheckEvent(down,center,size,0,0); CheckEvent(drag,center,size,moved.x-start.x,moved.y-start.y);
+        CGPoint cursor=CursorMoved(center,moved.x-start.x,moved.y-start.y,size);
+        CheckEvent(down,center,size,0,0); CheckEvent(drag,cursor,size,moved.x-start.x,moved.y-start.y);
         switch (reason) {
             case 0: [controls cancelTouches]; break;
             case 1: [NSNotificationCenter.defaultCenter postNotificationName:UIApplicationWillResignActiveNotification object:nil]; break;
             case 2: controls.trackpadEnabled=YES; break;
             case 3: host.bounds=(CGRect){CGPointZero,CGSizeMake(size.width-10,size.height-10)}; [host layoutSubviews]; break;
         }
-        CheckEvent(up,center,host.bounds.size,0,0); [controls cancelTouches]; Empty();
+        CheckEvent(up,cursor,host.bounds.size,0,0); [controls cancelTouches]; Empty();
         Send(host,event,finger,UITouchPhaseMoved,moved); Empty();
         event.touches=[NSSet setWithObjects:finger,other,nil];
         Send(host,event,other,UITouchPhaseBegan,start); Send(host,event,other,UITouchPhaseMoved,moved); Empty();
@@ -155,13 +167,32 @@ static void CheckCamera(CGSize size, CGPoint start, BOOL right) {
         CGPoint origin=[circle convertPoint:CGPointMake(circle.bounds.size.width/2,circle.bounds.size.height/2) toView:host];
         finger.point=origin; assert([circle beginTrackingWithTouch:finger withEvent:nil]); Empty();
         finger.point=CGPointMake(origin.x+12,origin.y+9); [circle continueTrackingWithTouch:finger withEvent:nil];
-        if (!mouse) { CheckEvent(NSEventTypeLeftMouseDown,center,size,0,0); CheckEvent(NSEventTypeLeftMouseDragged,center,size,12,9); }
+        if (!mouse) { CheckEvent(NSEventTypeLeftMouseDown,center,size,0,0); CheckEvent(NSEventTypeLeftMouseDragged,CursorMoved(center,12,9,size),size,12,9); }
         else CheckEvent(NSEventTypeMouseMoved,CGPointMake(center.x+12,center.y+9),size,12,9);
         [circle endTrackingWithTouch:finger withEvent:nil];
-        if (!mouse) CheckEvent(NSEventTypeLeftMouseUp,center,size,0,0);
+        if (!mouse) CheckEvent(NSEventTypeLeftMouseUp,CursorMoved(center,12,9,size),size,0,0);
         Empty(); assert(!presses);
     }
     overlay.beginDrag=nil; overlay.moveDrag=nil; overlay.endDrag=nil; [overlay removeFromSuperview];
+    controls.trackpadEnabled=NO;
+    // Model a client that starts capture only once event positions move.
+    // Each new gesture must wake it without needing a controller movement.
+    for (unsigned gesture=0;gesture<6;gesture++) {
+        AKMouseSetCaptured(false); Warp(center); CheckPolled(window,center,size);
+        CGPoint origin=gesture%2 ? CGPointMake(30,40) : CGPointMake(size.width-40,size.height-50);
+        Send(host,event,finger,UITouchPhaseBegan,origin); Empty(); CheckPolled(window,center,size);
+        CGPoint next=CGPointMake(origin.x+12,origin.y-9);
+        Send(host,event,finger,UITouchPhaseMoved,next);
+        NSEvent *downEvent=CheckEvent(down,center,size,0,0);
+        NSEvent *motion=CheckEvent(drag,CursorMoved(center,12,-9,size),size,12,-9);
+        assert(!CGPointEqualToPoint(downEvent.locationInWindow,motion.locationInWindow));
+        CheckPolled(window,CursorMoved(center,12,-9,size),size);
+        AKMouseSetCaptured(true); Warp(center); CheckPolled(window,center,size);
+        next=CGPointMake(next.x+5,next.y+3);
+        Send(host,event,finger,UITouchPhaseMoved,next); CheckEvent(drag,center,size,5,3);
+        CheckPolled(window,center,size);
+        Send(host,event,finger,UITouchPhaseEnded,next); CheckEvent(up,center,size,0,0); Empty();
+    }
     // Trackpad and indirect pointer behavior remains unchanged.
     controls.trackpadEnabled=YES; AKMouseSetCaptured(true); Warp(center);
     [(id<AKTouchControlsDelegate>)host touchMoveBy:CGPointMake(9,-4)]; CheckEvent(NSEventTypeMouseMoved,center,size,9,-4);

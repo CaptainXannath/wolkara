@@ -278,7 +278,7 @@
     _shown.on=_selected.enabled;
     __weak AKTouchActionOverlay *weakSelf=self;
     NSMutableArray *buttons=[NSMutableArray new],*mods=[NSMutableArray new];
-    for (NSString *key in @[@"A",@"B",@"X",@"Y",@"up",@"right",@"down",@"left"]) {
+    for (NSString *key in @[@"A",@"B",@"X",@"Y",@"LB",@"RB",@"up",@"right",@"down",@"left"]) {
         UIAction *action=[UIAction actionWithTitle:key image:nil identifier:nil handler:^(__kindof UIAction *a) {
             (void)a; AKTouchActionOverlay *self=weakSelf; if (!self) return; self->_selected.button=key; [self updateEditor];
         }]; action.state=[_selected.button isEqual:key]?UIMenuElementStateOn:UIMenuElementStateOff; [buttons addObject:action];

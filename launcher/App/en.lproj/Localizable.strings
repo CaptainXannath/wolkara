@@ -345,7 +345,7 @@
 "touch.value.on" = "On";
 "touch.value.off" = "Off";
 "touch.gamepad.automatic" = "Automatic touch controller";
-"touch.gamepad.hint" = "Show touch controls when no physical controller is connected. Tap to turn off or restore automatic controls.";
+"touch.gamepad.hint" = "Tap to switch between full and simple controls. Hold to turn the touch controller on or off. A connected physical controller takes priority.";
 "touch.gamepad.value.active" = "Active";
 "touch.gamepad.value.automatic" = "Automatic";
 "touch.gamepad.value.off" = "Off";
@@ -570,3 +570,7 @@
 "touch.savedText.singleLine" = "Use a single line without Return, Tab or other control characters.";
 "touch.savedText.saveError" = "Could not save to the iOS Keychain. Nothing was typed.";
 "touch.savedText.readError" = "Could not read the saved value from the iOS Keychain. Nothing was typed.";
+
+"touch.gamepad.value.full" = "Full";
+"touch.gamepad.value.simple" = "Simple";
+"touch.gamepad.toggleEnabled" = "Turn touch controller on or off";

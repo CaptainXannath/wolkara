@@ -93,7 +93,7 @@ static const NSTimeInterval PhaseInterval = 1.0 / 30.0;
 - (BOOL)beginAction:(NSString *)owner button:(NSString *)button modifiers:(NSUInteger)modifiers {
     [self publish];
     if (!owner.length || _actions[owner] || modifiers>3 ||
-        ![@[@"A",@"B",@"X",@"Y",@"up",@"right",@"down",@"left"] containsObject:button]) return NO;
+        ![@[@"A",@"B",@"X",@"Y",@"LB",@"RB",@"up",@"right",@"down",@"left"] containsObject:button]) return NO;
     NSUInteger manual=[self modifiersIn:_manual];
     if ((manual & ~modifiers) || [_output containsObject:button] || (_tailModifiers && _tailModifiers!=modifiers)) return NO;
     if (modifiers!=manual) {

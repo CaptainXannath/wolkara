@@ -84,7 +84,7 @@ static void InputTests(void) {
     [events removeAllObjects]; [input cancelAction:@"cancel"];
     assert(([events isEqual:@[@"Y-"]])); Advance(input,.04); assert(([events isEqual:@[@"Y-",@"RT-"]]));
     [input releaseAll]; [input releaseAll]; [input endAction:@"unknown"]; assert(!input.pressedButtons.count);
-    for (NSUInteger mod=0;mod<4;mod++) for (NSString *button in @[@"A",@"B",@"X",@"Y",@"up",@"right",@"down",@"left"]) {
+    for (NSUInteger mod=0;mod<4;mod++) for (NSString *button in @[@"A",@"B",@"X",@"Y",@"LB",@"RB",@"up",@"right",@"down",@"left"]) {
         Advance(input,.04); assert([input beginAction:@"one" button:button modifiers:mod]);
         assert([input.pressedButtons containsObject:button]==(mod==0));
         [input endAction:@"one"]; Advance(input,.04);
@@ -98,7 +98,7 @@ static void InputTests(void) {
     }
     assert(![input beginAction:@"bad" button:@"unknown" modifiers:0]);
     assert(![input beginAction:@"bad" button:@"A" modifiers:4]);
-    puts("TOUCH_ABILITIES_INPUT_PASS: phased delivery, 32 quick taps, no hold repetition, shared/manual ownership, conflicts, cancellation and no late input.");
+    puts("TOUCH_ABILITIES_INPUT_PASS: phased delivery, 40 quick taps, no hold repetition, shared/manual ownership, conflicts, cancellation and no late input.");
 }
 static void LayoutTests(void) {
     NSString *suite=[@"org.wolkara.tests.abilities." stringByAppendingString:NSUUID.UUID.UUIDString];
@@ -130,6 +130,15 @@ static void LayoutTests(void) {
     layout=[[AKTouchActionLayout alloc] initWithDefaults:defaults];
     assert(layout.enabled && layout.actions[0].diameter==80 && !layout.actions[0].enabled);
     assert([layout.actions[0].button isEqual:@"B"] && layout.actions[0].modifiers==2);
+    for (NSString *button in @[@"LB",@"RB"]) {
+        AKTouchAction *shoulder=[layout addAction]; shoulder.button=button; shoulder.modifiers=3;
+        NSString *identifier=shoulder.identifier; [layout save];
+        layout=[[AKTouchActionLayout alloc] initWithDefaults:defaults];
+        assert([layout.actions.lastObject.identifier isEqual:identifier]);
+        assert([layout.actions.lastObject.button isEqual:button] && layout.actions.lastObject.modifiers==3);
+        assert([layout.actions.lastObject.label containsString:button]);
+        [layout removeAction:layout.actions.lastObject];
+    }
     CGRect wide=[layout frameForAction:layout.actions[4] inBounds:reference];
     for (NSValue *bounds in @[[NSValue valueWithCGRect:CGRectMake(0,0,852,393)], [NSValue valueWithCGRect:CGRectMake(0,0,956,440)], [NSValue valueWithCGRect:CGRectMake(0,0,1280,900)], [NSValue valueWithCGRect:CGRectMake(20,10,500,300)]]) {
         for (AKTouchAction *a in layout.actions) assert(CGRectContainsRect(bounds.CGRectValue,[layout frameForAction:a inBounds:bounds.CGRectValue]));
