@@ -287,3 +287,18 @@ The native trackpad remains available and the first-launch touch tutorial is gon
 Existing WolkaraTouch files are retired outside AddOns without deleting other
 addons. Settings gain saved shoulder-position swapping and a compact layout.
 Runtime validation of this revised controller layout on the iPhone is pending.
+
+## Touch ability modifier delivery (2026-11-06)
+
+On the iPhone Duo, the user reported that unmodified ability circles worked,
+but modified circles activated only LT/RT even when held for a second. The
+virtual-controller fixture reproduced a delivery problem: the modifier callback
+already saw the ability button held, and button-up already saw the modifier
+released. Final-state assertions had missed those intermediate states.
+
+Modifier-down, button-down, button-up and modifier-up now use separate delivery
+phases. All 32 held combinations and quick-tap callback sequences pass in the
+synthetic controller fixture; cancellation discards pending presses, including
+several overdue presses cancelled together. The signed update was installed over
+the existing Wolkara app, together with the direct-camera cursor-warp correction;
+its process remained running after launch. Gameplay confirmation is still pending.

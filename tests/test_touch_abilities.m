@@ -3,44 +3,102 @@
 #include <assert.h>
 #include <math.h>
 
+// Deterministic clock: exercise deadlines without sleeping or loading a game.
+@interface AKTouchActionInput (TimingFixture)
+- (NSTimeInterval)now;
+- (void)publish;
+- (void)scheduleAt:(NSTimeInterval)deadline;
+@end
+@interface AKTimedActionInput : AKTouchActionInput
+@property NSTimeInterval time, deadline;
+@end
+@implementation AKTimedActionInput
+- (NSTimeInterval)now { return self.time; }
+- (void)scheduleAt:(NSTimeInterval)deadline { self.deadline=deadline; }
+@end
+static void Advance(AKTimedActionInput *input,NSTimeInterval elapsed) { input.time+=elapsed; [input publish]; }
 static void InputTests(void) {
-    AKTouchActionInput *input=[AKTouchActionInput new]; NSMutableArray *events=[NSMutableArray new];
+    AKTimedActionInput *input=[AKTimedActionInput new]; input.time=100;
+    NSMutableArray *events=[NSMutableArray new];
     input.changed=^(NSString *button,BOOL down) { [events addObject:[NSString stringWithFormat:@"%@%c",button,down?'+':'-']]; };
     assert([input beginAction:@"one" button:@"X" modifiers:3]);
-    assert(([events isEqual:@[@"LT+",@"RT+",@"X+"]]));
-    [input endAction:@"one"]; assert(([events isEqual:@[@"LT+",@"RT+",@"X+",@"X-",@"LT-",@"RT-"]]));
-    [events removeAllObjects];
-    [input setManualButton:@"LT" pressed:YES];
+    assert(([events isEqual:@[@"LT+",@"RT+"]]));
+    Advance(input,.01); assert(events.count==2);
+    Advance(input,.03); assert(([events isEqual:@[@"LT+",@"RT+",@"X+"]]));
+    Advance(input,1); assert(events.count==3); // Holding never repeats.
+    [input endAction:@"one"]; assert(([events isEqual:@[@"LT+",@"RT+",@"X+",@"X-"]]));
+    assert(input.pressedButtons.count==2);
+    Advance(input,.04); assert(([events isEqual:@[@"LT+",@"RT+",@"X+",@"X-",@"LT-",@"RT-"]]));
+    assert(!isfinite(input.deadline));
+    // Even a complete tap within one delivery phase becomes exactly one chord.
+    [events removeAllObjects]; Advance(input,.04);
+    assert([input beginAction:@"quick" button:@"A" modifiers:1]); [input endAction:@"quick"];
+    assert(([events isEqual:@[@"LT+"]]));
+    Advance(input,.04); assert(([events isEqual:@[@"LT+",@"A+"]]));
+    Advance(input,.01); assert(events.count==2);
+    Advance(input,.03); assert(([events isEqual:@[@"LT+",@"A+",@"A-"]]));
+    Advance(input,.04); assert(([events isEqual:@[@"LT+",@"A+",@"A-",@"LT-"]]));
+    Advance(input,2); assert(events.count==4 && !input.pressedButtons.count);
+    // Manual modifiers have independent ownership; shared circles keep them.
+    [input setManualButton:@"LT" pressed:YES]; Advance(input,.04);
     assert([input beginAction:@"one" button:@"A" modifiers:1]);
-    assert([input beginAction:@"two" button:@"B" modifiers:1]);
+    assert([input beginAction:@"two" button:@"B" modifiers:1]); Advance(input,.04);
     [input endAction:@"one"]; assert([input.pressedButtons containsObject:@"B"] && [input.pressedButtons containsObject:@"LT"]);
-    [input endAction:@"two"]; assert(([input.pressedButtons isEqual:[NSSet setWithObject:@"LT"]]));
-    [input setManualButton:@"LT" pressed:NO]; assert(input.pressedButtons.count==0);
+    [input endAction:@"two"]; Advance(input,.04);
+    assert(([input.pressedButtons isEqual:[NSSet setWithObject:@"LT"]]));
+    [input setManualButton:@"LT" pressed:NO]; assert(!input.pressedButtons.count);
     [input setManualButton:@"RT" pressed:YES];
     NSUInteger count=events.count; assert(![input beginAction:@"bad" button:@"X" modifiers:1]); assert(events.count==count);
     [input releaseAll]; assert([input beginAction:@"one" button:@"X" modifiers:1]);
     assert(![input beginAction:@"bad" button:@"A" modifiers:2]);
-    assert(![input beginAction:@"duplicate" button:@"X" modifiers:1]);
+    assert(![input beginAction:@"duplicate" button:@"X" modifiers:1]); // Reserved before its delayed press.
     assert(![input beginAction:@"one" button:@"B" modifiers:1]);
     [events removeAllObjects]; [input setManualButton:@"RT" pressed:YES];
-    assert(([events isEqual:@[@"X-",@"LT-",@"RT+"]]));
+    assert(([events isEqual:@[@"LT-",@"RT+"]])); Advance(input,1); assert(events.count==2);
     [input endAction:@"one"]; assert(([input.pressedButtons isEqual:[NSSet setWithObject:@"RT"]]));
     [input releaseAll]; [input setManualButton:@"A" pressed:YES];
-    assert(![input beginAction:@"bad" button:@"B" modifiers:1]); // Never change an already-held button's modifier context.
-    [input releaseAll]; assert([input beginAction:@"one" button:@"X" modifiers:1]);
-    [input setManualButton:@"X" pressed:YES]; [input endAction:@"one"];
+    assert(![input beginAction:@"bad" button:@"B" modifiers:1]);
+    [input releaseAll]; assert([input beginAction:@"one" button:@"X" modifiers:1]); Advance(input,.04);
+    [input setManualButton:@"X" pressed:YES]; [input endAction:@"one"]; Advance(input,.04); Advance(input,.04);
     assert(([input.pressedButtons isEqual:[NSSet setWithObject:@"X"]]));
-    [input releaseAll]; [input releaseAll]; [input endAction:@"unknown"]; assert(input.pressedButtons.count==0);
+    // Cancellation before/after lift must never deliver a late ability.
+    for (NSUInteger cancel=0;cancel<3;cancel++) {
+        [input releaseAll]; Advance(input,.04); [events removeAllObjects];
+        assert([input beginAction:@"cancel" button:@"Y" modifiers:2]);
+        if (cancel==1) [input endAction:@"cancel"];
+        if (cancel==2) [input releaseAll]; else [input cancelAction:@"cancel"];
+        Advance(input,1); assert(![events containsObject:@"Y+"] && !input.pressedButtons.count);
+    }
+    // Cancelling a delivered button releases it before dropping its modifier.
+    [events removeAllObjects];
+    [input setManualButton:@"LT" pressed:YES]; Advance(input,.04);
+    [input cancelAllActions]; assert(([input.pressedButtons isEqual:[NSSet setWithObject:@"LT"]]));
+    [input releaseAll];
+    assert([input beginAction:@"first" button:@"A" modifiers:1]);
+    assert([input beginAction:@"second" button:@"B" modifiers:1]);
+    [input endAction:@"first"]; [input endAction:@"second"];
+    input.time+=.1; // Deadlines are due, but the run loop has not delivered them.
+    [input cancelAllActions]; Advance(input,1);
+    assert(![events containsObject:@"A+"] && ![events containsObject:@"B+"] && !input.pressedButtons.count);
+    assert([input beginAction:@"cancel" button:@"Y" modifiers:2]); Advance(input,.04);
+    [events removeAllObjects]; [input cancelAction:@"cancel"];
+    assert(([events isEqual:@[@"Y-"]])); Advance(input,.04); assert(([events isEqual:@[@"Y-",@"RT-"]]));
+    [input releaseAll]; [input releaseAll]; [input endAction:@"unknown"]; assert(!input.pressedButtons.count);
     for (NSUInteger mod=0;mod<4;mod++) for (NSString *button in @[@"A",@"B",@"X",@"Y",@"up",@"right",@"down",@"left"]) {
-        assert([input beginAction:@"one" button:button modifiers:mod]);
-        assert([input.pressedButtons containsObject:button]);
-        assert([input.pressedButtons containsObject:@"LT"]==!!(mod&1));
-        assert([input.pressedButtons containsObject:@"RT"]==!!(mod&2));
-        [input releaseAll]; assert(!input.pressedButtons.count);
+        Advance(input,.04); assert([input beginAction:@"one" button:button modifiers:mod]);
+        assert([input.pressedButtons containsObject:button]==(mod==0));
+        [input endAction:@"one"]; Advance(input,.04);
+        if (mod) {
+            assert([input.pressedButtons containsObject:button]);
+            assert([input.pressedButtons containsObject:@"LT"]==!!(mod&1));
+            assert([input.pressedButtons containsObject:@"RT"]==!!(mod&2));
+        }
+        Advance(input,.04); assert(![input.pressedButtons containsObject:button]);
+        Advance(input,.04); assert(!input.pressedButtons.count);
     }
     assert(![input beginAction:@"bad" button:@"unknown" modifiers:0]);
     assert(![input beginAction:@"bad" button:@"A" modifiers:4]);
-    puts("TOUCH_ABILITIES_INPUT_PASS: modifier order, 32 chords, shared ownership, conflicting chords, cancellation, duplicate suppression and neutral reset.");
+    puts("TOUCH_ABILITIES_INPUT_PASS: phased delivery, 32 quick taps, no hold repetition, shared/manual ownership, conflicts, cancellation and no late input.");
 }
 static void LayoutTests(void) {
     NSString *suite=[@"org.wolkara.tests.abilities." stringByAppendingString:NSUUID.UUID.UUIDString];

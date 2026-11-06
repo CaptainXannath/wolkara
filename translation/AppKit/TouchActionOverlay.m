@@ -49,7 +49,8 @@
         circle.titleLabel.numberOfLines=2; circle.titleLabel.textAlignment=NSTextAlignmentCenter;
         circle.accessibilityIdentifier=[@"wolkara.ability." stringByAppendingString:action.identifier];
         [circle addTarget:self action:@selector(down:) forControlEvents:UIControlEventTouchDown];
-        [circle addTarget:self action:@selector(up:) forControlEvents:UIControlEventTouchUpInside|UIControlEventTouchUpOutside|UIControlEventTouchCancel|UIControlEventTouchDragExit];
+        [circle addTarget:self action:@selector(up:) forControlEvents:UIControlEventTouchUpInside];
+        [circle addTarget:self action:@selector(cancel:) forControlEvents:UIControlEventTouchUpOutside|UIControlEventTouchCancel|UIControlEventTouchDragExit];
         UIPanGestureRecognizer *pan=[[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(drag:)];
         pan.delegate=self; [circle addGestureRecognizer:pan];
         UITapGestureRecognizer *tap=[[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(selectCircle:)];
@@ -122,7 +123,16 @@
     if (circle.inputHeld && self.released) self.released(circle.action);
     circle.inputHeld=NO; [self updateAppearance];
 }
-- (void)releaseTouches { for (AKActionCircle *circle in _circles) if (circle.inputHeld) [self up:circle]; }
+- (void)cancel:(AKActionCircle *)circle {
+    // Also discard a short tap still waiting for its modifier delivery phase.
+    if (self.cancelled) self.cancelled(circle.action);
+    circle.inputHeld=NO; [self updateAppearance];
+}
+- (void)releaseTouches {
+    if (self.cancelledAll) self.cancelledAll();
+    for (AKActionCircle *circle in _circles) circle.inputHeld=NO;
+    [self updateAppearance];
+}
 - (void)selectCircle:(UITapGestureRecognizer *)tap {
     if (!self.editing || tap.state!=UIGestureRecognizerStateEnded) return;
     _selected=((AKActionCircle *)tap.view).action; [self updateEditor];

@@ -7,6 +7,8 @@
 @property(nonatomic) BOOL active;
 @property(nonatomic, copy) BOOL (^press)(AKTouchAction *action);
 @property(nonatomic, copy) void (^released)(AKTouchAction *action);
+@property(nonatomic, copy) void (^cancelled)(AKTouchAction *action);
+@property(nonatomic, copy) void (^cancelledAll)(void);
 @property(nonatomic, copy) void (^configurationChanged)(void);
 - (void)beginEditing;
 - (void)finishEditing;
