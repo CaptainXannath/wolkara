@@ -143,14 +143,14 @@ static void TestPreferences(void) {
     AKGamepadLayout *migrated=[[AKGamepadLayout alloc] initWithDefaults:defaults];
     assert(fabs(migrated.opacity-.6)<.001 && fabs(migrated.rearScale-1.2)<.001 &&
            fabs(migrated.frontScale-.9)<.001 && !migrated.hapticsEnabled);
-    assert([defaults dictionaryForKey:@"WolkaraTouchLayoutV1"] && !migrated.swapShoulders);
+    assert([defaults dictionaryForKey:@"WolkaraForeverTouchLayoutV1"] && !migrated.swapShoulders);
     CGRect migratedFrame=[migrated frameForItem:@"menu" defaultFrame:CGRectMake(0,0,100,100) inBounds:CGRectMake(0,0,500,300)];
     assert(CGRectEqualToRect(migratedFrame,CGRectMake(200,100,100,100)));
     migrated.opacity=.3;[migrated save];
     assert(fabs([[AKGamepadLayout alloc] initWithDefaults:defaults].opacity-.3)<.001);
     // Explicit current values (even malformed ones) must not resurrect old values.
     [defaults setObject:@{@"opacity":@"bad",@"rearScale":@99,@"frontScale":@(-2),
-        @"positions":@{@"broken":@[@"x",@0],@"left":@[@(-1),@4]}} forKey:@"WolkaraTouchLayoutV1"];
+        @"positions":@{@"broken":@[@"x",@0],@"left":@[@(-1),@4]}} forKey:@"WolkaraForeverTouchLayoutV1"];
     AKGamepadLayout *layout=[[AKGamepadLayout alloc] initWithDefaults:defaults];
     assert(layout.opacity==0.8 && layout.rearScale==1.5 && layout.frontScale==0.65 && layout.hapticsEnabled);
     layout.opacity=NAN; layout.rearScale=INFINITY; layout.frontScale=-INFINITY;
@@ -229,20 +229,22 @@ static void TestNativeInput(UIView *host, AKPreviewGamepad *manager) {
     // gameplay input. Preferences and dragged positions survive a new model.
     [manager toggleSettings]; [host layoutIfNeeded]; Drain();
     assert(!pad.leftShoulder.pressed && !pad.buttonA.pressed && pad.leftThumbstick.xAxis.value==0);
-    UIView *settings=Find(host,@"wolkara.controls.settings"); assert(settings);
-    // All settings and actions fit in the visible panel; no scrolling or overlap.
+    UIView *settings=Find(host,@"wolkaraforever.controls.settings"); assert(settings);
+    // Settings use a scrollable body with a fixed footer, including on small phones.
     NSMutableArray<UIView *> *settingsControls=[NSMutableArray new];
     for(UIView *view in settings.subviews) {
-        assert(![view isKindOfClass:UIScrollView.class]);
         assert(CGRectContainsRect(settings.bounds,view.frame));
         assert(CGRectContainsRect(host.bounds,[view convertRect:view.bounds toView:host]));
         if([view isKindOfClass:UIControl.class]) [settingsControls addObject:view];
     }
     for(NSUInteger i=0;i<settingsControls.count;i++) for(NSUInteger j=i+1;j<settingsControls.count;j++)
         assert(!CGRectIntersectsRect(settingsControls[i].frame,settingsControls[j].frame));
+    UIView *done=Find(settings,@"wolkaraforever.controls.done"); assert(done);
+    CGPoint donePoint=[done convertPoint:CGPointMake(done.bounds.size.width/2,done.bounds.size.height/2) toView:settings];
+    assert([settings hitTest:donePoint withEvent:nil]==done);
     CGRect lt=Button(host,GCInputLeftTrigger).frame, lb=Button(host,GCInputLeftShoulder).frame;
     CGRect rt=Button(host,GCInputRightTrigger).frame, rb=Button(host,GCInputRightShoulder).frame;
-    UISwitch *swap=(id)Find(host,@"wolkara.controls.swapShoulders"); assert(!swap.on);
+    UISwitch *swap=(id)Find(host,@"wolkaraforever.controls.swapShoulders"); assert(!swap.on);
     assert(CGRectGetMidX(lt)>CGRectGetMidX(lb) && CGRectGetMidX(rt)<CGRectGetMidX(rb));
     swap.on=YES; [swap sendActionsForControlEvents:UIControlEventValueChanged]; [host layoutIfNeeded];
     assert(CGRectEqualToRect(Button(host,GCInputLeftTrigger).frame,lb));
@@ -254,17 +256,17 @@ static void TestNativeInput(UIView *host, AKPreviewGamepad *manager) {
     [Button(host,GCInputButtonA) sendActionsForControlEvents:UIControlEventTouchDown]; Drain();
     assert(!pad.buttonA.pressed);
     assert(!manager.feedback.enabled && manager.feedback.buttons==silentButtons && manager.feedback.limits==silentLimits);
-    UISwitch *haptics=(id)Find(host,@"wolkara.controls.haptics"); assert(haptics.on);
+    UISwitch *haptics=(id)Find(host,@"wolkaraforever.controls.haptics"); assert(haptics.on);
     haptics.on=NO; [haptics sendActionsForControlEvents:UIControlEventValueChanged];
-    UISlider *scale=(id)Find(host,@"wolkara.controls.frontScale");
+    UISlider *scale=(id)Find(host,@"wolkaraforever.controls.frontScale");
     scale.value=1.3; [scale sendActionsForControlEvents:UIControlEventValueChanged]; [host layoutIfNeeded];
-    UIView *cluster=Find(host,@"wolkara.layout.left"); assert(cluster.frame.size.width>216);
-    UISlider *opacity=(id)Find(host,@"wolkara.controls.transparency");
+    UIView *cluster=Find(host,@"wolkaraforever.layout.left"); assert(cluster.frame.size.width>216);
+    UISlider *opacity=(id)Find(host,@"wolkaraforever.controls.transparency");
     opacity.value=.7; [opacity sendActionsForControlEvents:UIControlEventValueChanged];
     assert(fabs(cluster.alpha-.3)<.001);
-    UISwitch *edit=(id)Find(host,@"wolkara.controls.edit");
+    UISwitch *edit=(id)Find(host,@"wolkaraforever.controls.edit");
     edit.on=YES; [edit sendActionsForControlEvents:UIControlEventValueChanged]; [host layoutIfNeeded];
-    assert(!Find(host,@"wolkara.controls.settings"));
+    assert(!Find(host,@"wolkaraforever.controls.settings"));
     // Standalone buttons must remain hit-testable for their pan recognizer;
     // disabling them would allow groups to move but trap shoulders and +.
     for (NSString *name in @[GCInputLeftTrigger,GCInputLeftShoulder,GCInputRightTrigger,GCInputRightShoulder,GCInputButtonMenu]) {
@@ -294,15 +296,15 @@ static void TestNativeInput(UIView *host, AKPreviewGamepad *manager) {
     AKGamepadLayout *saved=[[AKGamepadLayout alloc] initWithDefaults:NSUserDefaults.standardUserDefaults];
     assert(fabs(saved.frontScale-1.3)<.001 && fabs(saved.opacity-.3)<.001);
     assert(!saved.hapticsEnabled && !saved.swapShoulders);
-    [(UIButton *)Find(host,@"wolkara.layout.done") sendActionsForControlEvents:UIControlEventTouchUpInside];
+    [(UIButton *)Find(host,@"wolkaraforever.layout.done") sendActionsForControlEvents:UIControlEventTouchUpInside];
     [Button(host,GCInputButtonA) sendActionsForControlEvents:UIControlEventTouchDown]; Drain();
     assert(pad.buttonA.pressed && manager.feedback.buttons==silentButtons);
     [Button(host,GCInputButtonA) sendActionsForControlEvents:UIControlEventTouchUpInside];
     [manager toggleSettings];
-    assert(((UISwitch *)Find(host,@"wolkara.controls.swapShoulders")).on);
-    [(UIButton *)Find(host,@"wolkara.controls.reset") sendActionsForControlEvents:UIControlEventTouchUpInside];
-    assert(((UISwitch *)Find(host,@"wolkara.controls.haptics")).on);
-    assert(!((UISwitch *)Find(host,@"wolkara.controls.swapShoulders")).on);
+    assert(((UISwitch *)Find(host,@"wolkaraforever.controls.swapShoulders")).on);
+    [(UIButton *)Find(host,@"wolkaraforever.controls.reset") sendActionsForControlEvents:UIControlEventTouchUpInside];
+    assert(((UISwitch *)Find(host,@"wolkaraforever.controls.haptics")).on);
+    assert(!((UISwitch *)Find(host,@"wolkaraforever.controls.swapShoulders")).on);
     [manager toggleSettings]; [host layoutIfNeeded];
     [Button(host,GCInputButtonA) sendActionsForControlEvents:UIControlEventTouchDown];
     [Button(host,GCInputButtonA) sendActionsForControlEvents:UIControlEventTouchUpInside];
@@ -406,7 +408,7 @@ static void TestLifecycle(UIView *host) {
 - (void)start {
     BOOL test=[NSProcessInfo.processInfo.arguments containsObject:@"--self-test"];
     if (test || [NSProcessInfo.processInfo.arguments containsObject:@"--self-test-input"])
-        [NSUserDefaults.standardUserDefaults removeObjectForKey:@"WolkaraTouchLayoutV1"];
+        [NSUserDefaults.standardUserDefaults removeObjectForKey:@"WolkaraForeverTouchLayoutV1"];
     if (test) { TestLifecycle(self.window.rootViewController.view); fflush(stdout); exit(0); }
     self.gamepad=[[AKPreviewGamepad alloc] initWithHostView:self.window.rootViewController.view];
     UIButton *settings=[UIButton buttonWithType:UIButtonTypeSystem];
@@ -450,7 +452,7 @@ static void TestLifecycle(UIView *host) {
     if ([NSProcessInfo.processInfo.arguments containsObject:@"--preview-settings"])
         [self.gamepad performSelector:@selector(toggleSettings) withObject:nil afterDelay:1];
 }
-- (void)testInput { TestNativeInput(self.window.rootViewController.view,(id)self.gamepad); fflush(stdout); exit(0); }
+- (void)testInput { extern void TestTouchAbilitiesUI(UIView *,AKTouchGamepad *,GCVirtualController *); TestTouchAbilitiesUI(self.window.rootViewController.view,self.gamepad,((AKPreviewGamepad *)self.gamepad).created); TestNativeInput(self.window.rootViewController.view,(id)self.gamepad); fflush(stdout); exit(0); }
 - (void)report {
     NSLog(@"FIXTURE_GAMEPAD: active=%d key=%d hidden=%d visible=%d controllers=%lu",UIApplication.sharedApplication.applicationState==UIApplicationStateActive,self.window.isKeyWindow,self.window.hidden,self.gamepad.visible,(unsigned long)GCController.controllers.count);
 }

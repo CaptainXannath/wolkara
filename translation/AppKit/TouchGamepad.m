@@ -2,6 +2,8 @@
 #import "TouchGamepadLayout.h"
 #import "AKHostLocalization.h"
 #import "TouchHaptics.h"
+#import "TouchActionInput.h"
+#import "TouchActionOverlay.h"
 #include <math.h>
 
 CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
@@ -123,6 +125,7 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
 @property(nonatomic, readonly) AKGamepadStick *leftStick;
 @property(nonatomic, readonly) AKGamepadStick *rightStick;
 @property(nonatomic, readonly) AKGamepadLayout *preferences;
+@property(nonatomic, readonly) AKTouchActionOverlay *actions;
 @property(nonatomic) BOOL controlsVisible;
 @property(nonatomic, readonly) BOOL configuring;
 @property(nonatomic, readonly) BOOL editing;
@@ -151,6 +154,15 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
         self.layer.zPosition = 99999;
         _preferences = [[AKGamepadLayout alloc] initWithDefaults:NSUserDefaults.standardUserDefaults];
         _dragOrigins = [NSMutableDictionary new];
+        _actions = [[AKTouchActionOverlay alloc] initWithFrame:self.bounds];
+        _actions.autoresizingMask = UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;
+        [self addSubview:_actions];
+        __weak AKGamepadOverlay *weakSelf = self;
+        _actions.configurationChanged = ^{
+            AKGamepadOverlay *self = weakSelf;
+            [self updateAppearance];
+            if (self.configurationChanged) self.configurationChanged();
+        };
         _editGrid = [CAShapeLayer layer]; _editAxes = [CAShapeLayer layer];
         _editGrid.name = @"WolkaraForeverEditGrid"; _editAxes.name = @"WolkaraForeverEditAxes";
         for (CAShapeLayer *layer in @[_editGrid, _editAxes]) {
@@ -206,14 +218,16 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     }
     return self;
 }
-- (BOOL)configuring { return _settings != nil || _editing; }
+- (BOOL)configuring { return _settings != nil || _editing || _actions.editing; }
 - (BOOL)configurationContainsPoint:(CGPoint)point inView:(UIView *)view {
+    if ([_actions editorContainsPoint:point inView:view]) return YES;
     UIView *control = _editing ? _editDone : _settings;
     return control && !control.hidden && CGRectContainsPoint(control.bounds, [control convertPoint:point fromView:view]);
 }
 - (void)setControlsVisible:(BOOL)visible { _controlsVisible = visible; [self updateAppearance]; }
 - (void)updateAppearance {
     self.hidden = !_controlsVisible && !self.configuring;
+    _actions.active = _controlsVisible && !self.configuring;
     for (UIView *item in _items.allValues) {
         item.hidden = !_controlsVisible && !self.configuring;
         item.alpha = _editing ? MAX(0.5,_preferences.opacity) : _preferences.opacity;
@@ -332,7 +346,7 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     return label;
 }
 - (void)toggleSettings {
-    if (_settings || _editing) { [self finishConfiguration]; return; }
+    if (self.configuring) { [self finishConfiguration]; return; }
     [self reset];
     _settings = [UIView new]; _settings.backgroundColor = [UIColor colorWithRed:.06 green:.08 blue:.11 alpha:1];
     _settings.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
@@ -384,6 +398,11 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     editRow.axis = UILayoutConstraintAxisHorizontal; editRow.alignment = UIStackViewAlignmentCenter;
     [options addArrangedSubview:editRow];
     [options addArrangedSubview:[self label:AKHostLocalized(@"touch.settings.edit.detail")]];
+    UIButton *abilities = [UIButton buttonWithType:UIButtonTypeSystem];
+    [abilities setTitle:@"Touch abilities…" forState:UIControlStateNormal];
+    abilities.accessibilityIdentifier = @"wolkara.controls.abilities";
+    [abilities addTarget:self action:@selector(editAbilities) forControlEvents:UIControlEventTouchUpInside];
+    [options addArrangedSubview:abilities];
     UIButton *reset = [UIButton buttonWithType:UIButtonTypeSystem]; [reset setTitle:AKHostLocalized(@"touch.settings.reset") forState:UIControlStateNormal];
     reset.accessibilityIdentifier = @"wolkaraforever.controls.reset";
     [reset addTarget:self action:@selector(resetLayout) forControlEvents:UIControlEventTouchUpInside];
@@ -431,6 +450,11 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     _sliders = nil; _values = nil; _editSwitch = nil; _hapticsSwitch = nil; _swapShouldersSwitch = nil; _settingsColumns = nil;
     [self updateAppearance]; if (self.configurationChanged) self.configurationChanged();
 }
+- (void)editAbilities {
+    [self finishConfiguration];
+    [self bringSubviewToFront:_actions];
+    [_actions beginEditing];
+}
 - (void)resetLayout {
     [self reset]; [_preferences reset];
     _sliders[0].value = 1-_preferences.opacity; _sliders[1].value = _preferences.rearScale; _sliders[2].value = _preferences.frontScale;
@@ -438,11 +462,13 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     [self updateValues]; [self updateAppearance];
 }
 - (void)finishConfiguration {
+    [_actions finishEditing];
     [self reset]; [_preferences save]; _editing = NO; [_dragOrigins removeAllObjects];
     [_settings removeFromSuperview]; _settings = nil; _sliders = nil; _values = nil; _editSwitch = nil; _hapticsSwitch = nil; _swapShouldersSwitch = nil; _settingsColumns = nil;
     [self updateAppearance]; if (self.configurationChanged) self.configurationChanged();
 }
 - (void)reset {
+    [_actions releaseTouches];
     for (AKGamepadButton *button in _buttons.allValues) [button releaseInput];
     [_leftStick reset]; [_rightStick reset];
 }
@@ -453,6 +479,7 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     GCVirtualController *_virtualController;
     AKGamepadOverlay *_overlay;
     AKTouchHaptics *_haptics;
+    AKTouchActionInput *_actionInput;
     BOOL _active, _connecting, _cancelConnect, _failed, _invalidated;
 }
 - (instancetype)initWithHostView:(UIView *)host {
@@ -463,6 +490,21 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
         _overlay.autoresizingMask = UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;
         [host addSubview:_overlay];
         __weak AKTouchGamepad *weakSelf = self;
+        _actionInput = [AKTouchActionInput new];
+        _actionInput.changed = ^(NSString *button, BOOL pressed) {
+            [weakSelf publishButton:button pressed:pressed];
+        };
+        _overlay.actions.press = ^BOOL(AKTouchAction *action) {
+            AKTouchGamepad *self = weakSelf;
+            if (!self || !self->_visible || self->_overlay.configuring) return NO;
+            BOOL accepted = [self->_actionInput beginAction:action.identifier button:action.button modifiers:action.modifiers];
+            if (accepted) [self->_haptics buttonPressed];
+            return accepted;
+        };
+        _overlay.actions.released = ^(AKTouchAction *action) {
+            AKTouchGamepad *self = weakSelf;
+            if (self) [self->_actionInput endAction:action.identifier];
+        };
         _overlay.configurationChanged = ^{
             AKTouchGamepad *self = weakSelf;
             [self updateHaptics];
@@ -483,7 +525,7 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     }
     return self;
 }
-- (BOOL)editing { return _overlay.editing; }
+- (BOOL)editing { return _overlay.editing || _overlay.actions.editing; }
 - (BOOL)configurationContainsPoint:(CGPoint)point inView:(UIView *)view {
     return [_overlay configurationContainsPoint:point inView:view];
 }
@@ -529,11 +571,21 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
 - (void)buttonChanged:(AKGamepadButton *)button {
     if (!_visible || _overlay.configuring) return;
     if (button.pressed) [_haptics buttonPressed];
-    if ([button.element hasPrefix:@"dpad."]) {
-        CGPoint value = CGPointMake(_overlay.buttons[@"dpad.right"].pressed - _overlay.buttons[@"dpad.left"].pressed,
-                                    _overlay.buttons[@"dpad.up"].pressed - _overlay.buttons[@"dpad.down"].pressed);
+    NSDictionary *names = @{GCInputButtonA:@"A",GCInputButtonB:@"B",GCInputButtonX:@"X",GCInputButtonY:@"Y",
+        GCInputLeftTrigger:@"LT",GCInputRightTrigger:@"RT",@"dpad.up":@"up",@"dpad.right":@"right",@"dpad.down":@"down",@"dpad.left":@"left"};
+    [_actionInput setManualButton:names[button.element] ?: button.element pressed:button.pressed];
+}
+- (void)publishButton:(NSString *)button pressed:(BOOL)pressed {
+    if ([@[@"up",@"right",@"down",@"left"] containsObject:button]) {
+        NSSet *held = _actionInput.pressedButtons;
+        CGPoint value = CGPointMake([held containsObject:@"right"] - [held containsObject:@"left"],
+                                    [held containsObject:@"up"] - [held containsObject:@"down"]);
         [_virtualController setPosition:value forDirectionPadElement:GCInputDirectionPad];
-    } else [_virtualController setValue:button.pressed ? 1 : 0 forButtonElement:button.element];
+    } else {
+        NSDictionary *elements = @{@"A":GCInputButtonA,@"B":GCInputButtonB,@"X":GCInputButtonX,@"Y":GCInputButtonY,
+            @"LT":GCInputLeftTrigger,@"RT":GCInputRightTrigger};
+        [_virtualController setValue:pressed ? 1 : 0 forButtonElement:elements[button] ?: button];
+    }
 }
 - (void)stickChanged:(AKGamepadStick *)stick {
     if (_visible && !_overlay.configuring) {
@@ -546,6 +598,7 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     // Explicitly release our held controls before removing the virtual device.
     // No value or handler on a physical controller is changed.
     [_overlay reset];
+    [_actionInput releaseAll];
     _virtualController = nil;
     [controller disconnect];
     [self setVisible:NO];

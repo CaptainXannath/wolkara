@@ -7,6 +7,32 @@ the gamepad controls and individual toolbar buttons. Positions are saved relativ
 to the safe area and stay on screen when the window changes size. Transparency,
 size, shoulder swapping and haptics remain configurable.
 
+## Touch abilities
+
+Open Settings → **Touch abilities…** and enable **Touch abilities**. The circles
+send button combinations through the same virtual controller as the sticks.
+They are active only while the touch controller is active; keyboard/draft entry,
+backgrounding, hiding the controller or opening its settings releases held input.
+
+The initial 32 circles follow the reference layout: the neutral D-pad and Y/B/A/X
+diamonds are above, LT is on the left, RT on the right, and LT+RT below. The overlay
+does not detect spells or inspect the game. Align it with the matching action bars.
+
+- **Whole layout:** drag any circle to move the block; pinch or use the size slider
+  to scale positions and diameters together. This is useful after changing WoW's UI scale.
+- **One circle:** tap a circle to select it, drag it, resize it, and choose its button
+  and modifier. Individual circles can be hidden/deleted; **Add** creates another.
+- **Borders** controls the outline while playing; zero leaves invisible touch zones.
+  The editor always shows labels and outlines. **Done** saves; **Reset** restores
+  the reference arrangement without changing whether the feature is enabled.
+
+Holding a circle holds its combination; releasing/cancelling releases that touch's
+buttons. There is no repetition or queued action. Shared modifiers remain held while
+another touch owns them. An incompatible simultaneous combination is rejected with
+an orange outline instead of becoming a different shortcut. A conflicting manual
+trigger press cancels the existing circle's chord before applying the manual input.
+The layout fits inside resized windows without overwriting the saved arrangement.
+
 ## Apple keyboard
 
 Select the game's text field before opening the keyboard. Write or dictate into
@@ -64,3 +90,9 @@ Run `tools/test_toolbar_dictation.sh --self-test` and
 speech/audio doubles and a Keychain double. The ad-hoc simulator fixture cannot
 prove real device Keychain persistence or microphone capture; those require the
 signed app on a physical device. No game input is automated by these tests.
+
+`tools/test_touch_abilities.sh` checks all modifier combinations, ownership and
+reference-layout geometry. `tools/test_touch_gamepad_ui.sh --self-test-input` checks
+the editor and all 32 combinations through an actual iOS virtual controller in our
+synthetic fixture; `--self-test` covers controller lifecycle. Gameplay validation
+still requires the signed app on a physical device.

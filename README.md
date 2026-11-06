@@ -58,6 +58,9 @@ WoW gameplay under this capability set remain untested.
 - A key button: tap to edit a saved value; hold to type it and send once. Storage
   uses this device's Keychain, not the clipboard, config files or input logs.
 - Physical controller support and an on-screen controller when none is connected.
+- Optional touch zones over action bars, with editable controller shortcuts,
+  individual circle sizing and whole-layout movement/scaling. The initial layout
+  has neutral, LT, RT and LT+RT groups; enable it in Settings → Touch abilities.
 - Movable touch controls, opacity and size settings, shoulder-position swapping,
   an alignment grid and haptics. The mouse/keyboard/microphone/key toolbar also
   moves in Edit layout. Compact settings require no scrolling.
