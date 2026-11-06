@@ -28,3 +28,4 @@ xcrun simctl spawn "$SIM_ID" "$PWD/build/emulation/test_audio_hardware"
 "${CC[@]}" -Itranslation/AppKit translation/AKSupport/AKSupport.m translation/AppKit/*.m translation/AppKit/*.c tests/test_appkit_views.m \
     $(cat translation/AppKit/ldflags) -o build/emulation/test_appkit_views
 xcrun simctl spawn "$SIM_ID" "$PWD/build/emulation/test_appkit_views"
+SIMULATOR="$SIM_ID" tools/test_direct_touch_camera.sh

@@ -33,6 +33,8 @@ BOOL AKIsPrivateInputEvent(id event);
 // these out, and the class asks before calling them. The adapter's older host
 // implements the six above and nothing more.
 @optional
+// Release direct input too when settings, focus or input mode cancels gestures.
+- (void)touchInputCancelled;
 - (void)touchSubmitPrivateText:(NSString *)text;
 // Explicit user-requested replacement of the focused field; no text is read.
 - (void)touchReplaceText:(NSString *)text;

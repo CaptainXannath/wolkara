@@ -254,6 +254,10 @@ NSEventModifierFlags AKModifiersReconciled(NSEventModifierFlags held, NSEventMod
     unsigned _lastTouchButton;
     NSInteger _touchClickCount;
     CGSize _touchViewportSize;
+    __weak UITouch *_directTouch;
+    CGPoint _directFingerLast;
+    BOOL _directPressed, _directRelative;
+    NSInteger _directButton;
 }
 - (instancetype)initWithFrame:(CGRect)f {
     if ((self = [super initWithFrame:f])) {
@@ -305,6 +309,7 @@ NSEventModifierFlags AKModifiersReconciled(NSEventModifierFlags held, NSEventMod
     }
 }
 - (void)touchTrackpadChanged:(BOOL)enabled {
+    [self touchInputCancelled];
     self.multipleTouchEnabled = enabled;
     if (enabled && !_touchCursorInitialized && self.bounds.size.width > 0 && self.bounds.size.height > 0) {
         _last = CGPointMake(CGRectGetMidX(self.bounds), CGRectGetMidY(self.bounds));
@@ -404,12 +409,14 @@ NSEventModifierFlags AKModifiersReconciled(NSEventModifierFlags held, NSEventMod
 - (void)captureChanged:(NSNotification *)notification {
     (void)notification;
     if(!NSThread.isMainThread) { dispatch_async(dispatch_get_main_queue(),^{[self captureChanged:nil];});return; }
+    if (_directPressed && AKMouseIsCaptured()) _directRelative = YES;
     [self.window.rootViewController setNeedsUpdateOfPrefersPointerLocked];
     AKLog(@"mouse capture requested=%d raw_devices=%lu",AKMouseIsCaptured(),(unsigned long)GCMouse.mice.count);
 }
 - (void)lockChanged:(NSNotification *)notification { (void)notification; AKLog(@"pointer lock active=%d",self.window.windowScene.pointerLockState.locked); }
 - (void)anchorChanged:(NSNotification *)notification {
     if(!NSThread.isMainThread) { dispatch_async(dispatch_get_main_queue(),^{[self anchorChanged:notification];});return; }
+    if (_directPressed && AKMouseIsCaptured()) _directRelative = YES;
     _last=CGPointMake([notification.userInfo[@"x"] doubleValue],[notification.userInfo[@"y"] doubleValue]);
     self.nsWindow.ak_mouseLocation=CGPointMake(_last.x,self.bounds.size.height-_last.y);
 }
@@ -449,6 +456,9 @@ NSEventModifierFlags AKModifiersReconciled(NSEventModifierFlags held, NSEventMod
     [self postMouse:t at:p button:b clicks:1];
 }
 - (void)postMouse:(NSEventType)t at:(CGPoint)p button:(NSInteger)b clicks:(NSInteger)clicks {
+    [self postMouse:t at:p button:b clicks:clicks delta:CGPointMake(p.x - _last.x, p.y - _last.y)];
+}
+- (void)postMouse:(NSEventType)t at:(CGPoint)p button:(NSInteger)b clicks:(NSInteger)clicks delta:(CGPoint)delta {
     if(t==NSEventTypeLeftMouseDown)_pressedLeft=YES;
     if(t==NSEventTypeLeftMouseUp)_pressedLeft=NO;
     if(t==NSEventTypeRightMouseDown)_pressedRight=YES;
@@ -460,7 +470,7 @@ NSEventModifierFlags AKModifiersReconciled(NSEventModifierFlags held, NSEventMod
     e.timestamp = NSProcessInfo.processInfo.systemUptime;
     e.locationInWindow = CGPointMake(p.x, self.bounds.size.height - p.y); self.nsWindow.ak_mouseLocation=e.locationInWindow;   // AppKit: bottom-left origin
     mouseScreenLocation=[self.nsWindow convertPointToScreen:e.locationInWindow];
-    e.deltaX = p.x - _last.x; e.deltaY = p.y - _last.y; _last = p;
+    e.deltaX = delta.x; e.deltaY = delta.y; _last = p;
     NSView *view=self.nsWindow.contentView;
     NSCursor *cursor=[view ak_cursorAtPoint:[view convertPoint:e.locationInWindow fromView:nil]];
     if(cursor && cursor!=NSCursor.currentCursor) [cursor set];
@@ -538,6 +548,18 @@ NSEventModifierFlags AKModifiersReconciled(NSEventModifierFlags held, NSEventMod
 }
 - (void)dealloc { [NSNotificationCenter.defaultCenter removeObserver:self]; }
 static BOOL AKIsRight(UIEvent *ev) { return (ev.buttonMask & UIEventButtonMaskSecondary) != 0; }
+static UITouch *AKDirectTouch(NSSet<UITouch *> *touches) {
+    for (UITouch *touch in touches) if (touch.type == UITouchTypeDirect) return touch;
+    return nil;
+}
+- (void)touchInputCancelled {
+    if (!_directPressed) return;
+    _directPressed = NO;
+    [self postMouse:_directButton ? NSEventTypeRightMouseUp : NSEventTypeLeftMouseUp
+                 at:_last button:_directButton clicks:1 delta:CGPointZero];
+    // Keep the cancelled finger until it lifts, so a mode change cannot turn
+    // the remainder of this gesture into a trackpad drag. A fresh begin can replace it.
+}
 - (BOOL)handleTrackpadTouches:(NSSet<UITouch *> *)touches event:(UIEvent *)event {
     if (!_touchControls.trackpadEnabled) return NO;
     for (UITouch *touch in touches) if (touch.type == UITouchTypeDirect) {
@@ -547,20 +569,61 @@ static BOOL AKIsRight(UIEvent *ev) { return (ev.buttonMask & UIEventButtonMaskSe
     return NO;
 }
 - (void)touchesBegan:(NSSet<UITouch *> *)t withEvent:(UIEvent *)ev {
+    if (_directTouch) {
+        if (_directPressed || [ev.allTouches containsObject:_directTouch]) return;
+        _directTouch = nil; // UIKit may drop a cancelled touch after losing focus.
+    }
     if ([self handleTrackpadTouches:t event:ev]) return;
+    UITouch *finger = AKDirectTouch(t);
+    if (finger) {
+        if (_touchControls.configuring || _pressedLeft || _pressedRight || _pressedMiddle) return;
+        _directTouch = finger; _directPressed = YES; _directButton = AKIsRight(ev);
+        _directFingerLast = [finger locationInView:self];
+        _directRelative = AKMouseIsCaptured();
+        [self reconcileModifiers:AKMods(ev.modifierFlags)];
+        [self postMouse:_directButton ? NSEventTypeRightMouseDown : NSEventTypeLeftMouseDown
+                     at:_directRelative ? _last : _directFingerLast button:_directButton clicks:1 delta:CGPointZero];
+        return;
+    }
     BOOL r = AKIsRight(ev);if(r?_pressedRight:_pressedLeft)return; _last = [t.anyObject locationInView:self];
     [self reconcileModifiers:AKMods(ev.modifierFlags)];
     [self postMouse:r ? NSEventTypeRightMouseDown : NSEventTypeLeftMouseDown at:_last button:r];
 }
 - (void)touchesMoved:(NSSet<UITouch *> *)t withEvent:(UIEvent *)ev {
+    if (_directTouch && [t containsObject:_directTouch]) {
+        if (!_directPressed) return;
+        CGPoint point = [_directTouch locationInView:self];
+        // Guest cursor warps change _last, never the finger's previous sample.
+        CGPoint delta = CGPointMake(point.x - _directFingerLast.x, point.y - _directFingerLast.y);
+        _directFingerLast = point;
+        _directRelative |= AKMouseIsCaptured();
+        if (CGPointEqualToPoint(delta, CGPointZero)) return;
+        [self postMouse:_directButton ? NSEventTypeRightMouseDragged : NSEventTypeLeftMouseDragged
+                     at:_directRelative ? _last : point button:_directButton clicks:1 delta:delta];
+        return;
+    }
+    if (_directTouch) return;
     if ([self handleTrackpadTouches:t event:ev]) return;
+    if (AKDirectTouch(t)) return; // An unowned/cancelled finger cannot start a drag.
     if([self usesRelativeMouse])return;
     BOOL r = _pressedRight;
     CGPoint point=[t.anyObject locationInView:self];if(CGPointEqualToPoint(point,_last))return;
     [self postMouse:r ? NSEventTypeRightMouseDragged : NSEventTypeLeftMouseDragged at:point button:r];
 }
 - (void)touchesEnded:(NSSet<UITouch *> *)t withEvent:(UIEvent *)ev {
+    if (_directTouch && [t containsObject:_directTouch]) {
+        if (_directPressed) {
+            _directRelative |= AKMouseIsCaptured();
+            CGPoint point = _directRelative ? _last : [_directTouch locationInView:self];
+            [self postMouse:_directButton ? NSEventTypeRightMouseUp : NSEventTypeLeftMouseUp
+                         at:point button:_directButton clicks:1 delta:CGPointZero];
+        }
+        _directTouch = nil; _directPressed = NO;
+        return;
+    }
+    if (_directTouch) return;
     if ([self handleTrackpadTouches:t event:ev]) return;
+    if (AKDirectTouch(t)) return;
     if(!_pressedRight && !_pressedLeft)return;
     [self postMouse:_pressedRight ? NSEventTypeRightMouseUp : NSEventTypeLeftMouseUp at:[self usesRelativeMouse]?_last:[t.anyObject locationInView:self] button:_pressedRight];
 }

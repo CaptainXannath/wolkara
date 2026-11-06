@@ -1008,6 +1008,7 @@ static void AKEmitTouch(void *context, AKTrackpadAction action, double x, double
     }
 }
 - (void)cancelTouches {
+    if ([self.delegate respondsToSelector:@selector(touchInputCancelled)]) [self.delegate touchInputCancelled];
     [_holdTimer invalidate]; _holdTimer = nil;
     AKTrackpadCancel(&_pad, AKEmitTouch, (__bridge void *)self);
     if (!_pad.fingers) _pad = (AKTrackpad){0};
