@@ -52,6 +52,8 @@ WoW gameplay under this capability set remain untested.
   game data. Updates preserve settings and addons.
 - Apple's keyboard with iOS autocorrection and dismissal after Send, plus a
   touch trackpad with two-finger scrolling.
+- Direct camera dragging with mouse mode off keeps finger movement independent
+  of the game's cursor recentering; ordinary taps still target their screen position.
 - A microphone button opens chat and transcribes speech into a visible local draft.
   Review or edit it before ✓ sends; × discards. Recognition callbacks never type
   into the game. On-device Apple Speech availability and permissions are required.

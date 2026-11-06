@@ -1,11 +1,24 @@
 # Touch controls and text input
 
 The toolbar offers mouse/trackpad, Apple keyboard, gamepad, settings, leave app,
-microphone and saved-text key controls. Touches outside controls use the trackpad;
+microphone and saved-text key controls. With mouse mode enabled, touches outside controls use the trackpad;
 opening an editor releases held inputs. Settings → Edit layout lets you move both
 the gamepad controls and individual toolbar buttons. Positions are saved relative
 to the safe area and stay on screen when the window changes size. Transparency,
 size, shoulder swapping and haptics remain configurable.
+
+## Direct camera dragging
+
+With mouse mode disabled, touch the game directly to click or drag. Camera motion
+uses the distance between successive finger samples, independently of the game's
+cursor position. Capturing or recentering the cursor cannot add a jump to that
+distance, including near screen edges. The game still controls camera sensitivity.
+Ordinary uncaptured taps and UI drags keep their absolute screen position.
+
+The first finger owns the drag until it lifts. Opening native controls, losing
+focus, changing input mode or resizing the viewport releases it; remaining samples
+from that cancelled gesture cannot start another drag. Touch ability circles and
+the virtual controller keep their own inputs.
 
 ## Touch abilities
 
@@ -96,3 +109,8 @@ reference-layout geometry. `tools/test_touch_gamepad_ui.sh --self-test-input` ch
 the editor and all 32 combinations through an actual iOS virtual controller in our
 synthetic fixture; `--self-test` covers controller lifecycle. Gameplay validation
 still requires the signed app on a physical device.
+
+`tools/test_direct_touch_camera.sh` (also part of `test_translation_sim.sh`) checks
+cursor capture/warps, delta continuity at different touch positions and viewport
+sizes, absolute UI drags, cancellation, finger ownership, trackpad movement and
+indirect pointer clicks. Its events are synthetic; it does not run a game.
