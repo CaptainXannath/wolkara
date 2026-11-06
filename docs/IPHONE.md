@@ -54,6 +54,27 @@ before guest entry. After enrollment, the user confirmed a cold launch after
 reboot with the iPhone disconnected from the Mac. Local signing and External
 JIT were not tested on this iPhone.
 
+### Folding or rotating during startup
+
+A Duo report on 2026-11-06 recorded an iOS `scene-update` watchdog termination
+(`0x8badf00d`, five-second allowance) while the main thread was sleeping inside
+native startup, before the game window appeared. This is an app responsiveness
+failure; the report does not establish a device reboot or GPU failure. Apple
+explains this termination in [Addressing watchdog terminations](https://developer.apple.com/documentation/xcode/addressing-watchdog-terminations).
+
+During pre-window startup, imported `nanosleep`, `usleep` and `sleep` calls on the
+main thread now give UIKit bounded turns between sleep slices. The monotonic
+sleep deadline includes time spent servicing UIKit; invalid requests and native
+interruptions retain their results. Worker threads and nested callbacks keep
+native sleeps. The launcher disables this policy when the game window appears
+or startup ends. The original executable and its startup thread are unchanged.
+
+A UIKit-only fixture exercises scene orientation changes and layout commits
+during a six-second synthetic startup sleep. The old blocking sleep prevents
+all updates; the cooperative path services them. This addresses sleeping startup
+phases, not uninterrupted CPU work or arbitrary lock/GPU waits. Physical folding
+during WoW startup remains a user validation step.
+
 ### Starting with mobile data (experimental recovery)
 
 The first reported cellular-only launch on 2026-10-04 failed to connect to the

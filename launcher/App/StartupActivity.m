@@ -3,6 +3,17 @@
 #include <limits.h>
 #include <stdlib.h>
 
+// Native startup keeps the UIKit main thread. Cooperative guest sleeps must
+// service scene/geometry updates (for example folding a Duo) within iOS's
+// scene-update deadline, then commit the native layout before sleeping again.
+void TKPumpStartupUI(void) {
+    @autoreleasepool {
+        static BOOL reported;
+        if (!reported) { reported=YES; fprintf(stderr,"[host] startup sleep: servicing UIKit while the guest waits\n"); }
+        CFRunLoopRunInMode(kCFRunLoopDefaultMode, .001, false);
+        [CATransaction flush];
+    }
+}
 // Entries looked at per scan of the app's folder, at most.
 static const unsigned ScanLimit = 4000;
 

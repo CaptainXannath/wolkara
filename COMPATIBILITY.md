@@ -367,3 +367,27 @@ after launch. Physical gameplay confirmation of these three changes is pending.
   bundle validation passes; updated Wolkara in place on the Duo after confirming
   the app was closed and confirmed normal launch. Game files were preserved;
   the user's in-game test of the new shoulder placement remains pending.
+
+
+## Duo folding during Starting (2026-11-06)
+
+- User report: opening/closing the Duo during Starting can leave a black screen
+  and unresponsive phone. The app's 14:53 local crash report records SIGKILL by
+  FRONTBOARD, `scene-update` watchdog `0x8badf00d`, with a five-second allowance.
+  The main thread was in nanosleep under native startup; the runtime log had not
+  reached the guest window. This confirms an app scene-update timeout, not a
+  demonstrated device reboot or GPU fault.
+- Cooperative main-thread sleep adapters service UIKit and commit layout only
+  during pre-window startup. Original durations use a monotonic deadline; worker
+  and nested sleeps bypass the policy. It is cleared on guest-window visibility
+  and all startup completion/stop paths. No executable edits or game automation.
+- Synthetic sleep tests cover deadlines, invalid arguments, interrupted remainders,
+  aliased request/remainder, nested/worker bypass and disabling during a wait.
+  A six-second UIKit fixture issued six orientation requests and delivered five
+  geometry updates plus 150 timer ticks, with a longest timer gap of about 50 ms.
+  The native blocking baseline delivered zero ticks/geometry updates and failed
+  the same fixture. Physical Duo/WoW folding confirmation remains pending.
+- The emulation/sanitizer suite, UIKit adapter regressions, clean staged-source
+  sleep/scene fixtures and signed Release bundle validation pass. Installed in
+  place on the Duo after confirming Wolkara was closed; normal launcher process
+  confirmed and existing game data preserved. In-game folding remains unverified.

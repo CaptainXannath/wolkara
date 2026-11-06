@@ -10,6 +10,7 @@
 #import "../WoW/WoWViewController.h"
 #import "LaunchProgressView.h"
 #import "NativeGuest.h"
+#include "GuestWait.h"
 #import "SignedFileProbe.h"
 #import "StartupActivity.h"
 #import "../Voice/Dictation.h"
@@ -863,6 +864,7 @@ static BOOL PreparedFromOutside(void) { return hd_may_run_unsigned_code() || ng_
     }
 }
 - (void)stopStartupActivity {
+    gw_set_startup_pump(NULL);
     [self.startupActivity stop];
     [NSNotificationCenter.defaultCenter removeObserver:self name:UIWindowDidBecomeVisibleNotification object:nil];
 }
@@ -956,7 +958,9 @@ static BOOL PreparedFromOutside(void) { return hd_may_run_unsigned_code() || ng_
         }
         fprintf(log,"[host] signed-image container=%s\n",shown.UTF8String); fflush(log);
     }
+    gw_set_startup_pump(fullStartup ? TKPumpStartupUI : NULL);
     BOOL ok = ng_initialize(path.fileSystemRepresentation, NSBundle.mainBundle.privateFrameworksPath.fileSystemRepresentation, map.fileSystemRepresentation, log, fullStartup);
+    gw_set_startup_pump(NULL);
     // The outcome as the host saw it (tools/run.sh requires "returned").
     fprintf(log,"[host] native %s %s\n",fullStartup?"startup":"first initializer",ok?"returned":"stopped"); fflush(log);
     self.status.text = ok ? (fullStartup ? [app.name stringByAppendingString:@" closed."] : @"Original client first initializer returned.") : @"Native startup stopped. See runtime log.";

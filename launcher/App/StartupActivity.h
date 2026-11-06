@@ -3,6 +3,8 @@
 #import "StartupActivityText.h"
 
 NS_ASSUME_NONNULL_BEGIN
+// A bounded main-thread turn used only by cooperative pre-window startup waits.
+void TKPumpStartupUI(void);
 // What startup is doing, and the file the app wrote last in its folder:
 // redrawn every second from a background queue with Core Animation, because
 // application code may hold the main thread for minutes while starting.
