@@ -347,3 +347,23 @@ after launch. Physical gameplay confirmation of these three changes is pending.
   the fix. Signed Release bundle validation passes. Installed in place on the
   Duo after confirming the app was closed; normal launch/process confirmed and
   existing game data preserved. In-game camera confirmation remains pending.
+
+
+## Simple-mode shoulder buttons (2026-11-06)
+
+- The user confirms the repeated camera swipes from PR #16 now work in WoW on
+  the Duo. This follow-up changes only controller presentation and placement.
+- Simple mode retains the normal LB/RB buttons along with the left stick, menu
+  and configured ability circles. LT/RT and the right cluster remain hidden.
+- LB/RB use independent saved positions in Simple. Edit layout moves the buttons
+  for the selected mode; Full keeps its existing slot-based positions, including
+  shoulder swapping. Simple positions follow LB/RB identities and survive reloads,
+  mode switches and later edits to Full. Reset clears both sets of positions.
+- The real virtual-controller fixture verifies LB/RB press/release in Simple,
+  independent edits in both modes, cancelled drags, saved-position reloads,
+  both shoulder-slot orders, window clamping and no controller reconnection.
+- Emulation/sanitizer and UIKit adapter regressions pass, as does the clean
+  staged-source controller fixture. Reviewed the Simple screenshot. Signed Release
+  bundle validation passes; updated Wolkara in place on the Duo after confirming
+  the app was closed and confirmed normal launch. Game files were preserved;
+  the user's in-game test of the new shoulder placement remains pending.

@@ -166,6 +166,72 @@ static void TestPreferences(void) {
     assert(CGRectEqualToRect([layout frameForItem:@"menu" defaultFrame:frame inBounds:bounds],frame));
     [defaults removePersistentDomainForName:suite];
 }
+static BOOL SameFrame(CGRect a, CGRect b) {
+    return fabs(a.origin.x-b.origin.x)<.01 && fabs(a.origin.y-b.origin.y)<.01 &&
+           fabs(a.size.width-b.size.width)<.01 && fabs(a.size.height-b.size.height)<.01;
+}
+static void EditShoulders(UIView *host, AKPreviewGamepad *manager, CGPoint movement, BOOL cancel) {
+    [manager toggleSettings]; [host layoutIfNeeded];
+    UISwitch *edit=(id)Find(host,@"wolkaraforever.controls.edit"); assert(edit);
+    edit.on=YES; [edit sendActionsForControlEvents:UIControlEventValueChanged]; [host layoutIfNeeded];
+    assert(manager.editing);
+    for (NSString *name in @[GCInputLeftShoulder,GCInputRightShoulder]) {
+        UIControl *button=Button(host,name); assert(button.enabled);
+        CGPoint center=[button convertPoint:CGPointMake(button.bounds.size.width/2,button.bounds.size.height/2) toView:host];
+        assert([host hitTest:center withEvent:nil]==button);
+        AKFixturePan *pan=[AKFixturePan new]; [button addGestureRecognizer:pan];
+        pan.testState=UIGestureRecognizerStateBegan; [button.superview drag:pan];
+        pan.movement=CGPointMake([name isEqual:GCInputLeftShoulder]?movement.x:-movement.x,movement.y);
+        pan.testState=UIGestureRecognizerStateChanged; [button.superview drag:pan];
+        pan.testState=cancel?UIGestureRecognizerStateCancelled:UIGestureRecognizerStateEnded; [button.superview drag:pan];
+        [button removeGestureRecognizer:pan];
+        assert(!manager.created.controller.physicalInputProfile.buttons[name].pressed);
+    }
+    [(UIControl *)Find(host,@"wolkaraforever.layout.done") sendActionsForControlEvents:UIControlEventTouchUpInside];
+    assert(!manager.configuring);
+}
+static void TestSimpleShoulderPositions(UIView *host, AKPreviewGamepad *manager) {
+    GCVirtualController *connection=manager.created;
+    UIView *overlay=Button(host,GCInputLeftShoulder).superview;
+    NSArray *names=@[GCInputLeftShoulder,GCInputRightShoulder];
+    for (NSUInteger swapped=0;swapped<2;swapped++) {
+        manager.simple=NO; [manager.layout reset]; manager.layout.swapShoulders=swapped;
+        [manager.layout save]; [overlay setNeedsLayout]; [host layoutIfNeeded];
+        EditShoulders(host,manager,CGPointMake(10,45),NO);
+        CGRect full[2],simple[2];
+        for (NSUInteger i=0;i<2;i++) full[i]=Button(host,names[i]).frame;
+        manager.simple=YES; [host layoutIfNeeded];
+        EditShoulders(host,manager,CGPointMake(35,90),NO);
+        for (NSUInteger i=0;i<2;i++) { simple[i]=Button(host,names[i]).frame; assert(!SameFrame(full[i],simple[i])); }
+        // Saving/reloading keeps separate keys without changing legacy full slots.
+        AKGamepadLayout *saved=[[AKGamepadLayout alloc] initWithDefaults:NSUserDefaults.standardUserDefaults];
+        CGRect safe=UIEdgeInsetsInsetRect(overlay.bounds,overlay.safeAreaInsets);
+        for (NSUInteger i=0;i<2;i++) {
+            NSString *key=i?@"simple.RB":@"simple.LB";
+            NSString *fullKey=i?(swapped?@"RT":@"RB"):(swapped?@"LT":@"LB");
+            assert(SameFrame([saved frameForItem:key defaultFrame:simple[i] inBounds:safe],simple[i]));
+            assert(SameFrame([saved frameForItem:fullKey defaultFrame:full[i] inBounds:safe],full[i]));
+            CGRect small=CGRectMake(10,10,300,200);
+            assert(CGRectContainsRect(small,[saved frameForItem:key defaultFrame:simple[i] inBounds:small]));
+            assert(SameFrame([saved frameForItem:key defaultFrame:simple[i] inBounds:safe],simple[i]));
+        }
+        EditShoulders(host,manager,CGPointMake(15,15),YES);
+        for (NSUInteger i=0;i<2;i++) assert(SameFrame(Button(host,names[i]).frame,simple[i]));
+        for (NSUInteger cycle=0;cycle<3;cycle++) {
+            manager.simple=NO; [host layoutIfNeeded];
+            for (NSUInteger i=0;i<2;i++) assert(SameFrame(Button(host,names[i]).frame,full[i]));
+            manager.simple=YES; [host layoutIfNeeded];
+            for (NSUInteger i=0;i<2;i++) assert(SameFrame(Button(host,names[i]).frame,simple[i]));
+            assert(manager.created==connection && manager.visible);
+        }
+        manager.simple=NO; [host layoutIfNeeded]; EditShoulders(host,manager,CGPointMake(5,12),NO);
+        manager.layout.swapShoulders=!swapped; [manager.layout save];
+        manager.simple=YES; [host layoutIfNeeded];
+        for (NSUInteger i=0;i<2;i++) assert(SameFrame(Button(host,names[i]).frame,simple[i]));
+    }
+    manager.simple=NO; [manager.layout reset]; [overlay setNeedsLayout]; [host layoutIfNeeded];
+    puts("SIMPLE_SHOULDER_POSITIONS_PASS: independent Full/Simple drags, cancelled edits, save/reload, slot swapping, clamping and same connected controller.");
+}
 static void TestNativeInput(UIView *host, AKPreviewGamepad *manager) {
     GCExtendedGamepad *pad=manager.created.controller.extendedGamepad;
     assert(pad && manager.visible);
@@ -232,11 +298,18 @@ static void TestNativeInput(UIView *host, AKPreviewGamepad *manager) {
         assert(manager.created==connection && manager.visible && !manager.configuring);
         assert(!pad.buttonA.pressed && !pad.leftShoulder.pressed && pad.leftThumbstick.xAxis.value==0 && pad.rightThumbstick.yAxis.value==0);
         assert(rightStick.superview.hidden && !leftStick.hidden && !leftStick.superview.hidden);
-        for (NSString *name in @[@"dpad.up",@"dpad.right",@"dpad.down",@"dpad.left",GCInputLeftShoulder,GCInputRightShoulder,GCInputLeftTrigger,GCInputRightTrigger]) {
+        for (NSString *name in @[@"dpad.up",@"dpad.right",@"dpad.down",@"dpad.left",GCInputLeftTrigger,GCInputRightTrigger]) {
             UIControl *hidden=(id)Find(host,[@"tolkara.gamepad." stringByAppendingString:name]);
             assert(hidden.hidden && !hidden.enabled);
             CGPoint center=[hidden convertPoint:CGPointMake(hidden.bounds.size.width/2,hidden.bounds.size.height/2) toView:host];
             UIView *hit=[host hitTest:center withEvent:nil]; assert(hit!=hidden && ![hit isDescendantOfView:hidden]);
+        }
+        for (NSString *name in @[GCInputLeftShoulder,GCInputRightShoulder]) {
+            UIControl *shoulder=Button(host,name); assert(shoulder.enabled);
+            [shoulder sendActionsForControlEvents:UIControlEventTouchDown]; Drain();
+            assert(connection.controller.physicalInputProfile.buttons[name].pressed);
+            [shoulder sendActionsForControlEvents:UIControlEventTouchUpInside]; Drain();
+            assert(!connection.controller.physicalInputProfile.buttons[name].pressed);
         }
         CGPoint arrow=[top convertPoint:CGPointMake(108,26) toView:host];
         assert([host hitTest:arrow withEvent:nil]==host);
@@ -249,7 +322,7 @@ static void TestNativeInput(UIView *host, AKPreviewGamepad *manager) {
         assert(manager.created==connection && manager.visible && !rightStick.superview.hidden && !top.hidden);
         assert(CGRectEqualToRect(leftFrame,leftStick.superview.frame) && CGRectEqualToRect(rightFrame,rightStick.superview.frame));
     }
-    puts("TOUCH_SIMPLE_MODE_PASS: same controller, neutral axes/buttons, left stick only plus menu, hidden areas pass through, full layout restored.");
+    puts("TOUCH_SIMPLE_MODE_PASS: same controller, neutral axes/buttons, left stick, shoulders and menu, hidden areas pass through, full layout restored.");
     // Entering settings releases held inputs and prevents editing from sending
     // gameplay input. Preferences and dragged positions survive a new model.
     [manager toggleSettings]; [host layoutIfNeeded]; Drain();
@@ -337,6 +410,7 @@ static void TestNativeInput(UIView *host, AKPreviewGamepad *manager) {
     assert(fabs(cluster.frame.size.width-216)<.01);
     assert(CGRectGetMidX(Button(host,GCInputLeftTrigger).frame)>CGRectGetMidX(Button(host,GCInputLeftShoulder).frame));
     assert(CGRectGetMidX(Button(host,GCInputRightTrigger).frame)<CGRectGetMidX(Button(host,GCInputRightShoulder).frame));
+    TestSimpleShoulderPositions(host,manager);
     TestPreferences();
     manager.keyboardVisible=YES; Drain();
     assert(!manager.visible && !pad.leftShoulder.pressed && !pad.buttonA.pressed);

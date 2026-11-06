@@ -61,8 +61,9 @@ WoW gameplay under this capability set remain untested.
   uses this device's Keychain, not the clipboard, config files or input logs.
 - Physical controller support and an on-screen controller when none is connected.
   Tap the controller toolbar button to switch Full/Simple; hold to turn it on/off.
-  Simple keeps the left stick and menu, hiding both button rings, the right stick
-  and LB/LT/RB/RT. Touch ability circles remain available.
+  Simple keeps the left stick, LB/RB and menu, hiding both button rings, the right stick
+  and LT/RT. LB/RB positions are saved separately for Simple and Full.
+  Touch ability circles remain available.
 - Optional touch zones over action bars, with editable controller shortcuts (including LB/RB),
   individual circle sizing, independent groups of four and whole-layout movement/scaling. The initial layout
   has neutral, LT, RT and LT+RT groups; enable it in Settings → Touch abilities.
