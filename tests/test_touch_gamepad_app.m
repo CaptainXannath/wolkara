@@ -225,6 +225,31 @@ static void TestNativeInput(UIView *host, AKPreviewGamepad *manager) {
     assert(pad.leftShoulder.pressed && pad.buttonA.pressed);
     // The empty surface continues to belong to the existing trackpad/guest.
     assert([host hitTest:CGPointMake(host.bounds.size.width/2,host.bounds.size.height/2) withEvent:nil]==host);
+    GCVirtualController *connection=manager.created;
+    CGRect leftFrame=leftStick.superview.frame, rightFrame=rightStick.superview.frame;
+    for (NSUInteger cycle=0;cycle<3;cycle++) {
+        manager.simple=YES; [host layoutIfNeeded]; Drain();
+        assert(manager.created==connection && manager.visible && !manager.configuring);
+        assert(!pad.buttonA.pressed && !pad.leftShoulder.pressed && pad.leftThumbstick.xAxis.value==0 && pad.rightThumbstick.yAxis.value==0);
+        assert(rightStick.superview.hidden && !leftStick.hidden && !leftStick.superview.hidden);
+        for (NSString *name in @[@"dpad.up",@"dpad.right",@"dpad.down",@"dpad.left",GCInputLeftShoulder,GCInputRightShoulder,GCInputLeftTrigger,GCInputRightTrigger]) {
+            UIControl *hidden=(id)Find(host,[@"tolkara.gamepad." stringByAppendingString:name]);
+            assert(hidden.hidden && !hidden.enabled);
+            CGPoint center=[hidden convertPoint:CGPointMake(hidden.bounds.size.width/2,hidden.bounds.size.height/2) toView:host];
+            UIView *hit=[host hitTest:center withEvent:nil]; assert(hit!=hidden && ![hit isDescendantOfView:hidden]);
+        }
+        CGPoint arrow=[top convertPoint:CGPointMake(108,26) toView:host];
+        assert([host hitTest:arrow withEvent:nil]==host);
+        CGPoint rightCenter=[rightStick convertPoint:CGPointMake(52,52) toView:host];
+        assert([host hitTest:rightCenter withEvent:nil]==host);
+        touch.point=CGPointMake(leftStick.bounds.size.width,leftStick.bounds.size.height/2);
+        [leftStick beginTrackingWithTouch:touch withEvent:nil]; Drain(); assert(pad.leftThumbstick.xAxis.value==1);
+        [leftStick cancelTrackingWithEvent:nil]; Drain(); assert(pad.leftThumbstick.xAxis.value==0);
+        manager.simple=NO; [host layoutIfNeeded]; Drain();
+        assert(manager.created==connection && manager.visible && !rightStick.superview.hidden && !top.hidden);
+        assert(CGRectEqualToRect(leftFrame,leftStick.superview.frame) && CGRectEqualToRect(rightFrame,rightStick.superview.frame));
+    }
+    puts("TOUCH_SIMPLE_MODE_PASS: same controller, neutral axes/buttons, left stick only plus menu, hidden areas pass through, full layout restored.");
     // Entering settings releases held inputs and prevents editing from sending
     // gameplay input. Preferences and dragged positions survive a new model.
     [manager toggleSettings]; [host layoutIfNeeded]; Drain();

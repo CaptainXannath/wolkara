@@ -60,7 +60,10 @@ WoW gameplay under this capability set remain untested.
 - A key button: tap to edit a saved value; hold to type it and send once. Storage
   uses this device's Keychain, not the clipboard, config files or input logs.
 - Physical controller support and an on-screen controller when none is connected.
-- Optional touch zones over action bars, with editable controller shortcuts,
+  Tap the controller toolbar button to switch Full/Simple; hold to turn it on/off.
+  Simple keeps the left stick and menu, hiding both button rings, the right stick
+  and LB/LT/RB/RT. Touch ability circles remain available.
+- Optional touch zones over action bars, with editable controller shortcuts (including LB/RB),
   individual circle sizing, independent groups of four and whole-layout movement/scaling. The initial layout
   has neutral, LT, RT and LT+RT groups; enable it in Settings → Touch abilities.
   Taps activate on lift; drags over circles control the camera/pointer without activating an ability.

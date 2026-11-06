@@ -7,13 +7,29 @@ the gamepad controls and individual toolbar buttons. Positions are saved relativ
 to the safe area and stay on screen when the window changes size. Transparency,
 size, shoulder swapping and haptics remain configurable.
 
+## Controller modes
+
+Tap the toolbar controller button to alternate **Full** and **Simple**. Hold for
+0.6 seconds to turn the virtual controller on or off; the selected mode is remembered.
+Tapping while off changes the remembered layout without enabling it. VoiceOver
+also offers an on/off action. A physical controller continues to take priority.
+
+Simple keeps the left analog stick without its directional ring, plus the menu
+button and enabled touch ability circles. It hides the right stick, A/B/X/Y ring
+and LB/LT/RB/RT. Hidden areas pass touches to the camera or pointer. Changing the
+mode releases held inputs without reconnecting the controller or altering saved
+positions. Use Full to edit controls that are hidden in Simple.
+
 ## Direct camera dragging
 
 With mouse mode disabled, a tap clicks its screen position on lift; a drag turns
 the camera. Touch-down does not move the guest cursor. After 8 points of movement,
-the drag starts at the existing cursor anchor and sends only finger deltas. This
-also covers clients polling cursor position before requesting mouse capture: lifting
-and starting elsewhere cannot teleport that position. The game still controls
+the drag starts at the existing cursor position. Before mouse capture it moves
+that position by the finger delta, so clients using absolute positions can detect
+movement and request capture on every gesture. During capture, only relative
+motion is sent and the requested cursor anchor stays fixed. Cursor warps update
+both window and screen position queries. Lifting and restarting elsewhere never
+uses the new finger origin as a cursor position. The game still controls
 camera sensitivity. Enable mouse mode for pointer movement and dragging UI items.
 
 The first finger owns the drag until it lifts. Opening native controls, losing
@@ -38,7 +54,8 @@ does not detect spells or inspect the game. Align it with the matching action ba
   There are eight default groups: D-pad and face buttons for each modifier set.
   Existing saved positions and bindings are preserved when the groups are added.
 - **One circle:** tap a circle to select it, drag it, resize it, and choose its button
-  and modifier. Individual circles can be hidden/deleted; **Add** creates another.
+  and modifier. Buttons include A/B/X/Y, the four directions, **LB** and **RB**;
+  each supports None, LT, RT or LT+RT. Individual circles can be hidden/deleted; **Add** creates another.
 - **Borders** controls the outline while playing; zero leaves invisible touch zones.
   The editor always shows labels and outlines. **Done** saves; **Reset** restores
   the reference arrangement without changing whether the feature is enabled.

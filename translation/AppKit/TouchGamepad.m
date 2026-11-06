@@ -127,6 +127,7 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
 @property(nonatomic, readonly) AKGamepadLayout *preferences;
 @property(nonatomic, readonly) AKTouchActionOverlay *actions;
 @property(nonatomic) BOOL controlsVisible;
+@property(nonatomic) BOOL simple;
 @property(nonatomic, readonly) BOOL configuring;
 @property(nonatomic, readonly) BOOL editing;
 @property(nonatomic, copy) void (^configurationChanged)(void);
@@ -225,19 +226,27 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     return control && !control.hidden && CGRectContainsPoint(control.bounds, [control convertPoint:point fromView:view]);
 }
 - (void)setControlsVisible:(BOOL)visible { _controlsVisible = visible; [self updateAppearance]; }
+- (void)setSimple:(BOOL)simple { _simple = simple; [self updateAppearance]; }
 - (void)updateAppearance {
     self.hidden = !_controlsVisible && !self.configuring;
     _actions.active = _controlsVisible && !self.configuring;
-    for (UIView *item in _items.allValues) {
-        item.hidden = !_controlsVisible && !self.configuring;
+    for (NSString *name in _items) {
+        UIView *item = _items[name];
+        BOOL omitted = _simple && [@[@"right",@"LB",@"LT",@"RB",@"RT"] containsObject:name];
+        item.hidden = omitted || (!_controlsVisible && !self.configuring);
         item.alpha = _editing ? MAX(0.5,_preferences.opacity) : _preferences.opacity;
         item.layer.borderWidth = _editing ? 1 : ([item isKindOfClass:AKGamepadButton.class] ? 1 : 0);
         item.layer.borderColor = (_editing ? UIColor.systemYellowColor : [UIColor colorWithWhite:1 alpha:0.3]).CGColor;
     }
     // An enabled UIControl is needed for its own pan recognizer to receive
     // touches. The manager suppresses game input throughout configuration.
-    for (AKGamepadButton *button in _buttons.allValues) button.enabled = !self.configuring || _editing;
-    _leftStick.enabled = _rightStick.enabled = !self.configuring;
+    for (NSString *name in _buttons) {
+        AKGamepadButton *button = _buttons[name];
+        if ([name hasPrefix:@"dpad."]) button.hidden = _simple;
+        button.enabled = (!self.configuring || _editing) && !button.hidden && !button.superview.hidden;
+    }
+    _leftStick.enabled = !self.configuring;
+    _rightStick.enabled = !self.configuring && !_simple;
     _editDone.hidden = _hint.hidden = !_editing;
     _editGrid.hidden = _editAxes.hidden = !_editing;
     [self setNeedsLayout];
@@ -591,10 +600,10 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     if (self.visibilityChanged) self.visibilityChanged(visible);
 }
 - (void)buttonChanged:(AKGamepadButton *)button {
-    if (!_visible || _overlay.configuring) return;
+    if (!_visible || _overlay.configuring || (button.pressed && !button.enabled)) return;
     if (button.pressed) [_haptics buttonPressed];
     NSDictionary *names = @{GCInputButtonA:@"A",GCInputButtonB:@"B",GCInputButtonX:@"X",GCInputButtonY:@"Y",
-        GCInputLeftTrigger:@"LT",GCInputRightTrigger:@"RT",@"dpad.up":@"up",@"dpad.right":@"right",@"dpad.down":@"down",@"dpad.left":@"left"};
+        GCInputLeftTrigger:@"LT",GCInputRightTrigger:@"RT",GCInputLeftShoulder:@"LB",GCInputRightShoulder:@"RB",@"dpad.up":@"up",@"dpad.right":@"right",@"dpad.down":@"down",@"dpad.left":@"left"};
     [_actionInput setManualButton:names[button.element] ?: button.element pressed:button.pressed];
 }
 - (void)publishButton:(NSString *)button pressed:(BOOL)pressed {
@@ -605,12 +614,12 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
         [_virtualController setPosition:value forDirectionPadElement:GCInputDirectionPad];
     } else {
         NSDictionary *elements = @{@"A":GCInputButtonA,@"B":GCInputButtonB,@"X":GCInputButtonX,@"Y":GCInputButtonY,
-            @"LT":GCInputLeftTrigger,@"RT":GCInputRightTrigger};
+            @"LT":GCInputLeftTrigger,@"RT":GCInputRightTrigger,@"LB":GCInputLeftShoulder,@"RB":GCInputRightShoulder};
         [_virtualController setValue:pressed ? 1 : 0 forButtonElement:elements[button] ?: button];
     }
 }
 - (void)stickChanged:(AKGamepadStick *)stick {
-    if (_visible && !_overlay.configuring) {
+    if (_visible && !_overlay.configuring && (!_simple || stick == _overlay.leftStick)) {
         [_haptics stickMoved:stick.position left:stick == _overlay.leftStick];
         [_virtualController setPosition:stick.position forDirectionPadElement:stick.element];
     }
@@ -672,6 +681,15 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
 }
 - (void)deactivate:(NSNotification *)note {
     (void)note; [_overlay finishConfiguration]; _active = NO; [self refresh];
+}
+- (void)setSimple:(BOOL)simple {
+    if (_simple == simple) return;
+    // Release held axes, buttons and pending ability chords before hiding any
+    // controls. A layout change must not reconnect or replace the device.
+    [_overlay reset];
+    [_actionInput releaseAll];
+    _simple = simple; _overlay.simple = simple;
+    if (self.visibilityChanged) self.visibilityChanged(_visible);
 }
 - (void)setEnabled:(BOOL)enabled {
     _enabled = enabled; _failed = NO; [self refresh];

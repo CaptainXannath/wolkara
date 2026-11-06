@@ -320,3 +320,30 @@ Synthetic tests pass cursor polling/restarts, circle-to-host drag handoff, all 3
 tap/quick-tap sequences, drag/cancel suppression, group geometry and persistence.
 The signed update was installed in place on the Duo and its process was running
 after launch. Physical gameplay confirmation of these three changes is pending.
+
+
+## Repeated swipes, simple controller and shoulder bindings (2026-11-06)
+
+- The user reports mouse-off dragging stops after the first swipe until moving
+  the virtual right stick. Our adapter log still shows capture/release requests.
+  The previous change froze event and polled cursor positions even before capture.
+  Direct drags now advance the existing cursor by finger deltas while uncaptured,
+  retain the requested anchor during capture, and synchronize screen/window queries
+  on cursor warps. A new finger origin still cannot teleport the pointer.
+- Tap the controller button to alternate Full/Simple; hold 0.6 seconds to enable
+  or disable it. Simple keeps the left stick and menu, hides both rings, the right
+  stick and LB/LT/RB/RT, and keeps enabled ability circles. Layout changes release
+  held/pending input without reconnecting the device or altering saved positions.
+- Ability circles can bind LB/RB with any existing modifier set. Their controller
+  aliases share ownership with the regular shoulder buttons; serialized bindings
+  survive reloads.
+- Synthetic UIKit regressions cover repeated capture cycles at different finger
+  origins on Pro, Pro Max, Duo and iPad window sizes; tap/drag cancellation; real
+  virtual-controller shoulder delivery with all modifier combinations; hidden-area
+  passthrough; full/simple restoration; tap/hold persistence and trailing-tap
+  suppression. UIKit adapter regressions pass. No game input was automated.
+- The emulation/sanitizer suite and clean staged-source tests pass. The new
+  cursor-position regression fails against the previous adapter and passes with
+  the fix. Signed Release bundle validation passes. Installed in place on the
+  Duo after confirming the app was closed; normal launch/process confirmed and
+  existing game data preserved. In-game camera confirmation remains pending.

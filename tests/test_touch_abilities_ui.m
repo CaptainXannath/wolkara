@@ -121,6 +121,35 @@ void TestTouchAbilitiesUI(UIView *host,AKTouchGamepad *manager,GCVirtualControll
         [circle endTrackingWithTouch:touch withEvent:nil]; Drain(); assert(downs==2);
         target.pressedChangedHandler=nil; pad.leftTrigger.pressedChangedHandler=nil; pad.rightTrigger.pressedChangedHandler=nil;
     }
+    // Shoulder bindings use the real controller in simple mode too. Retain
+    // manual ownership if the physical on-screen shoulder overlaps a circle tap.
+    AKTouchAction *mapped=overlay.layout.actions[0]; NSString *oldButton=mapped.button;
+    NSUInteger oldModifiers=mapped.modifiers;
+    for (NSString *name in @[@"LB",@"RB"]) {
+        mapped.button=name;
+        GCControllerButtonInput *target=[name isEqual:@"LB"] ? pad.leftShoulder : pad.rightShoulder;
+        NSString *element=[name isEqual:@"LB"] ? GCInputLeftShoulder : GCInputRightShoulder;
+        for (NSUInteger mod=0;mod<4;mod++) {
+            mapped.modifiers=mod; manager.simple=YES; [host layoutIfNeeded];
+            __block NSUInteger presses=0;
+            target.pressedChangedHandler=^(GCControllerButtonInput *button,float value,BOOL pressed) {
+                (void)button; (void)value;
+                assert(pad.leftTrigger.pressed==!!(mod&1) && pad.rightTrigger.pressed==!!(mod&2));
+                if (pressed) presses++;
+            };
+            CircleTap(first,host); Drain(); Drain();
+            assert(presses==1 && !target.pressed); target.pressedChangedHandler=nil;
+        }
+        manager.simple=NO; mapped.modifiers=0;
+        CircleTap(first,host);
+        UIControl *manual=(id)Find(host,[@"tolkara.gamepad." stringByAppendingString:element]);
+        [manual sendActionsForControlEvents:UIControlEventTouchDown]; Drain(); Drain();
+        assert(target.pressed); // Ending the circle must not release the manual owner.
+        [manual sendActionsForControlEvents:UIControlEventTouchUpInside]; Drain(); assert(!target.pressed);
+    }
+    mapped.button=oldButton; mapped.modifiers=oldModifiers;
+    manager.simple=YES; [host layoutIfNeeded]; Capture(host,@"controller-simple.png");
+    manager.simple=NO;
     // Settings cancel both a candidate touch and a committed but pending tap.
     UIControl *pending=(id)Find(host,@"wolkara.ability.1.X");
     __block NSUInteger latePresses=0;

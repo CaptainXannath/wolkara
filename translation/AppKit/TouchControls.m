@@ -308,9 +308,9 @@ static NSString *AKComposerDefaultLabel(void) { return AKHostLocalized(@"touch.d
     UIButton *_keyboardButton, *_trackpadButton, *_gamepadButton, *_settingsButton, *_leaveButton;
     UIButton *_insertDraftButton, *_clearDraftButton;
     UIButton *_savedTextButton;
-    UILongPressGestureRecognizer *_savedTextHold;
+    UILongPressGestureRecognizer *_savedTextHold, *_gamepadHold;
     BOOL _savedTextHeld, _savedTextEditing;
-    BOOL _gamepadEnabled, _keyboardRequested;
+    BOOL _gamepadEnabled, _gamepadSimple, _gamepadHeld, _keyboardRequested;
     UIView *_accessory, *_composer;
     NSTimer *_holdTimer;
     AKKeyboardTextView *_keyboardInput;
@@ -409,6 +409,12 @@ static void AKEmitTouch(void *context, AKTrackpadAction action, double x, double
         _trackpadButton.accessibilityIdentifier = @"tolkara.trackpad";
         _gamepadButton = [self buttonWithSymbol:@"gamecontroller" label:AKHostLocalized(@"touch.gamepad.automatic") action:@selector(toggleGamepad)];
         _gamepadButton.accessibilityIdentifier = @"tolkara.gamepad";
+        [_gamepadButton addTarget:self action:@selector(gamepadTouchDown) forControlEvents:UIControlEventTouchDown];
+        _gamepadHold = [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(holdGamepad:)];
+        _gamepadHold.minimumPressDuration = 0.6; _gamepadHold.cancelsTouchesInView = YES;
+        _gamepadHold.delegate = self; [_gamepadButton addGestureRecognizer:_gamepadHold];
+        _gamepadButton.accessibilityCustomActions = @[[[UIAccessibilityCustomAction alloc]
+            initWithName:AKHostLocalized(@"touch.gamepad.toggleEnabled") target:self selector:@selector(toggleGamepadEnabled)]];
         _settingsButton = [self buttonWithSymbol:@"gearshape" label:AKHostLocalized(@"touch.settings") action:@selector(showControlSettings)];
         _settingsButton.accessibilityIdentifier = @"wolkaraforever.controlSettings";
         // A way out of the game from any screen. Until this existed, a guest screen with no
@@ -423,6 +429,7 @@ static void AKEmitTouch(void *context, AKTrackpadAction action, double x, double
         _gamepadButton.accessibilityHint = AKHostLocalized(@"touch.gamepad.hint");
         NSNumber *gamepad = [NSUserDefaults.standardUserDefaults objectForKey:@"TKTouchGamepadEnabled"];
         _gamepadEnabled = gamepad ? gamepad.boolValue : YES;
+        _gamepadSimple = [NSUserDefaults.standardUserDefaults boolForKey:@"TKTouchGamepadSimple"];
         [self setGamepadVisible:NO];
         _trackpadButton.accessibilityHint = AKHostLocalized(@"touch.trackpad.hint");
         __weak AKTouchControls *weakSelf = self;
@@ -565,6 +572,7 @@ static void AKEmitTouch(void *context, AKTrackpadAction action, double x, double
     _dictationStatus.frame = CGRectMake(labelX, MAX(safe.origin.y, labelY), labelWidth, 60);
 }
 - (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer *)recognizer {
+    if (recognizer == _gamepadHold) return !_gamepad.configuring;
     if (recognizer == _savedTextHold) return !_gamepad.configuring && !self.voiceDraftActive && !_keyboardRequested && !_savedTextEditing;
     return _gamepad.editing;
 }
@@ -718,18 +726,35 @@ static void AKEmitTouch(void *context, AKTrackpadAction action, double x, double
     [self.window.rootViewController presentViewController:alert animated:YES completion:nil];
 }
 - (void)setGamepadVisible:(BOOL)visible {
-    _gamepadButton.tintColor = visible ? UIColor.systemCyanColor : UIColor.whiteColor;
-    _gamepadButton.accessibilityValue = _gamepadEnabled ? (visible ? AKHostLocalized(@"touch.gamepad.value.active") :
-        AKHostLocalized(@"touch.gamepad.value.automatic")) : AKHostLocalized(@"touch.gamepad.value.off");
+    _gamepadButton.tintColor = visible ? (_gamepadSimple ? UIColor.systemGreenColor : UIColor.systemCyanColor) : UIColor.whiteColor;
+    [_gamepadButton setImage:[UIImage systemImageNamed:_gamepadSimple ? @"l.joystick" : @"gamecontroller"] forState:UIControlStateNormal];
+    NSString *mode = AKHostLocalized(_gamepadSimple ? @"touch.gamepad.value.simple" : @"touch.gamepad.value.full");
+    NSString *state = AKHostLocalized(!_gamepadEnabled ? @"touch.gamepad.value.off" :
+        visible ? @"touch.gamepad.value.active" : @"touch.gamepad.value.automatic");
+    _gamepadButton.accessibilityValue = [NSString stringWithFormat:@"%@, %@",mode,state];
 }
+- (void)gamepadTouchDown { _gamepadHeld = NO; }
 - (void)toggleGamepad {
-    if (_gamepad.editing) return;
+    if (_gamepad.configuring || _gamepadHeld) return;
+    _gamepadSimple = !_gamepadSimple;
+    [NSUserDefaults.standardUserDefaults setBool:_gamepadSimple forKey:@"TKTouchGamepadSimple"];
+    _gamepad.simple = _gamepadSimple;
+    [self setGamepadVisible:_gamepad.visible];
+}
+- (void)holdGamepad:(UILongPressGestureRecognizer *)press {
+    if (press.state != UIGestureRecognizerStateBegan || _gamepadHeld || _gamepad.configuring) return;
+    _gamepadHeld = YES;
+    [self toggleGamepadEnabled];
+}
+- (BOOL)toggleGamepadEnabled {
+    if (_gamepad.configuring) return NO;
     _gamepadEnabled = !_gamepadEnabled;
     [NSUserDefaults.standardUserDefaults setBool:_gamepadEnabled forKey:@"TKTouchGamepadEnabled"];
     _gamepad.enabled = _gamepadEnabled;
     [self setGamepadVisible:_gamepad.visible];
     if ([self.delegate respondsToSelector:@selector(touchGamepadPreferenceChanged:)])
         [self.delegate touchGamepadPreferenceChanged:_gamepadEnabled];
+    return YES;
 }
 - (BOOL)canBecomeFirstResponder { return YES; }
 - (BOOL)keyboardVisible { return _keyboardInput.isFirstResponder; }
@@ -974,6 +999,7 @@ static void AKEmitTouch(void *context, AKTrackpadAction action, double x, double
             else [controls->_toolbarDragOrigins removeAllObjects];
             [controls controlAppearanceChanged:nil];
         };
+        _gamepad.simple = _gamepadSimple;
         _gamepad.enabled = _gamepadEnabled;
     }
     _gamepad.keyboardVisible = self.keyboardVisible || self.voiceDraftActive;

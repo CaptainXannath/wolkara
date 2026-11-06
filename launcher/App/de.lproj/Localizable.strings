@@ -345,7 +345,7 @@
 "touch.value.on" = "An";
 "touch.value.off" = "Aus";
 "touch.gamepad.automatic" = "Automatische Bedienelemente";
-"touch.gamepad.hint" = "Zeigt die Bedienelemente, wenn kein physischer Controller verbunden ist. Tippen schaltet sie aus oder stellt die Automatik wieder her.";
+"touch.gamepad.hint" = "Tippen wechselt zwischen vollständiger und einfacher Steuerung. Gedrückt halten schaltet den Touch-Controller ein oder aus. Ein verbundener physischer Controller hat Vorrang.";
 "touch.gamepad.value.active" = "Aktiv";
 "touch.gamepad.value.automatic" = "Automatisch";
 "touch.gamepad.value.off" = "Aus";
@@ -569,3 +569,7 @@
 "touch.savedText.singleLine" = "Verwende eine einzelne Zeile ohne Eingabetaste, Tabulator oder andere Steuerzeichen.";
 "touch.savedText.saveError" = "Der Wert konnte nicht im iOS-Schlüsselbund gespeichert werden. Es wurde nichts eingegeben.";
 "touch.savedText.readError" = "Der gespeicherte Wert konnte nicht aus dem iOS-Schlüsselbund gelesen werden. Es wurde nichts eingegeben.";
+
+"touch.gamepad.value.full" = "Vollständig";
+"touch.gamepad.value.simple" = "Einfach";
+"touch.gamepad.toggleEnabled" = "Touch-Controller ein- oder ausschalten";
