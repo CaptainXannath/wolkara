@@ -505,8 +505,17 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
             AKTouchGamepad *self = weakSelf;
             if (self) [self->_actionInput endAction:action.identifier];
         };
+        _overlay.actions.cancelled = ^(AKTouchAction *action) {
+            AKTouchGamepad *self = weakSelf;
+            if (self) [self->_actionInput cancelAction:action.identifier];
+        };
+        _overlay.actions.cancelledAll = ^{
+            AKTouchGamepad *self = weakSelf;
+            if (self) [self->_actionInput cancelAllActions];
+        };
         _overlay.configurationChanged = ^{
             AKTouchGamepad *self = weakSelf;
+            if (self && self->_overlay.configuring) [self->_actionInput releaseAll];
             [self updateHaptics];
             if (self.visibilityChanged) self.visibilityChanged(self.visible);
         };

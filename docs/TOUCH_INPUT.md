@@ -39,9 +39,12 @@ does not detect spells or inspect the game. Align it with the matching action ba
   The editor always shows labels and outlines. **Done** saves; **Reset** restores
   the reference arrangement without changing whether the feature is enabled.
 
-Holding a circle holds its combination; releasing/cancelling releases that touch's
-buttons. There is no repetition or queued action. Shared modifiers remain held while
-another touch owns them. An incompatible simultaneous combination is rejected with
+Each touch sends one combination: modifiers first, then the ability button, then
+button-up while the modifiers are still held, and finally modifier release. Holding
+a circle does not repeat it. A short tap released inside completes that one press;
+sliding out or cancelling discards a pending press. Opening controls or suspending
+the controller clears pending input. Shared modifiers remain held while another
+touch owns them. An incompatible simultaneous combination is rejected with
 an orange outline instead of becoming a different shortcut. A conflicting manual
 trigger press cancels the existing circle's chord before applying the manual input.
 The layout fits inside resized windows without overwriting the saved arrangement.
@@ -105,8 +108,11 @@ prove real device Keychain persistence or microphone capture; those require the
 signed app on a physical device. No game input is automated by these tests.
 
 `tools/test_touch_abilities.sh` checks all modifier combinations, ownership and
-reference-layout geometry. `tools/test_touch_gamepad_ui.sh --self-test-input` checks
-the editor and all 32 combinations through an actual iOS virtual controller in our
+reference-layout geometry, plus quick taps and cancellation with a deterministic
+clock. Modifier/button delivery uses separate 1/30-second phases: virtual-controller
+callbacks read the live profile, so setter order within a single turn is insufficient.
+`tools/test_touch_gamepad_ui.sh --self-test-input` checks the editor and all 32 held
+combinations and quick-tap callback sequences through an actual iOS virtual controller in our
 synthetic fixture; `--self-test` covers controller lifecycle. Gameplay validation
 still requires the signed app on a physical device.
 
