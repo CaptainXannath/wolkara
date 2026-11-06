@@ -232,7 +232,7 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     _actions.active = _controlsVisible && !self.configuring;
     for (NSString *name in _items) {
         UIView *item = _items[name];
-        BOOL omitted = _simple && [@[@"right",@"LB",@"LT",@"RB",@"RT"] containsObject:name];
+        BOOL omitted = _simple && [@[@"right",@"LT",@"RT"] containsObject:name];
         item.hidden = omitted || (!_controlsVisible && !self.configuring);
         item.alpha = _editing ? MAX(0.5,_preferences.opacity) : _preferences.opacity;
         item.layer.borderWidth = _editing ? 1 : ([item isKindOfClass:AKGamepadButton.class] ? 1 : 0);
@@ -262,9 +262,16 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     if (!_preferences.swapShoulders) return name;
     return @{@"LT":@"LB",@"LB":@"LT",@"RT":@"RB",@"RB":@"RT"}[name] ?: name;
 }
+- (NSString *)preferenceKeyForControl:(NSString *)name {
+    // Full mode retains its existing slot-based positions. Simple shoulders
+    // follow their button identity, even when the full layout swaps LT/LB.
+    if (_simple && [@[@"LB",@"RB"] containsObject:name]) return [@"simple." stringByAppendingString:name];
+    return [self positionName:name];
+}
 - (void)place:(NSString *)name frame:(CGRect)frame baseSize:(CGSize)base safe:(CGRect)safe {
-    UIView *item = _items[[self positionName:name]];
-    CGRect placed = [_preferences frameForItem:name defaultFrame:frame inBounds:safe];
+    NSString *control = [self positionName:name];
+    UIView *item = _items[control];
+    CGRect placed = [_preferences frameForItem:[self preferenceKeyForControl:control] defaultFrame:frame inBounds:safe];
     item.transform = CGAffineTransformIdentity; item.bounds = (CGRect){CGPointZero,base};
     item.center = CGPointMake(CGRectGetMidX(placed),CGRectGetMidY(placed));
     item.transform = CGAffineTransformMakeScale(placed.size.width/base.width,placed.size.height/base.height);
@@ -338,11 +345,11 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     }
     CGRect frame = [_dragOrigins[name] CGRectValue];
     if (pan.state == UIGestureRecognizerStateCancelled) {
-        [_preferences moveItem:[self positionName:name] toFrame:frame inBounds:[self usableBounds]];
+        [_preferences moveItem:[self preferenceKeyForControl:name] toFrame:frame inBounds:[self usableBounds]];
     } else {
         CGPoint delta = [pan translationInView:self];
         frame.origin.x += delta.x; frame.origin.y += delta.y;
-        [_preferences moveItem:[self positionName:name] toFrame:frame inBounds:[self usableBounds]];
+        [_preferences moveItem:[self preferenceKeyForControl:name] toFrame:frame inBounds:[self usableBounds]];
     }
     [self setNeedsLayout]; [self layoutIfNeeded];
     if (pan.state == UIGestureRecognizerStateEnded || pan.state == UIGestureRecognizerStateCancelled) {

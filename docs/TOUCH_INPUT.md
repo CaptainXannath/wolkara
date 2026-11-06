@@ -14,9 +14,11 @@ Tap the toolbar controller button to alternate **Full** and **Simple**. Hold for
 Tapping while off changes the remembered layout without enabling it. VoiceOver
 also offers an on/off action. A physical controller continues to take priority.
 
-Simple keeps the left analog stick without its directional ring, plus the menu
+Simple keeps the left analog stick without its directional ring, LB/RB, the menu
 button and enabled touch ability circles. It hides the right stick, A/B/X/Y ring
-and LB/LT/RB/RT. Hidden areas pass touches to the camera or pointer. Changing the
+and LT/RT. Move LB/RB in Settings → Edit layout while Simple is selected to save
+their positions separately from Full; each mode restores its own placement.
+Hidden areas pass touches to the camera or pointer. Changing the
 mode releases held inputs without reconnecting the controller or altering saved
 positions. Use Full to edit controls that are hidden in Simple.
 
