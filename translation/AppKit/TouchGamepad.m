@@ -505,13 +505,26 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
             AKTouchGamepad *self = weakSelf;
             if (self) [self->_actionInput endAction:action.identifier];
         };
-        _overlay.actions.cancelled = ^(AKTouchAction *action) {
-            AKTouchGamepad *self = weakSelf;
-            if (self) [self->_actionInput cancelAction:action.identifier];
-        };
         _overlay.actions.cancelledAll = ^{
             AKTouchGamepad *self = weakSelf;
             if (self) [self->_actionInput cancelAllActions];
+        };
+        _overlay.actions.beginDrag = ^BOOL(UITouch *touch, CGPoint origin) {
+            AKTouchGamepad *self=weakSelf;
+            if (!self) return NO;
+            UIView<AKTouchDragHost> *host=(id)self->_host;
+            if (!self->_visible || self->_overlay.configuring || ![host conformsToProtocol:@protocol(AKTouchDragHost)]) return NO;
+            return [host ak_beginTouchDrag:touch origin:[self->_overlay.actions convertPoint:origin toView:host]];
+        };
+        _overlay.actions.moveDrag = ^(UITouch *touch) {
+            AKTouchGamepad *self=weakSelf; if (!self) return;
+            UIView<AKTouchDragHost> *host=(id)self->_host;
+            if ([host conformsToProtocol:@protocol(AKTouchDragHost)]) [host ak_moveTouchDrag:touch];
+        };
+        _overlay.actions.endDrag = ^(UITouch *touch, BOOL cancelled) {
+            AKTouchGamepad *self=weakSelf; if (!self) return;
+            UIView<AKTouchDragHost> *host=(id)self->_host;
+            if ([host conformsToProtocol:@protocol(AKTouchDragHost)]) [host ak_endTouchDrag:touch cancelled:cancelled];
         };
         _overlay.configurationChanged = ^{
             AKTouchGamepad *self = weakSelf;

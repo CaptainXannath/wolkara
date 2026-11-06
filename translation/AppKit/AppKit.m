@@ -242,7 +242,7 @@ NSEventModifierFlags AKModifiersReconciled(NSEventModifierFlags held, NSEventMod
     return AKHeldFlags(held);
 }
 
-@interface AKHostView : UIView <UIPointerInteractionDelegate, AKTouchControlsDelegate>
+@interface AKHostView : UIView <UIPointerInteractionDelegate, AKTouchControlsDelegate, AKTouchDragHost>
 @property (nonatomic, weak) NSWindow *nsWindow;
 @end
 
@@ -255,8 +255,9 @@ NSEventModifierFlags AKModifiersReconciled(NSEventModifierFlags held, NSEventMod
     NSInteger _touchClickCount;
     CGSize _touchViewportSize;
     __weak UITouch *_directTouch;
-    CGPoint _directFingerLast;
+    CGPoint _directFingerLast, _directOrigin;
     BOOL _directPressed, _directRelative;
+    BOOL _directDragging, _directCancelled, _directTrackpad;
     NSInteger _directButton;
 }
 - (instancetype)initWithFrame:(CGRect)f {
@@ -553,12 +554,50 @@ static UITouch *AKDirectTouch(NSSet<UITouch *> *touches) {
     return nil;
 }
 - (void)touchInputCancelled {
+    _directCancelled = YES;
     if (!_directPressed) return;
     _directPressed = NO;
     [self postMouse:_directButton ? NSEventTypeRightMouseUp : NSEventTypeLeftMouseUp
                  at:_last button:_directButton clicks:1 delta:CGPointZero];
     // Keep the cancelled finger until it lifts, so a mode change cannot turn
     // the remainder of this gesture into a trackpad drag. A fresh begin can replace it.
+}
+- (void)startDirectDrag {
+    _directDragging = YES; _directRelative = YES;
+    if (_directTrackpad) return;
+    _directPressed = YES;
+    // Start at the existing guest cursor, not at the new finger's position.
+    // Clients may poll absolute position before they request mouse capture.
+    [self postMouse:_directButton ? NSEventTypeRightMouseDown : NSEventTypeLeftMouseDown
+                 at:_last button:_directButton clicks:1 delta:CGPointZero];
+}
+- (BOOL)ak_beginTouchDrag:(UITouch *)touch origin:(CGPoint)origin {
+    if (_directTouch || _touchControls.configuring || _pressedLeft || _pressedRight || _pressedMiddle) return NO;
+    [_touchControls cancelTouches];
+    _directTouch = touch; _directOrigin = _directFingerLast = origin;
+    _directCancelled = NO; _directTrackpad = _touchControls.trackpadEnabled; _directButton = 0;
+    [self startDirectDrag]; return YES;
+}
+- (void)ak_moveTouchDrag:(UITouch *)touch {
+    if (touch != _directTouch || _directCancelled) return;
+    CGPoint point = [touch locationInView:self];
+    if (!_directDragging) {
+        if (hypot(point.x-_directOrigin.x, point.y-_directOrigin.y) < AKTouchDragThreshold) return;
+        [self startDirectDrag];
+    }
+    CGPoint delta = CGPointMake(point.x-_directFingerLast.x, point.y-_directFingerLast.y);
+    _directFingerLast = point;
+    if (CGPointEqualToPoint(delta, CGPointZero)) return;
+    if (_directTrackpad) [self touchMoveBy:delta];
+    else [self postMouse:_directButton ? NSEventTypeRightMouseDragged : NSEventTypeLeftMouseDragged
+                     at:_last button:_directButton clicks:1 delta:delta];
+}
+- (void)ak_endTouchDrag:(UITouch *)touch cancelled:(BOOL)cancelled {
+    if (touch != _directTouch) return;
+    if (cancelled) [self touchInputCancelled];
+    if (_directPressed) [self postMouse:_directButton ? NSEventTypeRightMouseUp : NSEventTypeLeftMouseUp
+                                   at:_last button:_directButton clicks:1 delta:CGPointZero];
+    _directTouch = nil; _directPressed = NO; _directDragging = NO;
 }
 - (BOOL)handleTrackpadTouches:(NSSet<UITouch *> *)touches event:(UIEvent *)event {
     if (!_touchControls.trackpadEnabled) return NO;
@@ -577,12 +616,13 @@ static UITouch *AKDirectTouch(NSSet<UITouch *> *touches) {
     UITouch *finger = AKDirectTouch(t);
     if (finger) {
         if (_touchControls.configuring || _pressedLeft || _pressedRight || _pressedMiddle) return;
-        _directTouch = finger; _directPressed = YES; _directButton = AKIsRight(ev);
-        _directFingerLast = [finger locationInView:self];
+        _directTouch = finger; _directButton = AKIsRight(ev);
+        _directOrigin = _directFingerLast = [finger locationInView:self];
+        _directDragging = NO; _directCancelled = NO; _directTrackpad = NO;
         _directRelative = AKMouseIsCaptured();
         [self reconcileModifiers:AKMods(ev.modifierFlags)];
-        [self postMouse:_directButton ? NSEventTypeRightMouseDown : NSEventTypeLeftMouseDown
-                     at:_directRelative ? _last : _directFingerLast button:_directButton clicks:1 delta:CGPointZero];
+        // Wait for intent: a tap targets this position on lift; a drag never
+        // teleports the cursor, even before the game's capture notification.
         return;
     }
     BOOL r = AKIsRight(ev);if(r?_pressedRight:_pressedLeft)return; _last = [t.anyObject locationInView:self];
@@ -591,15 +631,7 @@ static UITouch *AKDirectTouch(NSSet<UITouch *> *touches) {
 }
 - (void)touchesMoved:(NSSet<UITouch *> *)t withEvent:(UIEvent *)ev {
     if (_directTouch && [t containsObject:_directTouch]) {
-        if (!_directPressed) return;
-        CGPoint point = [_directTouch locationInView:self];
-        // Guest cursor warps change _last, never the finger's previous sample.
-        CGPoint delta = CGPointMake(point.x - _directFingerLast.x, point.y - _directFingerLast.y);
-        _directFingerLast = point;
-        _directRelative |= AKMouseIsCaptured();
-        if (CGPointEqualToPoint(delta, CGPointZero)) return;
-        [self postMouse:_directButton ? NSEventTypeRightMouseDragged : NSEventTypeLeftMouseDragged
-                     at:_directRelative ? _last : point button:_directButton clicks:1 delta:delta];
+        [self ak_moveTouchDrag:_directTouch];
         return;
     }
     if (_directTouch) return;
@@ -612,13 +644,16 @@ static UITouch *AKDirectTouch(NSSet<UITouch *> *touches) {
 }
 - (void)touchesEnded:(NSSet<UITouch *> *)t withEvent:(UIEvent *)ev {
     if (_directTouch && [t containsObject:_directTouch]) {
-        if (_directPressed) {
-            _directRelative |= AKMouseIsCaptured();
-            CGPoint point = _directRelative ? _last : [_directTouch locationInView:self];
+        CGPoint point = [_directTouch locationInView:self];
+        if (!_directDragging && !_directCancelled && hypot(point.x-_directOrigin.x, point.y-_directOrigin.y) < AKTouchDragThreshold) {
+            if (_directRelative || AKMouseIsCaptured()) point = _last;
+            [self postMouse:NSEventTypeMouseMoved at:point button:0 clicks:0 delta:CGPointZero];
+            [self postMouse:_directButton ? NSEventTypeRightMouseDown : NSEventTypeLeftMouseDown
+                         at:point button:_directButton clicks:1 delta:CGPointZero];
             [self postMouse:_directButton ? NSEventTypeRightMouseUp : NSEventTypeLeftMouseUp
                          at:point button:_directButton clicks:1 delta:CGPointZero];
         }
-        _directTouch = nil; _directPressed = NO;
+        [self ak_endTouchDrag:_directTouch cancelled:NO];
         return;
     }
     if (_directTouch) return;
@@ -627,7 +662,10 @@ static UITouch *AKDirectTouch(NSSet<UITouch *> *touches) {
     if(!_pressedRight && !_pressedLeft)return;
     [self postMouse:_pressedRight ? NSEventTypeRightMouseUp : NSEventTypeLeftMouseUp at:[self usesRelativeMouse]?_last:[t.anyObject locationInView:self] button:_pressedRight];
 }
-- (void)touchesCancelled:(NSSet<UITouch *> *)t withEvent:(UIEvent *)ev { [self touchesEnded:t withEvent:ev]; }
+- (void)touchesCancelled:(NSSet<UITouch *> *)t withEvent:(UIEvent *)ev {
+    if (_directTouch && [t containsObject:_directTouch]) [self touchInputCancelled];
+    [self touchesEnded:t withEvent:ev];
+}
 
 // UIKit's modifiers at a key or pointer event: a modifier it no longer reports
 // is released, so the guest hears of that even when the key's own release was

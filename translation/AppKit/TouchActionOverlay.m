@@ -1,16 +1,62 @@
 #import "TouchActionOverlay.h"
+#import "TouchGamepad.h"
 #include <math.h>
 
+@class AKActionCircle;
+@interface AKTouchActionOverlay (Tracking)
+- (void)up:(AKActionCircle *)circle;
+- (void)updateAppearance;
+@end
 @interface AKActionCircle : UIButton
 @property(nonatomic, strong) AKTouchAction *action;
 @property(nonatomic) BOOL inputHeld;
+@property(nonatomic, weak) AKTouchActionOverlay *owner;
+- (void)cancelPendingTouch;
 @end
-@implementation AKActionCircle
+@implementation AKActionCircle {
+    __weak UITouch *_finger;
+    CGPoint _origin;
+    BOOL _dragged, _forwarded;
+}
 - (void)layoutSubviews {
     [super layoutSubviews]; self.layer.cornerRadius=self.bounds.size.width/2; self.clipsToBounds=YES;
 }
 - (BOOL)pointInside:(CGPoint)p withEvent:(UIEvent *)event {
     (void)event; return hypot(p.x-self.bounds.size.width/2,p.y-self.bounds.size.height/2)<=self.bounds.size.width/2;
+}
+- (BOOL)beginTrackingWithTouch:(UITouch *)touch withEvent:(UIEvent *)event {
+    (void)event;
+    if (_finger || self.owner.editing || !self.owner.active || !self.owner.layout.enabled || !self.action.enabled) return NO;
+    _finger=touch; _origin=[touch locationInView:self.owner]; _dragged=NO; _forwarded=NO;
+    self.inputHeld=YES; [self.owner updateAppearance]; return YES;
+}
+- (BOOL)continueTrackingWithTouch:(UITouch *)touch withEvent:(UIEvent *)event {
+    (void)event; if (touch!=_finger) return NO;
+    CGPoint point=[touch locationInView:self.owner];
+    if (!_dragged && hypot(point.x-_origin.x,point.y-_origin.y)>=AKTouchDragThreshold) {
+        _dragged=YES; self.inputHeld=NO; [self.owner updateAppearance];
+        _forwarded=self.owner.beginDrag && self.owner.beginDrag(touch,_origin);
+    }
+    if (_forwarded && self.owner.moveDrag) self.owner.moveDrag(touch);
+    return YES; // Keep the drag after the finger leaves the circle.
+}
+- (void)endTrackingWithTouch:(UITouch *)touch withEvent:(UIEvent *)event {
+    if (touch!=_finger) return;
+    CGPoint point=[touch locationInView:self.owner];
+    BOOL tap=!_dragged && hypot(point.x-_origin.x,point.y-_origin.y)<AKTouchDragThreshold &&
+             [self pointInside:[touch locationInView:self] withEvent:event];
+    if (_forwarded && self.owner.endDrag) self.owner.endDrag(touch,NO);
+    _finger=nil; _forwarded=NO; self.inputHeld=NO; [self.owner updateAppearance];
+    if (tap) [self.owner up:self]; // Leave rejection feedback visible after lift.
+}
+- (void)cancelPendingTouch {
+    if (_forwarded && _finger && self.owner.endDrag) self.owner.endDrag(_finger,YES);
+    _finger=nil; _forwarded=NO; self.inputHeld=NO;
+}
+- (void)cancelTrackingWithEvent:(UIEvent *)event { (void)event; [self cancelPendingTouch]; [self.owner updateAppearance]; }
+- (BOOL)accessibilityActivate {
+    if (self.owner.editing || !self.owner.active || !self.action.enabled) return NO;
+    [self.owner up:self]; return YES;
 }
 @end
 
@@ -27,6 +73,7 @@
     UIButton *_binding, *_modifier;
     UIStackView *_bindingRow;
     CGFloat _pinchInitial;
+    CGSize _lastViewportSize;
 }
 - (instancetype)initWithFrame:(CGRect)frame {
     if ((self=[super initWithFrame:frame])) {
@@ -44,13 +91,10 @@
     for (UIView *view in _circles) [view removeFromSuperview];
     _circles=[NSMutableArray new];
     for (AKTouchAction *action in self.layout.actions) {
-        AKActionCircle *circle=[AKActionCircle buttonWithType:UIButtonTypeCustom]; circle.action=action;
+        AKActionCircle *circle=[AKActionCircle buttonWithType:UIButtonTypeCustom]; circle.action=action; circle.owner=self;
         circle.exclusiveTouch=NO; circle.titleLabel.font=[UIFont systemFontOfSize:9 weight:UIFontWeightBold];
         circle.titleLabel.numberOfLines=2; circle.titleLabel.textAlignment=NSTextAlignmentCenter;
         circle.accessibilityIdentifier=[@"wolkara.ability." stringByAppendingString:action.identifier];
-        [circle addTarget:self action:@selector(down:) forControlEvents:UIControlEventTouchDown];
-        [circle addTarget:self action:@selector(up:) forControlEvents:UIControlEventTouchUpInside];
-        [circle addTarget:self action:@selector(cancel:) forControlEvents:UIControlEventTouchUpOutside|UIControlEventTouchCancel|UIControlEventTouchDragExit];
         UIPanGestureRecognizer *pan=[[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(drag:)];
         pan.delegate=self; [circle addGestureRecognizer:pan];
         UITapGestureRecognizer *tap=[[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(selectCircle:)];
@@ -66,7 +110,7 @@
 - (void)updateAppearance {
     self.hidden=!self.editing && (!self.active || !self.layout.enabled);
     for (AKActionCircle *circle in _circles) {
-        BOOL selected=circle.action==_selected;
+        BOOL selected=circle.action==_selected || (_mode.selectedSegmentIndex==1 && [circle.action.groupIdentifier isEqual:_selected.groupIdentifier]);
         circle.hidden=!self.editing && !circle.action.enabled;
         circle.layer.borderWidth=self.editing?2:(self.layout.borderOpacity>0?1:0);
         circle.layer.borderColor=(self.editing?(selected?UIColor.systemYellowColor:UIColor.systemCyanColor):
@@ -81,6 +125,9 @@
 }
 - (void)layoutSubviews {
     [super layoutSubviews];
+    if (!CGSizeEqualToSize(_lastViewportSize,self.bounds.size)) {
+        _lastViewportSize=self.bounds.size; [self releaseTouches];
+    }
     for (AKActionCircle *circle in _circles) {
         circle.frame=[self.layout frameForAction:circle.action inBounds:[self placementBounds]];
         circle.layer.cornerRadius=circle.bounds.size.width/2;
@@ -110,27 +157,19 @@
 - (BOOL)gestureRecognizer:(UIGestureRecognizer *)a shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)b {
     (void)a; (void)b; return NO;
 }
-- (void)down:(AKActionCircle *)circle {
-    if (self.editing || !self.active || !self.layout.enabled || !circle.action.enabled || circle.inputHeld) return;
-    circle.inputHeld=self.press && self.press(circle.action);
+- (void)up:(AKActionCircle *)circle {
+    if (self.editing || !self.active || !self.layout.enabled || !circle.action.enabled) return;
+    BOOL accepted=self.press && self.press(circle.action);
+    if (accepted && self.released) self.released(circle.action);
     [self updateAppearance];
-    if (!circle.inputHeld) {
+    if (!accepted) {
         // Reject an incompatible chord visibly, without typing a different shortcut.
         circle.layer.borderWidth=2; circle.layer.borderColor=UIColor.systemOrangeColor.CGColor;
     }
 }
-- (void)up:(AKActionCircle *)circle {
-    if (circle.inputHeld && self.released) self.released(circle.action);
-    circle.inputHeld=NO; [self updateAppearance];
-}
-- (void)cancel:(AKActionCircle *)circle {
-    // Also discard a short tap still waiting for its modifier delivery phase.
-    if (self.cancelled) self.cancelled(circle.action);
-    circle.inputHeld=NO; [self updateAppearance];
-}
 - (void)releaseTouches {
     if (self.cancelledAll) self.cancelledAll();
-    for (AKActionCircle *circle in _circles) circle.inputHeld=NO;
+    for (AKActionCircle *circle in _circles) [circle cancelPendingTouch];
     [self updateAppearance];
 }
 - (void)selectCircle:(UITapGestureRecognizer *)tap {
@@ -143,6 +182,7 @@
     if (pan.state==UIGestureRecognizerStateBegan) _selected=action;
     CGPoint delta=[pan translationInView:self];
     if (_mode.selectedSegmentIndex==0) [self.layout moveGroupBy:delta inBounds:[self placementBounds]];
+    else if (_mode.selectedSegmentIndex==1) [self.layout moveButtonGroupForAction:action by:delta inBounds:[self placementBounds]];
     else [self.layout moveAction:action by:delta inBounds:[self placementBounds]];
     [pan setTranslation:CGPointZero inView:self]; [self updateEditor];
     if (pan.state==UIGestureRecognizerStateEnded || pan.state==UIGestureRecognizerStateCancelled) [self.layout save];
@@ -152,6 +192,7 @@
     BOOL group=_mode.selectedSegmentIndex==0;
     if (pinch.state==UIGestureRecognizerStateBegan) _pinchInitial=group?self.layout.scale:_selected.diameter;
     if (group) self.layout.scale=_pinchInitial*pinch.scale;
+    else if (_mode.selectedSegmentIndex==1) [self.layout resizeButtonGroupForAction:_selected diameter:_pinchInitial*pinch.scale inBounds:[self placementBounds]];
     else if (_selected) _selected.diameter=MAX(20,MIN(160,_pinchInitial*pinch.scale));
     [self updateEditor];
     if (pinch.state==UIGestureRecognizerStateEnded || pinch.state==UIGestureRecognizerStateCancelled) [self.layout save];
@@ -187,7 +228,7 @@
     [stack addArrangedSubview:[self row:@[title,_enabled,
         [self button:@"Add" action:@selector(addCircle) identifier:@"wolkara.abilities.add"],
         [self button:@"Reset" action:@selector(resetLayout) identifier:@"wolkara.abilities.reset"]]]];
-    _mode=[[UISegmentedControl alloc] initWithItems:@[@"Whole layout",@"One circle"]]; _mode.selectedSegmentIndex=0;
+    _mode=[[UISegmentedControl alloc] initWithItems:@[@"Whole layout",@"Group of 4",@"One circle"]]; _mode.selectedSegmentIndex=0;
     _mode.accessibilityIdentifier=@"wolkara.abilities.mode";
     [_mode addTarget:self action:@selector(modeChanged) forControlEvents:UIControlEventValueChanged];
     [stack addArrangedSubview:_mode];
@@ -226,10 +267,11 @@
     BOOL group=_mode.selectedSegmentIndex==0;
     _size.minimumValue=group?.4:20; _size.maximumValue=group?4:160;
     _size.value=group?self.layout.scale:_selected.diameter; _size.enabled=group || _selected!=nil;
-    _sizeLabel.text=group?[NSString stringWithFormat:@"Layout %.0f%%",self.layout.scale*100]:[NSString stringWithFormat:@"Circle %.0f",_selected.diameter];
-    _size.accessibilityLabel=group?@"Whole layout scale":@"Circle diameter";
-    _size.accessibilityValue=_sizeLabel.text; _bindingRow.hidden=group || !_selected;
-    _selectionLabel.text=group?@"Drag any circle to move all. Pinch or use Size to scale the block.":@"Tap a circle to select it. Drag to move; pinch or use Size to resize.";
+    BOOL quad=_mode.selectedSegmentIndex==1;
+    _sizeLabel.text=group?[NSString stringWithFormat:@"Layout %.0f%%",self.layout.scale*100]:[NSString stringWithFormat:quad?@"Group %.0f":@"Circle %.0f",_selected.diameter];
+    _size.accessibilityLabel=group?@"Whole layout scale":quad?@"Button group size":@"Circle diameter";
+    _size.accessibilityValue=_sizeLabel.text; _bindingRow.hidden=group || quad || !_selected;
+    _selectionLabel.text=group?@"Drag any circle to move all. Pinch or use Size to scale the block.":quad?@"Drag a circle to move its group. Pinch or use Size to resize the group.":@"Tap a circle to select it. Drag to move; pinch or use Size to resize.";
     [_binding setTitle:[@"Button: " stringByAppendingString:_selected.button?:@"—"] forState:UIControlStateNormal];
     NSArray *modifiers=@[@"None",@"LT",@"RT",@"LT + RT"];
     [_modifier setTitle:modifiers[MIN(_selected.modifiers,3)] forState:UIControlStateNormal];
@@ -254,12 +296,14 @@
 - (void)shownChanged:(UISwitch *)sender { _selected.enabled=sender.on; [self updateEditor]; }
 - (void)borderChanged:(UISlider *)sender { self.layout.borderOpacity=sender.value; }
 - (void)sizeChanged:(UISlider *)sender {
-    if (_mode.selectedSegmentIndex==0) self.layout.scale=sender.value; else _selected.diameter=sender.value;
+    if (_mode.selectedSegmentIndex==0) self.layout.scale=sender.value;
+    else if (_mode.selectedSegmentIndex==1) [self.layout resizeButtonGroupForAction:_selected diameter:sender.value inBounds:[self placementBounds]];
+    else _selected.diameter=sender.value;
     [self updateEditor];
 }
 - (void)addCircle {
     AKTouchAction *added=[self.layout addAction]; if (!added) return;
-    _selected=added; _mode.selectedSegmentIndex=1; [self rebuildCircles]; [self updateEditor];
+    _selected=added; _mode.selectedSegmentIndex=2; [self rebuildCircles]; [self updateEditor];
 }
 - (void)deleteCircle { [self.layout removeAction:_selected]; _selected=self.layout.actions.firstObject; [self rebuildCircles]; [self updateEditor]; }
 - (void)resetLayout {

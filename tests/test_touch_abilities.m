@@ -145,4 +145,53 @@ static void LayoutTests(void) {
     [defaults removePersistentDomainForName:suite];
     puts("TOUCH_ABILITIES_LAYOUT_PASS: screenshot mapping, block translation/scaling, individual edits, persistence, phone sizes, clamping and malformed preferences.");
 }
-int main(void) { @autoreleasepool { InputTests(); LayoutTests(); } return 0; }
+static BOOL SameFrame(CGRect a,CGRect b) {
+    return fabs(a.origin.x-b.origin.x)<.001 && fabs(a.origin.y-b.origin.y)<.001 &&
+           fabs(a.size.width-b.size.width)<.001 && fabs(a.size.height-b.size.height)<.001;
+}
+static void GroupTests(void) {
+    NSString *suite=[@"org.wolkara.tests.groups." stringByAppendingString:NSUUID.UUID.UUIDString];
+    NSUserDefaults *defaults=[[NSUserDefaults alloc] initWithSuiteName:suite];
+    AKTouchActionLayout *layout=[[AKTouchActionLayout alloc] initWithDefaults:defaults];
+    for (NSValue *value in @[[NSValue valueWithCGRect:CGRectMake(0,0,852,393)],
+            [NSValue valueWithCGRect:CGRectMake(0,0,932,430)], [NSValue valueWithCGRect:CGRectMake(0,0,951,669)],
+            [NSValue valueWithCGRect:CGRectMake(20,10,1194,834)]]) {
+        [layout reset]; layout.scale=1.25; CGRect bounds=value.CGRectValue;
+        NSMutableArray *frames=[NSMutableArray new];
+        for (AKTouchAction *a in layout.actions) [frames addObject:[NSValue valueWithCGRect:[layout frameForAction:a inBounds:bounds]]];
+        AKTouchAction *first=layout.actions[0]; assert([layout groupForAction:first].count==4);
+        [layout moveButtonGroupForAction:first by:CGPointMake(12,-6) inBounds:bounds];
+        for (NSUInteger i=0;i<32;i++) {
+            CGRect old=[frames[i] CGRectValue],now=[layout frameForAction:layout.actions[i] inBounds:bounds];
+            assert(SameFrame(now,i<4?CGRectOffset(old,12,-6):old));
+        }
+        CGRect group=CGRectNull;
+        for (AKTouchAction *a in [layout groupForAction:first]) group=CGRectUnion(group,[layout frameForAction:a inBounds:bounds]);
+        CGFloat oldDiameter=first.diameter;
+        [layout resizeButtonGroupForAction:first diameter:oldDiameter*1.2 inBounds:bounds];
+        CGRect resized=CGRectNull;
+        for (AKTouchAction *a in [layout groupForAction:first]) resized=CGRectUnion(resized,[layout frameForAction:a inBounds:bounds]);
+        assert(fabs(CGRectGetMidX(resized)-CGRectGetMidX(group))<.001 && fabs(CGRectGetMidY(resized)-CGRectGetMidY(group))<.001);
+        assert(fabs(resized.size.width/group.size.width-1.2)<.001);
+        for (NSUInteger i=4;i<32;i++) assert(SameFrame([frames[i] CGRectValue],[layout frameForAction:layout.actions[i] inBounds:bounds]));
+        [layout moveButtonGroupForAction:first by:CGPointMake(10000,10000) inBounds:bounds];
+        for (AKTouchAction *a in layout.actions) assert(CGRectContainsRect(bounds,[layout frameForAction:a inBounds:bounds]));
+        for (NSUInteger i=4;i<32;i++) assert(SameFrame([frames[i] CGRectValue],[layout frameForAction:layout.actions[i] inBounds:bounds]));
+    }
+    // Old custom positions/bindings migrate in place; groups follow original
+    // identifiers, so changing an arrow's binding cannot move it to another diamond.
+    layout.enabled=YES; layout.actions[0].button=@"B"; [layout save];
+    NSMutableDictionary *stored=[[defaults dictionaryForKey:@"WolkaraTouchAbilitiesV1"] mutableCopy];
+    NSMutableArray *legacy=[NSMutableArray new];
+    for (NSDictionary *item in stored[@"actions"]) { NSMutableDictionary *a=item.mutableCopy; [a removeObjectForKey:@"group"]; [legacy addObject:a]; }
+    stored[@"actions"]=legacy; [defaults setObject:stored forKey:@"WolkaraTouchAbilitiesV1"];
+    CGPoint position=layout.actions[0].position;
+    layout=[[AKTouchActionLayout alloc] initWithDefaults:defaults];
+    assert(layout.enabled && [layout groupForAction:layout.actions[0]].count==4 && [layout.actions[0].button isEqual:@"B"]);
+    assert(CGPointEqualToPoint(layout.actions[0].position,position)); [layout save];
+    layout=[[AKTouchActionLayout alloc] initWithDefaults:defaults]; assert([layout groupForAction:layout.actions[0]].count==4);
+    AKTouchAction *added=[layout addAction]; assert([layout groupForAction:added].count==1);
+    [defaults removePersistentDomainForName:suite];
+    puts("TOUCH_ABILITIES_GROUP_PASS: eight independent diamonds, translation, scaling, clamping without moving peers, persistence and legacy-layout migration.");
+}
+int main(void) { @autoreleasepool { InputTests(); LayoutTests(); GroupTests(); } return 0; }

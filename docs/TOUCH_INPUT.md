@@ -9,16 +9,17 @@ size, shoulder swapping and haptics remain configurable.
 
 ## Direct camera dragging
 
-With mouse mode disabled, touch the game directly to click or drag. Camera motion
-uses the distance between successive finger samples, independently of the game's
-cursor position. Capturing or recentering the cursor cannot add a jump to that
-distance, including near screen edges. The game still controls camera sensitivity.
-Ordinary uncaptured taps and UI drags keep their absolute screen position.
+With mouse mode disabled, a tap clicks its screen position on lift; a drag turns
+the camera. Touch-down does not move the guest cursor. After 8 points of movement,
+the drag starts at the existing cursor anchor and sends only finger deltas. This
+also covers clients polling cursor position before requesting mouse capture: lifting
+and starting elsewhere cannot teleport that position. The game still controls
+camera sensitivity. Enable mouse mode for pointer movement and dragging UI items.
 
 The first finger owns the drag until it lifts. Opening native controls, losing
 focus, changing input mode or resizing the viewport releases it; remaining samples
-from that cancelled gesture cannot start another drag. Touch ability circles and
-the virtual controller keep their own inputs.
+from that cancelled gesture cannot start another drag. A drag starting over an
+ability circle follows the same camera path, or moves the pointer in mouse mode.
 
 ## Touch abilities
 
@@ -33,16 +34,20 @@ does not detect spells or inspect the game. Align it with the matching action ba
 
 - **Whole layout:** drag any circle to move the block; pinch or use the size slider
   to scale positions and diameters together. This is useful after changing WoW's UI scale.
+- **Group of 4:** select a circle and move or resize its whole diamond independently.
+  There are eight default groups: D-pad and face buttons for each modifier set.
+  Existing saved positions and bindings are preserved when the groups are added.
 - **One circle:** tap a circle to select it, drag it, resize it, and choose its button
   and modifier. Individual circles can be hidden/deleted; **Add** creates another.
 - **Borders** controls the outline while playing; zero leaves invisible touch zones.
   The editor always shows labels and outlines. **Done** saves; **Reset** restores
   the reference arrangement without changing whether the feature is enabled.
 
-Each touch sends one combination: modifiers first, then the ability button, then
-button-up while the modifiers are still held, and finally modifier release. Holding
-a circle does not repeat it. A short tap released inside completes that one press;
-sliding out or cancelling discards a pending press. Opening controls or suspending
+Lifting a tap inside a circle commits one combination: modifiers first, then the
+ability button, button-up with modifiers still held, and finally modifier release.
+Resting a finger sends no controller input. Moving 8 points converts it into a drag;
+returning to the circle does not turn it back into a tap. These circles are tap
+shortcuts; use the regular controller buttons for held abilities. Opening controls or suspending
 the controller clears pending input. Shared modifiers remain held while another
 touch owns them. An incompatible simultaneous combination is rejected with
 an orange outline instead of becoming a different shortcut. A conflicting manual
@@ -111,12 +116,13 @@ signed app on a physical device. No game input is automated by these tests.
 reference-layout geometry, plus quick taps and cancellation with a deterministic
 clock. Modifier/button delivery uses separate 1/30-second phases: virtual-controller
 callbacks read the live profile, so setter order within a single turn is insufficient.
-`tools/test_touch_gamepad_ui.sh --self-test-input` checks the editor and all 32 held
-combinations and quick-tap callback sequences through an actual iOS virtual controller in our
+`tools/test_touch_gamepad_ui.sh --self-test-input` checks all three edit modes and
+the 32 tap-on-lift/quick-tap callback sequences through an actual iOS virtual controller in our
 synthetic fixture; `--self-test` covers controller lifecycle. Gameplay validation
 still requires the signed app on a physical device.
 
 `tools/test_direct_touch_camera.sh` (also part of `test_translation_sim.sh`) checks
-cursor capture/warps, delta continuity at different touch positions and viewport
-sizes, absolute UI drags, cancellation, finger ownership, trackpad movement and
+cursor capture/warps, unchanged polled position on touch-down/restart, delta continuity
+at different touch positions and viewport sizes, tap intent, circle drag handoff,
+cancellation, finger ownership, trackpad movement and
 indirect pointer clicks. Its events are synthetic; it does not run a game.
