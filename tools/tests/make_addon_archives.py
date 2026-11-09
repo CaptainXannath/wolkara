@@ -60,3 +60,17 @@ central = data.find(b'PK\x01\x02')
 assert central >= 0, 'the central directory record was not where it was expected'
 data[central + 24:central + 28] = (10).to_bytes(4, 'little')
 path.write_bytes(bytes(data))
+
+# Updates can replace the original top-level folder and carry a companion addon.
+archive('renamed-update', [('Replacement/Replacement.toc', toc.replace(b'Version: 1', b'Version: 2')),
+                           ('Companion/Companion.toc', toc)])
+archive('multi-flavor', [('Flavors/A_Classic.toc', toc),
+                         ('Flavors/Z_Mainline.toc', toc.replace(b'16001', b'120005'))])
+
+# Database add-ons can carry their data in huge TOCs (QuestieDB uses ~15 MiB).
+# The installer reads bounded metadata but must copy every byte of both flavors.
+database_toc = (b'## Interface: 16001\n## Title: Database fixture\n## Version: 1\n'
+                + b'## X-Data: ' + b'x' * (15 * 1024 * 1024) + b'\nmain.lua\n')
+archive('database-toc', [('Database/Database_Forever.toc', database_toc),
+                         ('Database/Database_Camelot.toc', database_toc),
+                         ('Database/main.lua', b'-- fixture\n')])

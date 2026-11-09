@@ -13,9 +13,14 @@ The upstream history, MIT license and [third-party notices](NOTICE.md) are retai
 Selected improvements from [WolkaraForever](https://github.com/jklock/wolkaraforever)
 by **John Klockenkemper ([jklock](https://github.com/jklock)) and its contributors**
 are integrated here: addon management, settings backups, audio-session coordination,
-localization infrastructure, background pacing and build optimizations. Thank you
+localization infrastructure, background pacing, the optional performance overlay
+and build optimizations. Thank you
 for that work. Wolkara's native keyboard, reviewed dictation, movable toolbar and
 saved-text key include the refinements developed and tested together on iPhone.
+The addon store incorporates WolkaraForever's
+[Add-ons management update](https://github.com/jklock/wolkaraforever/commit/c3fe78d),
+adapted to Wolkara's edition selection and shared update lock, with interrupted-update
+recovery fixes. Wolkara's website download flow replaces the API browser and credential setup.
 The imported MIT [license](WolkaraForever-LICENSE) is retained and shipped in the app.
 
 This project is not affiliated with or endorsed by Blizzard Entertainment.
@@ -56,25 +61,44 @@ WoW gameplay under this capability set remain untested.
   finger lifts and restarts elsewhere; taps click their screen position on lift.
 - A microphone button opens chat and transcribes speech into a visible local draft.
   Review or edit it before ✓ sends; × discards. Recognition callbacks never type
-  into the game. On-device Apple Speech availability and permissions are required.
+  into the game. Choose the spoken language in the draft (remembered between sessions);
+  changing language starts a fresh draft without reopening chat. On-device Apple
+  Speech availability and permissions are required.
 - A key button: tap to edit a saved value; hold to type it and send once. Storage
   uses this device's Keychain, not the clipboard, config files or input logs.
 - Physical controller support and an on-screen controller when none is connected.
   Tap the controller toolbar button to switch Full/Simple; hold to turn it on/off.
   Simple keeps the left stick, LB/RB and menu, hiding both button rings, the right stick
   and LT/RT. LB/RB positions are saved separately for Simple and Full.
-  Touch ability circles remain available.
+  Touch ability circles remain available. Double-tap the left stick for L3 or the
+  right stick for R3. With the touch controller active, double-tapping bare game
+  content in the lower-right quadrant also sends R3, including in Simple mode.
 - Optional touch zones over action bars, with editable controller shortcuts (including LB/RB),
   individual circle sizing, independent groups of four and whole-layout movement/scaling. The initial layout
   has neutral, LT, RT and LT+RT groups; enable it in Settings → Touch abilities.
   Taps activate on lift; drags over circles control the camera/pointer without activating an ability.
 - Movable touch controls, opacity and size settings, shoulder-position swapping,
   an alignment grid and haptics. The mouse/keyboard/microphone/key toolbar also
-  moves in Edit layout. Compact settings require no scrolling.
-- Settings → Game tools: import/manage addon ZIPs, browse CurseForge with your own
-  API key, back up/restore WTF + Interface, enable gamepad, or reset graphics.
-  Tools follow the selected edition. Imports require a matching TOC Interface
-  version for the installed client; that check is not a gameplay compatibility guarantee.
+  moves in Edit layout.
+- An optional performance overlay in the in-game control settings shows presented
+  FPS, frame intervals, GPU timing, thermal state, memory and battery. Tap to expand
+  or collapse; drag to reposition. Monitoring stops when hidden or backgrounded;
+  it does not raise the rendering limit. GPU timing covers the presenting command
+  buffer, not all GPU work in the system.
+- **Add-ons** on the launcher: open **Browse CurseForge**, find the addon on the
+  real website and choose its ZIP download. Wolkara receives the browser download,
+  validates the archive and installs it automatically. No API key is needed.
+  The + button still imports ZIPs from Files. Download a newer ZIP to update a
+  managed package; pinned packages and existing unmanaged folders are protected.
+  Dependencies and extra modules hosted as separate projects need their own ZIP
+  downloads (for example, Questie needs QuestieDB). Database add-ons with large
+  TOCs are supported; only the metadata preview is bounded, never the installed files.
+  There is no automatic update polling. Choose the correct game version on the
+  site; compatibility tags are advisory, not a gameplay guarantee.
+  Navigation stays locked through download/install, with cancellation available
+  while downloading. Installation uses the shared game-update lock.
+- Settings → Game tools also provides the addon manager, WTF + Interface backups,
+  gamepad settings and graphics reset. Tools follow the selected edition.
 - Release builds and optimized adapters, shader cache hits without a full byte copy,
   optional expensive diagnostics and a 5 FPS background rendering limit. Foreground
   rendering keeps the standard iOS frame-rate behavior; no 120 Hz override or M1
@@ -89,7 +113,7 @@ folder. Choose the same region and language in Wolkara. The released Forever
 client uses product `wowf` and `_forever_`; older beta files are not a current copy.
 
 Wolkara and WolkaraForever have separate app containers. Moving game files does
-not transfer saved passwords, CurseForge credentials or app preferences. Normal
+not transfer saved passwords or app preferences. Normal
 startup uses Wolkara's integrated Developer service after its one-time enrollment;
 no separate LocalDevVPN app is needed for that route. A matching installation is
 checked using metadata and its executable; full data verification is reserved for

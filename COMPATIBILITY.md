@@ -391,3 +391,214 @@ after launch. Physical gameplay confirmation of these three changes is pending.
   sleep/scene fixtures and signed Release bundle validation pass. Installed in
   place on the Duo after confirming Wolkara was closed; normal launcher process
   confirmed and existing game data preserved. In-game folding remains unverified.
+
+## Simple-mode shoulder defaults (2026-11-06)
+
+- Default LB/RB centers in Simple now match the green/red target icons in the
+  user's 1280x900 reference: (507,568) and (772,568), above the neutral abilities.
+  They use the ability block's viewport transform, including its position and
+  scale, while retaining the configurable shoulder-button size and safe-area
+  clamping. Saved Simple positions still override the defaults; Full positions
+  and shoulder swapping remain independent.
+- Existing ability-layout and virtual-controller UI regressions pass, including
+  input delivery, Full/Simple switching, editing, persistence and slot swapping.
+  Signed Release build and bundle validation pass. Installed in place on the
+  Duo after the user closed Wolkara; normal launch confirmed, game data kept.
+  Physical confirmation of the new default alignment remains pending.
+
+## Dictation language, camera restart and performance overlay (2026-11-06)
+
+- The previous punctuation/task-hint trial did **not** fix the English title-case
+  draft on the Duo, according to the user's screenshot. A synthetic English
+  recording through on-device `es-ES` recognition reproduced title-cased words
+  and recognition mistakes; the same audio through `en-US` returned normal
+  sentence case. This supports the locale diagnosis without claiming to have
+  inspected the recognizer's locale on the user's device.
+- The draft now displays its speech language. English, Spanish and configured
+  keyboard languages are selectable; the selection persists. A language change
+  clears the draft and restarts only recognition, invalidating late results.
+  It adds no Return/Esc or guest text. Transcript casing is not rewritten, and
+  sending still requires explicit review. Native Speech punctuation is retained.
+- Direct camera regression now invokes the real `CGWarpMouseCursorPosition`
+  wrapper: uncaptured restore warps previously failed. A second regression
+  reproduced an absolute hover update overwriting the anchor while a finger
+  owned the gesture. Both failed before and pass after their respective fixes.
+  The four-viewport fixture also covers repeated drags, capture/release,
+  cancellation, resizing, trackpad mode and ability-circle handoff. The user
+  subsequently confirmed that the combined update works correctly on the Duo.
+- Ported the optional performance HUD from WolkaraForever (including late Metal
+  lookup/enable from `227b69e`), with attribution retained. The in-game controls settings own
+  its persisted toggle. Frame rate comes from Metal presentation timestamps;
+  GPU timing covers the presenting command buffer only. No display-link FPS
+  substitute, 120 Hz override, render preset or frame readback is enabled.
+  Hidden/background HUDs stop polling and per-frame statistics. Invalid,
+  duplicate and stale samples are rejected; re-enabling resets old history.
+- Validation: 43 toolbar-controller checks, language/draft UIKit checks, direct
+  camera regressions, HUD toggle/late-load/hide-show and synthetic 60/30 FPS
+  interval tests, the emulation/sanitizer suite, signed Release build and app
+  bundle checks passed. Synthetic metrics do not establish game FPS on the Duo.
+  The installed build also retains previously verified local audio/toolbar work;
+  that unrelated work is excluded from this PR's new changes.
+- Installed in place over Wi-Fi after the user closed Wolkara; normal launcher
+  process confirmed. Game data was preserved. The user subsequently reported
+  that the combined update works perfectly; no numeric device FPS was supplied.
+
+## Double-tap stick clicks (2026-11-06)
+
+- Double-tapping the left/right stick sends one L3/R3 press and release. The
+  lower-right safe-area quadrant also accepts R3 on bare game content while the
+  virtual controller is visible, including Simple mode. Toolbar, ability circles,
+  other UIKit controls, indirect pointers and settings/editing are excluded.
+  Dragging at the existing eight-point threshold defeats tap recognition;
+  joystick lifts remain immediate. UIKit delays background tap endings to
+  distinguish a single click from R3, cancelling the taps when R3 is recognized.
+- Apple's native hidden virtual controller did not expose either stick button in
+  the simulator, even when requested. A scoped compatibility extension provides
+  the missing buttons using public writable controller snapshots. Only registered
+  touch controllers are extended; their identity, axes and existing buttons remain
+  intact. Discovery, dictionaries, per-button/profile callbacks and captures expose
+  the added buttons. Physical/unregistered controllers and snapshots are excluded.
+- Native-controller fixture checks pass for initial discovery, polling, callbacks,
+  captures, pulse release and settings/mode cancellation. A separate unregistered
+  native-controller fixture confirms isolation. Full controls/32 ability-chord,
+  lifecycle and direct-camera regressions also pass. These synthetic tests do not
+  prove physical double-tap recognition or in-game L3/R3 behavior; device validation
+  remains pending.
+- Signed Release build and bundle validation pass, including the new controller
+  bridge in the packaged AppKit adapter. Installed in place over Wi-Fi after the
+  exact-bundle guard confirmed Wolkara was closed; normal launch confirmed and
+  game data preserved.
+
+## Composed text and long-session memory follow-up (2026-11-09)
+
+- Software text without an ANSI key previously reached `keyDown:` with virtual
+  key 255. A text client that filters invalid physical keys lost those characters
+  before text interpretation. Host-composed events now commit their unchanged
+  Unicode through the current text responder, once on key-down; their key-up is
+  consumed. Queue ordering, physical input, ASCII shortcuts and explicit Return
+  remain unchanged. The synthetic client regression failed before and passes
+  after, covering Spanish accents, uppercase accents, combining accents, ñ, ü,
+  emoji, mixed ASCII and exactly one Return. Actual game confirmation is pending.
+- Shader-library loading now scopes adapter/compiler temporaries to one request
+  instead of relying on a desktop worker draining its outer autorelease pool.
+  Retained libraries and error results survive the scope. A synthetic loader
+  reproduced retained temporaries before the change and releases them after
+  each of 1,000 requests after it. Cache entries are explicitly released on an
+  iOS memory warning; the fixture verifies their deallocation.
+- The retrieved Nov 9 CPU resource reports showed 4,464–4,990 MB footprint and
+  `Action taken: none`. The retrieved Nov 8 jetsam report did not list Tolkara.
+  These do not establish the cause of the user's reported multi-hour exit. A
+  nested UIKit-pump fixture already released its temporaries without changes,
+  so no speculative run-loop pool changes were made. The shader fix is not a
+  claim that the physical-device session leak is fully identified or resolved.
+- When the game window is shown, process counters are saved every 30 seconds
+  and on memory/lifecycle notifications, independently of the FPS HUD. Local
+  `Documents/memory-health.json` keeps the latest 120 samples plus lifetime peak
+  footprint, minimum available allowance and warning count; one previous session
+  is retained. No guest-memory contents, text, addresses or identifiers are read
+  or saved. The final up-to-30-second rise before a kill may be absent.
+- Simulator adapter/camera regressions, Metal lifetime/error/cache-pressure
+  tests, and bounded memory-journal persistence/process-counter checks pass.
+  Signed Release and bundle/signature checks pass after a clean build. Installed
+  in place after the exact-bundle guard confirmed the Duo app was closed; normal
+  launcher process confirmed and game data preserved. Physical text confirmation
+  and long-session stability remain pending.
+
+## Addon manager integration (2026-11-09)
+
+The current WolkaraForever addon workflow (upstream `c3fe78d`, inspected at
+`550755f`) is integrated in the original launcher. A direct Add-ons button opens
+it for the selected installation; Settings → Game tools remains available.
+John Klockenkemper and contributors are credited in README and the bundled MIT
+license remains intact.
+
+- Browse rows can install directly. Managed packages retain their recorded
+  CurseForge project/file identity, can be pinned, and support individual,
+  selected or all-package updates. Existing folders and ZIP imports without a
+  provider identity are excluded from provider updates.
+- Version selection and TOC compatibility use the installed client's version,
+  including multiple flavor TOCs; unsupported/missing tags are advisory. The
+  manager does not assume Forever 1.60.1 for Retail or other editions.
+- Downloads/extraction finish before bulk progression. Navigation is held until
+  actual writes finish, extraction runs off the UI thread, and the same lock as
+  the game updater covers mutations, migration and recovery. An interrupted
+  uncommitted update rolls back; a committed update keeps its new files and
+  manifest. Multi-folder packages remain a single managed record after renames.
+- The format-1 manifest migrates to format 2 with a backup. ZIP traversal,
+  collisions, invalid archives and expansion limits retain the existing checks.
+
+Validation: production Swift/ZIPFoundation archive suite (58 checks plus the
+Objective-C import lifecycle), CurseForge fake-transport suite (52 checks),
+localization suite (58 checks), and UIKit launcher fixture. The UI fixture covers
+edition propagation, disabled access during startup, available-update controls,
+and delayed completion that must keep two updates serial and navigation locked.
+All use synthetic files and metadata, with no game execution or live API key.
+Release build and signed app-bundle validation pass. Live CurseForge downloads
+and addon behavior inside the game still require user testing.
+
+## Website addon downloads without an API key (2026-11-09)
+
+The website flow supersedes the API browser described above. Add-ons → Browse
+CurseForge opens the real website in WKWebView. The REST client, credential store,
+key prompts and automatic provider-update controls have been removed. The native
+installed list and Files ZIP import remain. Existing manifest metadata is retained
+for migration; replacing a package from a manually chosen ZIP drops stale provider
+file identity.
+
+- WebKit download delegates receive normal ZIP links, download attributes, new
+  windows and redirects. The website remains responsible for search, login,
+  consent and any human verification. No HTML scraping, private API, key or
+  challenge bypass is used.
+- Only HTTPS downloads from CurseForge/ForgeCDN are accepted in production.
+  Responses must identify a ZIP and return success; HTML responses are not
+  imported. Download filenames never determine a destination path. Downloads
+  have a 128 MiB cap; the existing extractor enforces CRC, path and expansion
+  limits. Temporary files are removed after completion, failure or cancellation.
+- Navigation stays locked through download and installation; downloads can be
+  cancelled. The browser retains the ZIP until the background installer finishes.
+  Re-downloading a package updates a single matching managed package under the
+  shared lock. Pinned packages, disabled state and unmanaged folders are protected.
+  No automatic provider update checks run.
+
+Validation: the loopback UIKit fixture exercises real WKDownload delivery for
+plain links, download attributes, new windows and redirects, delayed installation,
+cancellation, HTTP failures, oversized responses, HTML rejection and retry. The
+server rejects any API-key header. The archive/import suite, localization tests,
+launcher UI fixture, clean signed Release build and app-bundle checks pass.
+The read-only live website check in the simulator initially displayed CurseForge's
+security-verification page, then loaded the actual addon catalogue after waiting
+for its automatic check. No challenge was solved or bypassed. A real provider ZIP
+and gameplay compatibility remain user checks. Installed in place on the Duo
+after the exact-bundle guard confirmed the app was closed; the launcher was opened.
+
+## Database addon TOCs and separate downloads (2026-11-09)
+
+The first user downloads exposed two different cases. Questie 12.6.4 was present
+without its separately distributed QuestieDB dependency. Improved Forever 0.14.2
+was complete, and the user confirmed that `/if` opens its configuration; only the
+core package was installed, while additional modules have their own downloads.
+The website downloader installs the selected ZIP, not the provider's dependency
+relationships. Its success message and README now make that distinction explicit.
+
+QuestieDB 1.0.13 Forever carries database data inside two 15,514,072-byte TOCs.
+The previous TOC reader skipped files over 256 KiB, so it would refuse that valid
+ZIP and omit an existing installation from the list. Both metadata readers now
+use a shared 64 KiB prefix reader, retain only complete lines when truncated,
+and reject non-regular files and symlinks. Extraction and copying still preserve
+every byte of the original TOC; the limit applies only to the metadata preview.
+
+Validation: archive/import regression coverage includes two synthetic 15 MiB
+TOCs, complete-file preservation through update and disable/restore, bounded
+metadata, UTF-8 and file-type checks. Launcher UI discovery with a large TOC,
+localization, the clean signed Release build and app-bundle checks pass. The
+official QuestieDB Forever ZIP was verified against its published SHA-256, then
+installed locally through the production Swift extractor and Objective-C store;
+all 65 regular files matched the official archive byte for byte. No third-party
+Lua was executed, modified or committed.
+
+Device follow-up: installed the corrected app in place after the exact-bundle
+closed-app guard. Added QuestieDB as its own managed package without replacing
+Questie, Improved Forever or their settings. Read back all 65 QuestieDB files
+and the package manifest from the Duo: byte-for-byte verification passed, and
+the existing package records were unchanged. Opened the launcher. Questie
+initialization in the game remains a user check.

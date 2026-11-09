@@ -1,4 +1,5 @@
 #import <UIKit/UIKit.h>
+#import "AddonStore.h"
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -15,23 +16,14 @@ NS_ASSUME_NONNULL_BEGIN
 // folders are skipped so a damaged add-on cannot prevent the manager opening.
 NSArray<TKWoWAddon *> *TKWoWAddonsAtDirectory(NSString *directory);
 
-// Whether the CurseForge list has room for all seven columns at this width.
-//
-// The columns are fixed widths - 480 points of them, plus spacing, artwork and
-// the project's name - and the browser ships them all on a wide page. Deciding
-// this from the horizontal size class was wrong: an iPad form sheet stays
-// *regular* however narrow it is, so a portrait sheet drew a row wider than the
-// list. Measured in the fixture on 2026-10-22: the page is 540 points wide in
-// portrait and the full column set asks for 586 before the name has any room.
-BOOL TKAddonRowsAreCompact(CGFloat width);
-
 @interface TKWoWAddonManagerViewController : UITableViewController
 - (instancetype)initWithAddOnsDirectory:(NSString *)directory edition:(NSString *)edition;
 - (instancetype)initWithAddOnsDirectory:(NSString *)directory edition:(NSString *)edition
                                 product:(NSString *)product gameVersion:(NSString *)version;
-// Starts on Browse rather than Installed, for the development preview and for
-// a future direct link from the home page.
-- (instancetype)initWithAddOnsDirectory:(NSString *)directory edition:(NSString *)edition browse:(BOOL)browse;
+// The actions a managed package offers: disable/restore, pin/unpin, remove, cancel. Exposed so
+// the device self-test can assert that removal is reachable without a second pair of hands on
+// the iPad; the page presents this same sheet when a row is tapped.
+- (UIAlertController *)manageSheetForRecord:(TKAddonRecord *)record;
 @end
 
 NS_ASSUME_NONNULL_END
