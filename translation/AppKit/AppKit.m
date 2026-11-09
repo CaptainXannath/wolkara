@@ -6,6 +6,7 @@
 #import "TouchGamepad.h"
 #import "TouchGamepadLayout.h"
 #import "AKPerformanceOverlay.h"
+#import "MemoryDiagnostics.h"
 #import <GameController/GameController.h>
 #import <objc/message.h>
 #import <objc/runtime.h>
@@ -394,6 +395,7 @@ NSEventModifierFlags AKModifiersReconciled(NSEventModifierFlags held, NSEventMod
         event.type = index == 0 ? NSEventTypeKeyDown : NSEventTypeKeyUp;
         event.window = self.nsWindow; event.keyCode = code; event.modifierFlags = modifiers;
         event.characters = characters; event.charactersIgnoringModifiers = unmodified;
+        event.ak_committedText = code == 0xFF;
         event.timestamp = NSProcessInfo.processInfo.systemUptime;
         if (privateInput) AKMarkPrivateInputEvent(event);
         [NSApp postEvent:event atStart:NO];
@@ -906,6 +908,7 @@ static void logLayer(CALayer *layer,unsigned depth) {
         if (_contentView) [self ak_attach];
     }
     [_uiWindow makeKeyAndVisible];
+    AKStartMemoryDiagnostics();
     coverLauncher(_uiWindow);
     [_host cursorChanged:nil];
     if (![NSApp.windows containsObject:self]) [(NSMutableArray *)NSApp.windows addObject:self];
@@ -934,6 +937,15 @@ static void logLayer(CALayer *layer,unsigned depth) {
 - (void)makeMainWindow { }   // single game surface; already key
 - (void)close { [self orderOut:nil]; [(NSMutableArray *)NSApp.windows removeObject:self]; }
 - (void)sendEvent:(NSEvent *)e {
+    if (e.ak_committedText && (e.type == NSEventTypeKeyDown || e.type == NSEventTypeKeyUp)) {
+        // UIKit has already composed accents, IME and dictation. A physical-key
+        // handler may legitimately reject keyCode 255 before interpretKeyEvents:.
+        // Commit once to the current text responder, in normal queue order.
+        // Never manufacture a base-letter key or send both a commit and keyDown.
+        if (e.type == NSEventTypeKeyDown)
+            AKInterpretTextKey(self.firstResponder,e.characters,0xFF,0);
+        return;
+    }
     switch (e.type) {
         case NSEventTypeKeyDown: [self.firstResponder keyDown:e]; break;
         case NSEventTypeKeyUp: [self.firstResponder keyUp:e]; break;

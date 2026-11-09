@@ -59,7 +59,16 @@ typedef id<MTLLibrary> (*LibraryLoader)(id,SEL,dispatch_data_t,NSError *__autore
 static LibraryLoader originalLibraryLoader;
 static NSCache<NSString *,id<MTLLibrary>> *libraryCache(id<MTLDevice> device) {
     static NSMapTable *devices; static dispatch_once_t once;
-    dispatch_once(&once,^{ devices=[NSMapTable weakToStrongObjectsMapTable]; });
+    dispatch_once(&once,^{
+        devices=[NSMapTable weakToStrongObjectsMapTable];
+        [NSNotificationCenter.defaultCenter addObserverForName:UIApplicationDidReceiveMemoryWarningNotification
+            object:nil queue:nil usingBlock:^(__unused NSNotification *note) { @autoreleasepool {
+                @synchronized(devices) {
+                    for (NSCache *cache in devices.objectEnumerator) [cache removeAllObjects];
+                }
+                AKLog(@"memory warning: released adapter shader-library cache");
+            } }];
+    });
     @synchronized(devices) {
         NSCache *cache=[devices objectForKey:device];
         if(!cache) {
@@ -81,7 +90,19 @@ static NSData *translatedLibraryData(NSString *path) {
     return [hash isEqual:ready[@"sha256"]] ? bytes : nil;
 }
 static id<MTLLibrary> captureLibrary(id receiver,SEL selector,dispatch_data_t data,NSError *__autoreleasing *error) __attribute__((ns_returns_retained));
+static id<MTLLibrary> loadLibraryInPool(id receiver,SEL selector,dispatch_data_t data,NSError *__autoreleasing *error) __attribute__((ns_returns_retained));
 static id<MTLLibrary> captureLibrary(id receiver,SEL selector,dispatch_data_t data,NSError *__autoreleasing *error) {
+    // Desktop callers can keep a worker's outer pool alive for a long time.
+    // Bound the lifetime of our copied/translated shader data and native
+    // compiler temporaries to one request, including cache hits and failures.
+    id<MTLLibrary> library;
+    NSError *failure=nil;
+    @autoreleasepool { library=loadLibraryInPool(receiver,selector,data,&failure); }
+    // Retain both results across the pool before writing the +0 error back.
+    if (error) *error=failure;
+    return library;
+}
+static id<MTLLibrary> loadLibraryInPool(id receiver,SEL selector,dispatch_data_t data,NSError *__autoreleasing *error) {
     size_t length=dispatch_data_get_size(data);
     if(!length || length>64*1024*1024) return originalLibraryLoader(receiver,selector,data,error);
     const void *mappedBytes=NULL; size_t mappedLength=0;

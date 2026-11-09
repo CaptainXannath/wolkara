@@ -468,3 +468,38 @@ after launch. Physical gameplay confirmation of these three changes is pending.
   bridge in the packaged AppKit adapter. Installed in place over Wi-Fi after the
   exact-bundle guard confirmed Wolkara was closed; normal launch confirmed and
   game data preserved.
+
+## Composed text and long-session memory follow-up (2026-11-09)
+
+- Software text without an ANSI key previously reached `keyDown:` with virtual
+  key 255. A text client that filters invalid physical keys lost those characters
+  before text interpretation. Host-composed events now commit their unchanged
+  Unicode through the current text responder, once on key-down; their key-up is
+  consumed. Queue ordering, physical input, ASCII shortcuts and explicit Return
+  remain unchanged. The synthetic client regression failed before and passes
+  after, covering Spanish accents, uppercase accents, combining accents, ñ, ü,
+  emoji, mixed ASCII and exactly one Return. Actual game confirmation is pending.
+- Shader-library loading now scopes adapter/compiler temporaries to one request
+  instead of relying on a desktop worker draining its outer autorelease pool.
+  Retained libraries and error results survive the scope. A synthetic loader
+  reproduced retained temporaries before the change and releases them after
+  each of 1,000 requests after it. Cache entries are explicitly released on an
+  iOS memory warning; the fixture verifies their deallocation.
+- The retrieved Nov 9 CPU resource reports showed 4,464–4,990 MB footprint and
+  `Action taken: none`. The retrieved Nov 8 jetsam report did not list Tolkara.
+  These do not establish the cause of the user's reported multi-hour exit. A
+  nested UIKit-pump fixture already released its temporaries without changes,
+  so no speculative run-loop pool changes were made. The shader fix is not a
+  claim that the physical-device session leak is fully identified or resolved.
+- When the game window is shown, process counters are saved every 30 seconds
+  and on memory/lifecycle notifications, independently of the FPS HUD. Local
+  `Documents/memory-health.json` keeps the latest 120 samples plus lifetime peak
+  footprint, minimum available allowance and warning count; one previous session
+  is retained. No guest-memory contents, text, addresses or identifiers are read
+  or saved. The final up-to-30-second rise before a kill may be absent.
+- Simulator adapter/camera regressions, Metal lifetime/error/cache-pressure
+  tests, and bounded memory-journal persistence/process-counter checks pass.
+  Signed Release and bundle/signature checks pass after a clean build. Installed
+  in place after the exact-bundle guard confirmed the Duo app was closed; normal
+  launcher process confirmed and game data preserved. Physical text confirmation
+  and long-session stability remain pending.

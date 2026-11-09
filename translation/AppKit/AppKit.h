@@ -60,6 +60,8 @@ typedef NS_OPTIONS(NSUInteger, NSEventModifierFlags) {
 @property unsigned short keyCode;     // macOS virtual key code
 @property (copy) NSString *characters, *charactersIgnoringModifiers;
 @property BOOL isARepeat;
+// Host-composed text with no physical ANSI key; delivered as a text commit.
+@property BOOL ak_committedText;
 @property NSInteger buttonNumber, clickCount;
 // Its Quartz event (a CGEventRef): the location in global display coordinates.
 - (CFTypeRef)CGEvent;
