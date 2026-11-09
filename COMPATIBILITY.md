@@ -570,3 +570,35 @@ security-verification page, then loaded the actual addon catalogue after waiting
 for its automatic check. No challenge was solved or bypassed. A real provider ZIP
 and gameplay compatibility remain user checks. Installed in place on the Duo
 after the exact-bundle guard confirmed the app was closed; the launcher was opened.
+
+## Database addon TOCs and separate downloads (2026-11-09)
+
+The first user downloads exposed two different cases. Questie 12.6.4 was present
+without its separately distributed QuestieDB dependency. Improved Forever 0.14.2
+was complete, and the user confirmed that `/if` opens its configuration; only the
+core package was installed, while additional modules have their own downloads.
+The website downloader installs the selected ZIP, not the provider's dependency
+relationships. Its success message and README now make that distinction explicit.
+
+QuestieDB 1.0.13 Forever carries database data inside two 15,514,072-byte TOCs.
+The previous TOC reader skipped files over 256 KiB, so it would refuse that valid
+ZIP and omit an existing installation from the list. Both metadata readers now
+use a shared 64 KiB prefix reader, retain only complete lines when truncated,
+and reject non-regular files and symlinks. Extraction and copying still preserve
+every byte of the original TOC; the limit applies only to the metadata preview.
+
+Validation: archive/import regression coverage includes two synthetic 15 MiB
+TOCs, complete-file preservation through update and disable/restore, bounded
+metadata, UTF-8 and file-type checks. Launcher UI discovery with a large TOC,
+localization, the clean signed Release build and app-bundle checks pass. The
+official QuestieDB Forever ZIP was verified against its published SHA-256, then
+installed locally through the production Swift extractor and Objective-C store;
+all 65 regular files matched the official archive byte for byte. No third-party
+Lua was executed, modified or committed.
+
+Device follow-up: installed the corrected app in place after the exact-bundle
+closed-app guard. Added QuestieDB as its own managed package without replacing
+Questie, Improved Forever or their settings. Read back all 65 QuestieDB files
+and the package manifest from the Duo: byte-for-byte verification passed, and
+the existing package records were unchanged. Opened the launcher. Questie
+initialization in the game remains a user check.

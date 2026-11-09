@@ -90,6 +90,9 @@ WoW gameplay under this capability set remain untested.
   validates the archive and installs it automatically. No API key is needed.
   The + button still imports ZIPs from Files. Download a newer ZIP to update a
   managed package; pinned packages and existing unmanaged folders are protected.
+  Dependencies and extra modules hosted as separate projects need their own ZIP
+  downloads (for example, Questie needs QuestieDB). Database add-ons with large
+  TOCs are supported; only the metadata preview is bounded, never the installed files.
   There is no automatic update polling. Choose the correct game version on the
   site; compatibility tags are advisory, not a gameplay guarantee.
   Navigation stays locked through download/install, with cancellation available

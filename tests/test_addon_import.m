@@ -188,6 +188,31 @@ int TestRealAddonImport(const char *fixtures, const char *temporary) {
         CHECK(![store installZIPAtURL:zip error:&error] && [before isEqual:[NSData dataWithContentsOfFile:toc]], "website never overwrites unmanaged files");
         [fm removeItemAtPath:toc.stringByDeletingLastPathComponent error:NULL];
 
+        // A TOC with embedded database data is still an add-on. Inspect only its
+        // header, while importing/updating the complete original bytes.
+        NSURL *database=[NSURL fileURLWithPath:[[NSString stringWithUTF8String:fixtures] stringByAppendingPathComponent:@"database-toc.zip"]];
+        CHECK([store installZIPAtURL:database error:&error], "large database TOCs install from website ZIP");
+        CHECK([ManagedRecord(store).name isEqual:@"Database fixture"] &&
+              [ManagedRecord(store).compatibility isEqual:TKAddonCompatibilityVerified], "large TOC metadata remains readable");
+        NSString *databaseTOC=[directory stringByAppendingPathComponent:@"Database/Database_Forever.toc"];
+        NSData *databaseBytes=[NSData dataWithContentsOfFile:databaseTOC];
+        CHECK(databaseBytes.length>15*1024*1024, "whole database TOC is installed");
+        NSString *header=TKAddonReadTOCHeader(databaseTOC);
+        CHECK(header.length<64*1024 && ![header containsString:@"X-Data"], "bounded header drops a cut line");
+        CHECK([store installZIPAtURL:database error:&error], "large TOC website update works");
+        CHECK([databaseBytes isEqual:[NSData dataWithContentsOfFile:databaseTOC]], "large TOC update preserves all bytes");
+        CHECK([store setDisabled:YES record:ManagedRecord(store) error:&error], "large TOC can be disabled");
+        CHECK([store setDisabled:NO record:ManagedRecord(store) error:&error], "large TOC can be restored");
+        CHECK([databaseBytes isEqual:[NSData dataWithContentsOfFile:databaseTOC]], "large TOC restore preserves all bytes");
+        CHECK([store removeRecord:ManagedRecord(store) error:&error], "remove database fixture");
+
+        NSString *headerPath=[root stringByAppendingPathComponent:@"header.toc"];
+        CHECK([@"## Title: Caf\u00e9\n## Version: 2" writeToFile:headerPath atomically:YES encoding:NSUTF8StringEncoding error:&error], "UTF-8 header fixture");
+        CHECK([TKAddonReadTOCHeader(headerPath) isEqual:@"## Title: Caf\u00e9\n## Version: 2"], "small TOC keeps UTF-8 and last line without newline");
+        NSString *linkPath=[root stringByAppendingPathComponent:@"header-link.toc"];
+        CHECK([fm createSymbolicLinkAtPath:linkPath withDestinationPath:headerPath error:&error], "symlink fixture");
+        CHECK(!TKAddonReadTOCHeader(linkPath) && !TKAddonReadTOCHeader(root), "header reader rejects symlinks and directories");
+
         // --- format-1 -> format-2 migration, and recovery from an interrupted one
         NSString *legacyRoot = [root stringByAppendingPathComponent:@"Legacy/Interface/AddOns"];
         CHECK([fm createDirectoryAtPath:[legacyRoot stringByAppendingPathComponent:@"LegacyAddon"]

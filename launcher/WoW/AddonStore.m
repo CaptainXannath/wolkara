@@ -1,6 +1,7 @@
 #import "AddonStore.h"
 #import <CommonCrypto/CommonDigest.h>
 #include <sys/file.h>
+#include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <errno.h>
@@ -34,14 +35,38 @@ static const NSInteger ManifestFormat    = 2;
 // Compatibility is relative to the selected installed client, not a fixed Forever build.
 
 static BOOL Fail(NSError **error, NSString *message) { if(error)*error=[NSError errorWithDomain:@"WolkaraForever.AddOns" code:1 userInfo:@{NSLocalizedDescriptionKey:message}];return NO; }
+NSString *TKAddonReadTOCHeader(NSString *path) {
+    const NSUInteger limit=64*1024;
+    int fd=open(path.fileSystemRepresentation,O_RDONLY|O_NONBLOCK|O_NOFOLLOW);
+    if (fd<0) return nil;
+    struct stat info;
+    if (fstat(fd,&info)!=0 || !S_ISREG(info.st_mode)) { close(fd); return nil; }
+    NSMutableData *data=[NSMutableData dataWithLength:limit];
+    NSUInteger length=0;
+    while (length<limit) {
+        ssize_t count=read(fd,(uint8_t *)data.mutableBytes+length,limit-length);
+        if (count<0 && errno==EINTR) continue;
+        if (count<0) { close(fd); return nil; }
+        if (!count) break;
+        length+=(NSUInteger)count;
+    }
+    close(fd);
+    // A cut line may end in half a UTF-8 character or an incomplete metadata value.
+    if (length==limit) {
+        const uint8_t *bytes=data.bytes;
+        while (length && bytes[length-1]!='\n' && bytes[length-1]!='\r') length--;
+    }
+    if (!length) return nil;
+    data.length=length;
+    return [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] ?:
+        [[NSString alloc] initWithData:data encoding:NSISOLatin1StringEncoding];
+}
 static NSString *TOC(NSString *folder) {
     NSArray *names=[[NSFileManager.defaultManager contentsOfDirectoryAtPath:folder error:NULL] sortedArrayUsingSelector:@selector(compare:)];
     NSMutableString *combined=[NSMutableString new];
     for (NSString *name in names) if ([name.pathExtension.lowercaseString isEqual:@"toc"]) {
         NSString *path=[folder stringByAppendingPathComponent:name];
-        if ([[NSFileManager.defaultManager attributesOfItemAtPath:path error:NULL] fileSize]>256*1024) continue;
-        NSData *data=[NSData dataWithContentsOfFile:path options:NSDataReadingMappedIfSafe error:NULL];
-        NSString *text=[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] ?: [[NSString alloc] initWithData:data encoding:NSISOLatin1StringEncoding];
+        NSString *text=TKAddonReadTOCHeader(path);
         if (text) [combined appendFormat:@"%@\n",text];
     }
     return combined.length ? combined : nil;

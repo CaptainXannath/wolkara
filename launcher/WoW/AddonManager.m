@@ -30,10 +30,7 @@ static NSString *ReadTOC(NSString *directory, NSString *folder) {
     for (NSString *name in names) {
         if (![name.pathExtension.lowercaseString isEqual:@"toc"]) continue;
         if (![name isEqual:preferred] && [names containsObject:preferred]) continue;
-        NSData *data=[NSData dataWithContentsOfFile:[directory stringByAppendingPathComponent:name] options:0 error:NULL];
-        if (!data.length || data.length>256*1024) continue;
-        NSString *text=[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-        if (!text) text=[[NSString alloc] initWithData:data encoding:NSISOLatin1StringEncoding];
+        NSString *text=TKAddonReadTOCHeader([directory stringByAppendingPathComponent:name]);
         if (text) return text;
     }
     return nil;

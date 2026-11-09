@@ -559,7 +559,7 @@
 "addons.web.unsupported" = "Choose an add-on ZIP from CurseForge using the file’s Download button.";
 "addons.web.downloading" = "Downloading add-on…";
 "addons.web.installing" = "Installing add-on…";
-"addons.web.installed" = "Add-on installed. You can keep browsing or tap Done.";
+"addons.web.installed" = "ZIP installed. Check the add-on page for required dependencies or extra modules, which may need separate downloads.";
 "addons.web.cancelled" = "Download cancelled. No add-on was installed.";
 "addons.web.tooLarge" = "This ZIP exceeds the 128 MiB download limit.";
 "addons.web.importZIP" = "Import ZIP";

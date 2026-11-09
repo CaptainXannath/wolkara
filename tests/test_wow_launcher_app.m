@@ -218,10 +218,18 @@ static void TestAddonBrowserPolicy(void) {
     NSString *example=[fixture.directory stringByAppendingPathComponent:@"Interface/AddOns/ExampleAddon"];
     assert([NSFileManager.defaultManager createDirectoryAtPath:example withIntermediateDirectories:YES attributes:nil error:NULL]);
     assert([@"## Interface: 16001\n## Title: Example addon\n## Version: 2.1\n" writeToFile:[example stringByAppendingPathComponent:@"Example.toc"] atomically:YES encoding:NSUTF8StringEncoding error:NULL]);
+    NSString *database=[fixture.directory stringByAppendingPathComponent:@"Interface/AddOns/Database"];
+    assert([NSFileManager.defaultManager createDirectoryAtPath:database withIntermediateDirectories:YES attributes:nil error:NULL]);
+    NSMutableString *largeTOC=[@"## Interface: 16001\n## Title: Database fixture\n## Version: 1\n" mutableCopy];
+    [largeTOC appendString:[@"x" stringByPaddingToLength:1024*1024 withString:@"x" startingAtIndex:0]];
+    assert([largeTOC writeToFile:[database stringByAppendingPathComponent:@"Database_Forever.toc"] atomically:YES encoding:NSUTF8StringEncoding error:NULL]);
+    NSArray<TKWoWAddon *> *listed=TKWoWAddonsAtDirectory(database.stringByDeletingLastPathComponent);
+    assert(listed.count==2 && [listed.firstObject.title isEqual:@"Database fixture"]);
     [self.controller manageAddons];
     TKWoWAddonManagerViewController *manager=(id)self.controller.navigationController.topViewController;
     assert([manager isKindOfClass:TKWoWAddonManagerViewController.class]);
     assert([[[manager valueForKey:@"store"] valueForKey:@"product"] isEqual:@"wowf"]);
+    assert([[manager valueForKey:@"store"] records].count==2);
     [manager loadViewIfNeeded];
     [self performSelector:@selector(captureAddonManager) withObject:nil afterDelay:0.4];
 }

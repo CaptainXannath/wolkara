@@ -3,6 +3,9 @@
 NS_ASSUME_NONNULL_BEGIN
 
 FOUNDATION_EXPORT NSString * _Nullable TKAddonInterfaceForVersion(NSString *version);
+// Read only a bounded prefix, keeping complete lines. Some database add-ons store
+// megabytes of data after their TOC metadata; the installer must keep those files intact.
+FOUNDATION_EXPORT NSString * _Nullable TKAddonReadTOCHeader(NSString *path);
 
 // Legacy provider metadata is retained when migrating packages installed by older builds.
 // The website flow neither asks for an API key nor polls provider updates.
