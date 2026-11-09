@@ -4,6 +4,7 @@
 #import "Updater.h"
 #import "AddonCleanup.h"
 #import "GameToolsViewController.h"
+#import "AddonManager.h"
 #import "ForeverUI.h"
 #import "UpdateLock.h"
 #import "../App/LaunchProgressView.h"
@@ -43,7 +44,7 @@ static UIStackView *Stack(NSArray<UIView *> *views, CGFloat spacing) {
     NSLayoutConstraint *_leftWidth;
     UILabel *_stateLabel, *_detailLabel, *_versionLabel, *_startupLabel, *_compatibilityLabel;
     UIButton *_editionButton, *_preferencesButton, *_primaryButton;
-    UIBarButtonItem *_refreshItem;
+    UIBarButtonItem *_refreshItem, *_addonsItem;
     UIActivityIndicatorView *_activity;
 }
 - (instancetype)initWithLibrary:(TKAppLibrary *)library {
@@ -77,6 +78,10 @@ static UIStackView *Stack(NSArray<UIView *> *views, CGFloat spacing) {
         style:UIBarButtonItemStylePlain target:self action:@selector(settings)];
     self.navigationItem.rightBarButtonItem.accessibilityLabel=@"Settings";
     self.navigationItem.rightBarButtonItem.accessibilityIdentifier=@"wow.settings";
+    _addonsItem=[[UIBarButtonItem alloc] initWithTitle:@"Add-ons" style:UIBarButtonItemStylePlain
+        target:self action:@selector(manageAddons)];
+    _addonsItem.accessibilityIdentifier=@"wow.addons";
+    self.navigationItem.rightBarButtonItems=@[self.navigationItem.rightBarButtonItem,_addonsItem];
     self.navigationItem.backButtonTitle=@"Back";
     _refreshItem=[[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"arrow.clockwise"]
         style:UIBarButtonItemStylePlain target:self action:@selector(refresh)];
@@ -411,6 +416,7 @@ static UIStackView *Stack(NSArray<UIView *> *views, CGFloat spacing) {
     _stateLabel.text=title; _detailLabel.text=detail;
     [self configureButton:_primaryButton title:action filled:YES]; _primaryButton.enabled=enabled;
     _refreshItem.enabled=!_busy && !_sessionUsed && !_starting;
+    _addonsItem.enabled=!_busy && !_sessionUsed && !_starting && _installation.app!=nil;
     if (_busy) [_activity startAnimating]; else [_activity stopAnimating];
     if (_checkedAt) {
         NSString *time=[NSDateFormatter localizedStringFromDate:_checkedAt dateStyle:NSDateFormatterNoStyle timeStyle:NSDateFormatterShortStyle];
@@ -476,6 +482,23 @@ static UIStackView *Stack(NSArray<UIView *> *views, CGFloat spacing) {
         }]];
     }
     [self presentSheet:sheet anchor:nil];
+}
+- (void)manageAddons {
+    if (_busy || _starting || _sessionUsed || !_installation.app) return;
+    NSError *error=nil;
+    NSString *directory=[_library workingDirectoryForApp:_installation.app error:&error];
+    if (!directory) {
+        UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"Add-ons"
+            message:error.localizedDescription ?: @"The installation folder is unavailable."
+            preferredStyle:UIAlertControllerStyleAlert];
+        [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+        [self presentViewController:alert animated:YES completion:nil];
+        return;
+    }
+    TKWoWAddonManagerViewController *manager=[[TKWoWAddonManagerViewController alloc]
+        initWithAddOnsDirectory:[directory stringByAppendingPathComponent:@"Interface/AddOns"]
+        edition:_product[@"name"] product:_product[@"id"] gameVersion:_installation.installedVersion ?: @""];
+    [self.navigationController pushViewController:manager animated:YES];
 }
 - (void)settings {
     UIAlertController *sheet=[UIAlertController alertControllerWithTitle:@"Settings"

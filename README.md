@@ -17,6 +17,10 @@ localization infrastructure, background pacing, the optional performance overlay
 and build optimizations. Thank you
 for that work. Wolkara's native keyboard, reviewed dictation, movable toolbar and
 saved-text key include the refinements developed and tested together on iPhone.
+The addon browser and package-update workflow incorporate WolkaraForever's
+[Add-ons management update](https://github.com/jklock/wolkaraforever/commit/c3fe78d),
+adapted to Wolkara's edition selection and shared update lock, with serial install
+completion and interrupted-update recovery fixes.
 The imported MIT [license](WolkaraForever-LICENSE) is retained and shipped in the app.
 
 This project is not affiliated with or endorsed by Blizzard Entertainment.
@@ -81,10 +85,15 @@ WoW gameplay under this capability set remain untested.
   or collapse; drag to reposition. Monitoring stops when hidden or backgrounded;
   it does not raise the rendering limit. GPU timing covers the presenting command
   buffer, not all GPU work in the system.
-- Settings → Game tools: import/manage addon ZIPs, browse CurseForge with your own
-  API key, back up/restore WTF + Interface, enable gamepad, or reset graphics.
-  Tools follow the selected edition. Imports require a matching TOC Interface
-  version for the installed client; that check is not a gameplay compatibility guarantee.
+- **Add-ons** on the launcher: import ZIPs, enable/disable/remove packages, browse
+  CurseForge with your own Core API key, and update managed packages individually
+  or with Update selected / Update all. Pin packages to keep their current version.
+  ZIP imports need no key; existing folders are never guessed to be a provider project.
+  Compatibility follows the selected installed client. Missing version tags are
+  shown as unverified; a matching tag is not a gameplay compatibility guarantee.
+  Downloads and writes finish before returning to the launcher.
+- Settings → Game tools also provides the addon manager, WTF + Interface backups,
+  gamepad settings and graphics reset. Tools follow the selected edition.
 - Release builds and optimized adapters, shader cache hits without a full byte copy,
   optional expensive diagnostics and a 5 FPS background rendering limit. Foreground
   rendering keeps the standard iOS frame-rate behavior; no 120 Hz override or M1

@@ -60,3 +60,9 @@ central = data.find(b'PK\x01\x02')
 assert central >= 0, 'the central directory record was not where it was expected'
 data[central + 24:central + 28] = (10).to_bytes(4, 'little')
 path.write_bytes(bytes(data))
+
+# Updates can replace the original top-level folder and carry a companion addon.
+archive('renamed-update', [('Replacement/Replacement.toc', toc.replace(b'Version: 1', b'Version: 2')),
+                           ('Companion/Companion.toc', toc)])
+archive('multi-flavor', [('Flavors/A_Classic.toc', toc),
+                         ('Flavors/Z_Mainline.toc', toc.replace(b'16001', b'120005'))])

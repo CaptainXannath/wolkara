@@ -503,3 +503,35 @@ after launch. Physical gameplay confirmation of these three changes is pending.
   in place after the exact-bundle guard confirmed the Duo app was closed; normal
   launcher process confirmed and game data preserved. Physical text confirmation
   and long-session stability remain pending.
+
+## Addon manager integration (2026-11-09)
+
+The current WolkaraForever addon workflow (upstream `c3fe78d`, inspected at
+`550755f`) is integrated in the original launcher. A direct Add-ons button opens
+it for the selected installation; Settings → Game tools remains available.
+John Klockenkemper and contributors are credited in README and the bundled MIT
+license remains intact.
+
+- Browse rows can install directly. Managed packages retain their recorded
+  CurseForge project/file identity, can be pinned, and support individual,
+  selected or all-package updates. Existing folders and ZIP imports without a
+  provider identity are excluded from provider updates.
+- Version selection and TOC compatibility use the installed client's version,
+  including multiple flavor TOCs; unsupported/missing tags are advisory. The
+  manager does not assume Forever 1.60.1 for Retail or other editions.
+- Downloads/extraction finish before bulk progression. Navigation is held until
+  actual writes finish, extraction runs off the UI thread, and the same lock as
+  the game updater covers mutations, migration and recovery. An interrupted
+  uncommitted update rolls back; a committed update keeps its new files and
+  manifest. Multi-folder packages remain a single managed record after renames.
+- The format-1 manifest migrates to format 2 with a backup. ZIP traversal,
+  collisions, invalid archives and expansion limits retain the existing checks.
+
+Validation: production Swift/ZIPFoundation archive suite (58 checks plus the
+Objective-C import lifecycle), CurseForge fake-transport suite (52 checks),
+localization suite (58 checks), and UIKit launcher fixture. The UI fixture covers
+edition propagation, disabled access during startup, available-update controls,
+and delayed completion that must keep two updates serial and navigation locked.
+All use synthetic files and metadata, with no game execution or live API key.
+Release build and signed app-bundle validation pass. Live CurseForge downloads
+and addon behavior inside the game still require user testing.

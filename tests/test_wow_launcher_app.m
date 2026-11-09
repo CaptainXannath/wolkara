@@ -11,6 +11,8 @@
 #import "wow_installation_fixture.h"
 #import "../launcher/WoW/GameToolsViewController.h"
 #import "../launcher/WoW/AddonManager.h"
+#import "../launcher/WoW/AddonStore.h"
+#import "../launcher/WoW/CurseForgeClient.h"
 
 // The production Swift archive is covered by test_forever_ui_archive.swift.
 // This UI fixture only needs its no-pending-restore bridge to open the launcher.
@@ -27,6 +29,7 @@
 - (void)refresh;
 - (void)about;
 - (void)repairInstallation;
+- (void)manageAddons;
 @end
 static atomic_uint requests, revision, updates, repairs;
 static atomic_bool failure, slow, interruptRepair;
@@ -60,6 +63,80 @@ static CALayer *ActivityLayer(CALayer *layer) {
     for (CALayer *child in layer.sublayers) { CALayer *found=ActivityLayer(child); if (found) return found; }
     return nil;
 }
+@interface TKWoWAddonManagerViewController (AddonFixture)
+- (void)runBulkUpdate:(NSArray<TKAddonRecord *> *)records;
+- (void)checkForUpdates;
+- (void)done;
+- (void)installCandidate:(TKCurseForgeFileCandidate *)candidate project:(NSDictionary *)project
+    replacing:(TKAddonRecord *)record client:(TKCurseForgeClient *)client name:(NSString *)name
+    completion:(void (^)(BOOL,NSError *))completion;
+@end
+@interface TKFixtureAddonCredentials : NSObject
+@end
+@implementation TKFixtureAddonCredentials
+- (NSString *)curseForgeKey:(NSError **)error { (void)error; return @"synthetic-key-never-sent"; }
+@end
+@interface TKDelayedAddonManager : TKWoWAddonManagerViewController
+@property(nonatomic) NSUInteger started;
+@property(nonatomic,copy) void (^pending)(BOOL,NSError *);
+@end
+@implementation TKDelayedAddonManager
+- (void)installCandidate:(TKCurseForgeFileCandidate *)candidate project:(NSDictionary *)project
+    replacing:(TKAddonRecord *)record client:(TKCurseForgeClient *)client name:(NSString *)name
+    completion:(void (^)(BOOL,NSError *))completion {
+    (void)candidate; (void)project; (void)record; (void)client; (void)name;
+    self.started+=1; self.pending=completion;
+}
+@end
+static void AddonBestFile(id self,SEL selector,NSNumber *project,NSString *version,
+                         void (^completion)(TKCurseForgeFileCandidate *,NSError *)) {
+    (void)self; (void)selector; (void)project;
+    assert([version isEqual:@"12.0.5"]);
+    completion(TKCurseForgeChooseFile(@[@{@"id":@2,@"fileDate":@"2026-11-09",@"isAvailable":@YES,@"gameVersions":@[@"12.0.5"]}],version),nil);
+}
+static void AwaitAddonStart(TKDelayedAddonManager *manager,NSUInteger count) {
+    NSDate *deadline=[NSDate dateWithTimeIntervalSinceNow:2];
+    while (manager.started<count && deadline.timeIntervalSinceNow>0)
+        [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
+    assert(manager.started==count);
+}
+static void TestAddonSequence(NSString *directory) {
+    Method method=class_getInstanceMethod(TKCurseForgeClient.class,@selector(bestFileForModID:gameVersion:completion:));
+    IMP saved=method_setImplementation(method,(IMP)AddonBestFile);
+    TKDelayedAddonManager *manager=[[TKDelayedAddonManager alloc] initWithAddOnsDirectory:directory edition:@"Retail" product:@"wow" gameVersion:@"12.0.5.99999"];
+    [manager setValue:[TKFixtureAddonCredentials new] forKey:@"credentials"];
+    UINavigationController *navigation=[[UINavigationController alloc] initWithRootViewController:[UIViewController new]];
+    [navigation pushViewController:manager animated:NO]; [manager loadViewIfNeeded];
+    TKAddonRecord *first=[TKAddonRecord new]; first.identifier=@"First"; first.name=@"First"; first.managed=YES;
+    first.provider=@{@"kind":@"curseforge",@"projectID":@1,@"fileID":@1};
+    TKAddonRecord *second=[TKAddonRecord new]; second.identifier=@"Second"; second.name=@"Second"; second.managed=YES;
+    second.provider=@{@"kind":@"curseforge",@"projectID":@2,@"fileID":@1};
+    [[manager valueForKey:@"store"] setValue:@[first,second] forKey:@"records"];
+    [manager checkForUpdates];
+    NSDate *deadline=[NSDate dateWithTimeIntervalSinceNow:2];
+    while ([[manager valueForKey:@"checkingUpdates"] boolValue] && deadline.timeIntervalSinceNow>0)
+        [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
+    assert([(UIButton *)Find(manager.view,@"wow.addons.updateAll") isEnabled]);
+    [manager runBulkUpdate:@[first,second]];
+    AwaitAddonStart(manager,1);
+    assert([[manager valueForKey:@"activeWrites"] unsignedIntegerValue]==1);
+    assert(!manager.navigationItem.leftBarButtonItem.enabled && manager.modalInPresentation);
+    assert(!manager.tableView.userInteractionEnabled && !navigation.interactivePopGestureRecognizer.enabled);
+    [manager done]; assert(navigation.topViewController==manager);
+    // An HTTP metadata response alone cannot advance the queue or enable Done.
+    [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.02]];
+    assert(manager.started==1 && [[manager valueForKey:@"bulkUpdating"] boolValue]);
+    void (^finish)(BOOL,NSError *)=manager.pending; manager.pending=nil; finish(YES,nil);
+    AwaitAddonStart(manager,2);
+    assert(!manager.navigationItem.leftBarButtonItem.enabled);
+    finish=manager.pending; manager.pending=nil; finish(YES,nil);
+    assert(![[manager valueForKey:@"bulkUpdating"] boolValue]);
+    assert([[manager valueForKey:@"activeWrites"] unsignedIntegerValue]==0);
+    assert(manager.navigationItem.leftBarButtonItem.enabled && !manager.modalInPresentation);
+    assert(manager.tableView.userInteractionEnabled);
+    method_setImplementation(method,saved);
+}
+
 @interface TKWoWFixtureDelegate : UIResponder <UIWindowSceneDelegate>
 @property(nonatomic) UIWindow *window;
 @property(nonatomic) TKWoWViewController *controller;
@@ -195,6 +272,21 @@ static CALayer *ActivityLayer(CALayer *layer) {
     UIScrollView *scroll=(id)Find(self.controller.view,@"wow.scroll");
     scroll.contentOffset=CGPointZero;
     [self capture:@"wow-home.png"];
+    UIBarButtonItem *addonsItem=[self.controller valueForKey:@"addonsItem"];
+    assert(addonsItem.enabled && [addonsItem.accessibilityIdentifier isEqual:@"wow.addons"]);
+    NSString *example=[fixture.directory stringByAppendingPathComponent:@"Interface/AddOns/ExampleAddon"];
+    assert([NSFileManager.defaultManager createDirectoryAtPath:example withIntermediateDirectories:YES attributes:nil error:NULL]);
+    assert([@"## Interface: 16001\n## Title: Example addon\n## Version: 2.1\n" writeToFile:[example stringByAppendingPathComponent:@"Example.toc"] atomically:YES encoding:NSUTF8StringEncoding error:NULL]);
+    [self.controller manageAddons];
+    TKWoWAddonManagerViewController *manager=(id)self.controller.navigationController.topViewController;
+    assert([manager isKindOfClass:TKWoWAddonManagerViewController.class]);
+    assert([[[manager valueForKey:@"store"] valueForKey:@"product"] isEqual:@"wowf"]);
+    [manager loadViewIfNeeded];
+    [self performSelector:@selector(captureAddonManager) withObject:nil afterDelay:0.4];
+}
+- (void)captureAddonManager {
+    [self capture:@"wow-addons.png"];
+    [self.controller.navigationController popToRootViewControllerAnimated:NO];
     [self tap]; [self performSelector:@selector(checkLaunch) withObject:nil afterDelay:0.3];
 }
 - (void)capture:(NSString *)name {
@@ -211,6 +303,9 @@ static CALayer *ActivityLayer(CALayer *layer) {
     [self.controller beginStartup];
     self.controller.startupStatusLabel.text=@"Preparing to run. This can take a few minutes. Keep this app open.";
     assert(![self primary].enabled && !self.controller.launchProgress.hidden);
+    assert(![(UIBarButtonItem *)[self.controller valueForKey:@"addonsItem"] isEnabled]);
+    [self.controller manageAddons];
+    assert(self.controller.navigationController.topViewController==self.controller);
     assert([[self status] isEqual:@"Starting…"]);
     assert(self.controller.navigationController.viewControllers.count==1);
     TKLaunchProgressView *progress=self.controller.launchProgress;
@@ -275,7 +370,8 @@ static CALayer *ActivityLayer(CALayer *layer) {
     assert([[addons valueForKey:@"installedGameVersion"] isEqual:@"12.0.5"]);
     assert([[[addons valueForKey:@"store"] valueForKey:@"product"] isEqual:@"wow"]);
     [self.controller.navigationController popToRootViewControllerAnimated:NO];
-    puts("WoW UIKit PASS: automatic check/update, offline retry, edition race, background cancellation, verified launch, inline preparation/failure/session end, no duplicate launches and bundled licenses."); fflush(stdout);
+    TestAddonSequence([fixture.directory stringByAppendingPathComponent:@"Interface/AddOns"]);
+    puts("WoW UIKit PASS: addon launcher access, edition context, guarded serial updates; automatic check/update, offline retry, edition race, background cancellation, verified launch, inline preparation/failure/session end, no duplicate launches and bundled licenses."); fflush(stdout);
     if (![NSProcessInfo.processInfo.arguments containsObject:@"--preview"]) exit(0);
     // Leave a ready home for visual inspection; no real download or guest runs.
     [self.controller refresh];

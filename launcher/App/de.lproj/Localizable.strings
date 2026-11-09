@@ -440,7 +440,7 @@
 "addons.loading" = "CurseForge wird geladen …";
 "addons.loadingCategories" = "CurseForge-Kategorien werden geladen …";
 "addons.noCategories" = "CurseForge hat keine Add-on-Kategorien geliefert.";
-"addons.projectsShown" = "%lu von %lu Projekten · die Forever-Kompatibilität wird bei der Installation geprüft";
+"addons.projectsShown" = "%lu von %lu Projekten · die Kompatibilität ist ein Hinweis, keine Sperre";
 "addons.projectsOfShown" = "%lu von %lu Projekten angezeigt";
 "addons.by" = "Von %@";
 "addons.downloads" = "%@ Downloads auf CurseForge";
@@ -455,9 +455,9 @@
 "addons.error.installTitle" = "Add-on konnte nicht installiert werden";
 "addons.error.importTitle" = "Add-on konnte nicht importiert werden";
 "addons.error.importMessage" = "Das geladene Archiv konnte nicht importiert werden.";
-"addons.installedStatus" = "%@ installiert. Die Forever-Kompatibilität wurde anhand der TOC-Datei geprüft.";
+"addons.installedStatus" = "%@ installiert. Die installierte Liste zeigt die Versionskompatibilität.";
 "addons.installed" = "Installiert";
-"addons.installed.footer" = "Vorhandene Add-ons bleiben erhalten. Wolkara entfernt nur Paketordner, die es selbst installiert und verzeichnet hat.";
+"addons.installed.footer" = "Jedes aufgelistete Add-on kann von diesem Gerät entfernt werden. Beim Entfernen wird sein Paketordner gelöscht.";
 "addons.setUpAccess" = "CurseForge-Zugang einrichten";
 "addons.setUpAccess.detail" = "Geben Sie einen zugelassenen Core-API-Schlüssel ein, um über CurseForge zu suchen und zu installieren.";
 "addons.key.title" = "CurseForge-API-Schlüssel";
@@ -470,7 +470,7 @@
 "addons.count.other" = "%lu Add-ons installiert";
 "addons.count.none" = "Keine Add-ons installiert";
 "addons.state.disabled" = "Deaktiviert";
-"addons.state.managed" = "Kompatibel · verwaltet";
+"addons.state.managed" = "Verwaltet";
 "addons.state.unverified" = "Ungeprüft · vorhanden";
 "addons.state.pinned" = " · angeheftet";
 "addons.restore" = "Wiederherstellen";
@@ -578,3 +578,75 @@
 
 "touch.gamepad.leftStick.hint" = "Doppeltippen für L3.";
 "touch.gamepad.rightStick.hint" = "Doppeltippen für R3.";
+
+"addons.refreshing" = "Wird von CurseForge aktualisiert…";
+
+"addons.filters.forever" = "Forever (Fassung %@)";
+
+"addons.action.install" = "Installieren";
+
+"addons.action.installing" = "Wird installiert…";
+
+"addons.action.installed" = "Installiert";
+
+"addons.action.unavailable" = "Nicht verfügbar";
+
+"addons.action.retry" = "Erneut versuchen";
+
+"addons.action.update" = "Aktualisieren";
+
+"addons.action.updating" = "Wird aktualisiert…";
+
+"addons.action.upToDate" = "Auf dem neuesten Stand";
+
+"addons.select.one" = "Dieses Add-on auswählen";
+
+"addons.select.on" = "Ausgewählt";
+
+"addons.select.off" = "Nicht ausgewählt";
+
+"addons.select.all" = "Alle auswählen";
+
+"addons.select.clear" = "Auswahl aufheben";
+
+"addons.select.summary" = "%lu ausgewählt · %lu aktualisierbar";
+
+"addons.select.updateSelected" = "Ausgewählte aktualisieren";
+
+"addons.updateAll" = "Alle aktualisieren";
+
+"addons.update.selectedTitle" = "Ausgewählte Add-ons aktualisieren?";
+
+"addons.update.allTitle" = "Alle Add-ons mit neuerer Datei aktualisieren?";
+
+"addons.update.none" = "Es ist nichts zu aktualisieren.";
+
+"addons.update.partialFailure" = "%lu Paket(e) konnten nicht aktualisiert werden. Die übrigen wurden aktualisiert.";
+
+"addons.update.working" = "%@ wird aktualisiert…";
+
+"addons.update.workingMany" = "Wird aktualisiert…";
+
+"addons.update.noProvider" = "Dieses Paket hat keine CurseForge-Identität und kann daher nicht vom Anbieter aktualisiert werden.";
+
+"addons.installedUnverified" = "%@ installiert. Der Anbieter bestätigt die Kompatibilität mit dieser Clientversion nicht.";
+
+"addons.state.pinnedShort" = "angeheftet";
+
+"addons.state.notVerifiedForForever" = "Kompatibilität unbestätigt";
+
+"addons.manage.note" = "Nur dieses verwaltete Paket kann geändert werden. Vorhandene Ordner bleiben unangetastet.";
+
+"addons.manage.disabledNote" = "Dieses Paket ist privat gespeichert und für World of Warcraft nicht sichtbar.";
+
+"addons.pin" = "Diese Version anheften";
+
+"addons.unpin" = "Aktualisierungen wieder zulassen";
+
+"addons.remove" = "Vom Gerät entfernen";
+
+"addons.action.manage" = "Verwalten";
+
+"addons.manage.unmanaged" = "Dieses vorhandene Add-on wird von diesem Gerät entfernt.";
+
+"addons.filters.installed" = "Installierter Client (%@)";
