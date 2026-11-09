@@ -394,90 +394,17 @@
 
 /* ---- Add-on manager ---- */
 "addons.title" = "Add-On Manager";
-"addons.column.name" = "Name";
-"addons.column.downloads" = "Downloads";
-"addons.column.top" = "Top";
-"addons.column.latest" = "Latest";
-"addons.column.category" = "Category";
-"addons.column.version" = "Game Version";
-"addons.column.author" = "Author";
-"addons.untitled" = "Untitled add-on";
-"addons.thisAddon" = "This add-on";
-"addons.edition" = "Edition: %@  ▾";
 "addons.mode.installed" = "Installed (%lu)";
-"addons.mode.browse" = "Browse CurseForge";
-"addons.search" = "Search World of Warcraft add-ons";
-"addons.sort" = "Sort";
-"addons.filters" = "Filters";
-"addons.columns" = "Columns";
-"addons.projectsFound" = "%@ projects found";
-"addons.searching" = "Searching…";
-"addons.enterKey" = "Enter a CurseForge key";
-"addons.enterKey.long" = "Enter an approved CurseForge Core API key to search and install World of Warcraft add-ons.";
-"addons.sort.current" = "Sort: %@";
-"addons.sort.title" = "Sort projects";
-"addons.sort.field" = "Field";
-"addons.sort.direction" = "Direction";
-"addons.sort.directionValue" = "Direction: %@";
-"addons.sort.ascending" = "Ascending";
-"addons.sort.descending" = "Descending";
-"addons.sort.featured" = "Featured";
-"addons.sort.popularity" = "Popularity";
-"addons.sort.lastUpdated" = "Last Updated";
-"addons.sort.totalDownloads" = "Total Downloads";
-"addons.sort.releaseDate" = "Release Date";
-"addons.sort.tapToChange" = "%@ · tap to change";
-"addons.filters.active" = "Filters · %@";
-"addons.filters.allVersions" = "All game versions";
-"addons.filters.allCategories" = "All categories";
-"addons.filters.category" = "Category: %@";
-"addons.filters.chooseCategory" = "Choose category…";
-"addons.filters.clear" = "Clear filters";
-"addons.filters.gameVersion" = "Game version";
-"addons.filters.categoryTitle" = "Filter by category";
-"addons.filters.tapToFilter" = "Tap to filter by category";
-"addons.loadingMore" = "Loading more projects…";
-"addons.loading" = "Loading CurseForge…";
-"addons.loadingCategories" = "Loading CurseForge categories…";
-"addons.noCategories" = "CurseForge returned no add-on categories.";
-"addons.projectsShown" = "%lu of %lu projects · compatibility is advisory, not a gate";
-"addons.projectsOfShown" = "%lu of %lu projects shown";
-"addons.by" = "By %@";
-"addons.downloads" = "%@ downloads on CurseForge";
-"addons.installLatest" = "Install latest compatible file";
-"addons.noDistribution" = "%@\n\nThis project does not allow downloads through the CurseForge API. Open its project page to install it by hand, or import the ZIP.";
-"addons.openProject" = "Open project page";
-"addons.downloading" = "Downloading %@…";
-"addons.error.incompleteFile" = "CurseForge returned an incomplete file record.";
-"addons.error.noArchive" = "CurseForge did not return an archive.";
-"addons.error.providerTitle" = "CurseForge request failed";
-"addons.error.changeTitle" = "Could not change add-on";
-"addons.error.installTitle" = "Could not install add-on";
 "addons.error.importTitle" = "Could not import add-on";
 "addons.error.importMessage" = "The downloaded archive could not be imported.";
-"addons.installedStatus" = "Installed %@. See the installed list for version compatibility.";
-"addons.installed" = "Installed";
-"addons.installed.footer" = "Remove any listed add-on from this device. Removing an add-on deletes its package folder.";
-"addons.setUpAccess" = "Set up CurseForge access";
-"addons.setUpAccess.detail" = "Enter an approved Core API key to search and install from CurseForge.";
-"addons.key.title" = "CurseForge API key";
-"addons.key.message" = "Enter a current approved key. It stays only in this device's Keychain and is sent only to CurseForge metadata APIs.";
-"addons.key.placeholder" = "API key";
-"addons.key.save" = "Save";
-"addons.key.errorTitle" = "Could not save key";
-"addons.loadMore" = "Load more…";
 "addons.count.one" = "%lu add-on installed";
 "addons.count.other" = "%lu add-ons installed";
 "addons.count.none" = "No add-ons installed";
 "addons.state.disabled" = "Disabled";
 "addons.state.managed" = "Managed";
-"addons.state.unverified" = "Unverified · existing";
-"addons.state.pinned" = " · pinned";
 "addons.restore" = "Restore";
 "addons.disable" = "Disable";
 "addons.source.existing" = "Existing";
-"addons.source.import" = "Wolkara import";
-"addons.source.zip" = "Imported from ZIP";
 "addons.version.unknown" = "Unknown version";
 
 /* ---- Voice and dictation ---- */
@@ -580,65 +507,37 @@
 "touch.gamepad.leftStick.hint" = "Double-tap for L3.";
 "touch.gamepad.rightStick.hint" = "Double-tap for R3.";
 
-"addons.refreshing" = "Refreshing from CurseForge…";
 
-"addons.filters.forever" = "Forever (%@)";
 
-"addons.action.install" = "Install";
 
-"addons.action.installing" = "Installing…";
 
-"addons.action.installed" = "Installed";
 
-"addons.action.unavailable" = "Unavailable";
 
-"addons.action.retry" = "Retry";
 
-"addons.action.update" = "Update";
 
-"addons.action.updating" = "Updating…";
 
-"addons.action.upToDate" = "Up to date";
 
-"addons.select.one" = "Select this add-on";
 
-"addons.select.on" = "Selected";
 
-"addons.select.off" = "Not selected";
 
-"addons.select.all" = "Select All";
 
-"addons.select.clear" = "Clear";
 
-"addons.select.summary" = "%lu selected · %lu updatable";
 
-"addons.select.updateSelected" = "Update Selected";
 
-"addons.updateAll" = "Update All";
 
-"addons.update.selectedTitle" = "Update the selected add-ons?";
 
-"addons.update.allTitle" = "Update every add-on that has a newer file?";
 
-"addons.update.none" = "Nothing is available to update.";
 
-"addons.update.partialFailure" = "%lu package(s) could not be updated. The others were updated.";
 
-"addons.update.working" = "Updating %@…";
 
-"addons.update.workingMany" = "Updating…";
 
-"addons.update.noProvider" = "This package has no CurseForge identity, so it cannot be updated from the provider.";
 
-"addons.installedUnverified" = "Installed %@. The provider does not confirm compatibility with this client version.";
 
 "addons.state.pinnedShort" = "pinned";
 
 "addons.state.notVerifiedForForever" = "compatibility unverified";
 
-"addons.manage.note" = "Only this managed package can be changed. Existing folders are left alone.";
 
-"addons.manage.disabledNote" = "This package is stored privately and is not visible to World of Warcraft.";
 
 "addons.pin" = "Pin this version";
 
@@ -646,8 +545,22 @@
 
 "addons.remove" = "Remove from device";
 
-"addons.action.manage" = "Manage";
 
-"addons.manage.unmanaged" = "This existing add-on will be removed from this device.";
 
-"addons.filters.installed" = "Installed client (%@)";
+
+/* Website downloads: no API key. */
+"addons.web.browse" = "Browse CurseForge";
+"addons.web.managerHint" = "Find an add-on, choose the right game version and download its ZIP. Wolkara installs it automatically.";
+"addons.web.hint" = "%@: choose your version and use Download. The ZIP will install automatically.";
+"addons.web.back" = "Back";
+"addons.web.forward" = "Forward";
+"addons.web.home" = "CurseForge add-ons";
+"addons.web.useDownload" = "Use the file’s Download button instead of Install with the CurseForge app.";
+"addons.web.unsupported" = "Choose an add-on ZIP from CurseForge using the file’s Download button.";
+"addons.web.downloading" = "Downloading add-on…";
+"addons.web.installing" = "Installing add-on…";
+"addons.web.installed" = "Add-on installed. You can keep browsing or tap Done.";
+"addons.web.cancelled" = "Download cancelled. No add-on was installed.";
+"addons.web.tooLarge" = "This ZIP exceeds the 128 MiB download limit.";
+"addons.web.importZIP" = "Import ZIP";
+"addons.web.footer" = "To update an add-on, download its new ZIP. Managed packages are replaced safely; existing folders from outside the manager are left untouched.";

@@ -535,3 +535,38 @@ and delayed completion that must keep two updates serial and navigation locked.
 All use synthetic files and metadata, with no game execution or live API key.
 Release build and signed app-bundle validation pass. Live CurseForge downloads
 and addon behavior inside the game still require user testing.
+
+## Website addon downloads without an API key (2026-11-09)
+
+The website flow supersedes the API browser described above. Add-ons → Browse
+CurseForge opens the real website in WKWebView. The REST client, credential store,
+key prompts and automatic provider-update controls have been removed. The native
+installed list and Files ZIP import remain. Existing manifest metadata is retained
+for migration; replacing a package from a manually chosen ZIP drops stale provider
+file identity.
+
+- WebKit download delegates receive normal ZIP links, download attributes, new
+  windows and redirects. The website remains responsible for search, login,
+  consent and any human verification. No HTML scraping, private API, key or
+  challenge bypass is used.
+- Only HTTPS downloads from CurseForge/ForgeCDN are accepted in production.
+  Responses must identify a ZIP and return success; HTML responses are not
+  imported. Download filenames never determine a destination path. Downloads
+  have a 128 MiB cap; the existing extractor enforces CRC, path and expansion
+  limits. Temporary files are removed after completion, failure or cancellation.
+- Navigation stays locked through download and installation; downloads can be
+  cancelled. The browser retains the ZIP until the background installer finishes.
+  Re-downloading a package updates a single matching managed package under the
+  shared lock. Pinned packages, disabled state and unmanaged folders are protected.
+  No automatic provider update checks run.
+
+Validation: the loopback UIKit fixture exercises real WKDownload delivery for
+plain links, download attributes, new windows and redirects, delayed installation,
+cancellation, HTTP failures, oversized responses, HTML rejection and retry. The
+server rejects any API-key header. The archive/import suite, localization tests,
+launcher UI fixture, clean signed Release build and app-bundle checks pass.
+The read-only live website check in the simulator initially displayed CurseForge's
+security-verification page, then loaded the actual addon catalogue after waiting
+for its automatic check. No challenge was solved or bypassed. A real provider ZIP
+and gameplay compatibility remain user checks. Installed in place on the Duo
+after the exact-bundle guard confirmed the app was closed; the launcher was opened.

@@ -4,6 +4,8 @@ NS_ASSUME_NONNULL_BEGIN
 
 FOUNDATION_EXPORT NSString * _Nullable TKAddonInterfaceForVersion(NSString *version);
 
+// Legacy provider metadata is retained when migrating packages installed by older builds.
+// The website flow neither asks for an API key nor polls provider updates.
 // The keys of a package's provider identity.
 //
 // A provider identity is recorded, never inferred. A folder called "Details" is not the
@@ -48,7 +50,7 @@ FOUNDATION_EXPORT BOOL TKAddonProviderIsCurseForge(NSDictionary *_Nullable provi
 @end
 
 // Owns only packages explicitly imported by WolkaraForever. Existing add-ons are
-// discovered and displayed but cannot be removed by this store.
+// discovered and displayed; removal is limited to the exact folder selected by the user.
 //
 // The manifest it writes is format 2. A format-1 manifest is migrated on first read, through a
 // journal and a backup, so an interrupted migration is recovered rather than left half-applied.
@@ -77,6 +79,9 @@ FOUNDATION_EXPORT BOOL TKAddonProviderIsCurseForge(NSDictionary *_Nullable provi
                  compatibility:(NSString *_Nullable *_Nullable)compatibility
                          error:(NSError **)error;
 
+// Install a user-selected ZIP; replace one matching managed package transactionally.
+// Collisions with existing unmanaged folders or several packages are refused.
+- (BOOL)installZIPAtURL:(NSURL *)url error:(NSError **)error;
 - (BOOL)importZIPAtURL:(NSURL *)url error:(NSError **)error;
 // The same import with a provider identity recorded in the same transaction, so a package is
 // never briefly updatable-looking without the identity that makes it updatable.

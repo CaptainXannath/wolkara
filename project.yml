@@ -67,6 +67,7 @@ targetTemplates:
     dependencies:
       - sdk: libz.tbd
       - sdk: Security.framework
+      - sdk: WebKit.framework
       - sdk: Speech.framework
       - sdk: AVFAudio.framework
       - package: ZIPFoundation

@@ -12,7 +12,7 @@
 #import "../launcher/WoW/GameToolsViewController.h"
 #import "../launcher/WoW/AddonManager.h"
 #import "../launcher/WoW/AddonStore.h"
-#import "../launcher/WoW/CurseForgeClient.h"
+#import "../launcher/WoW/AddonBrowser.h"
 
 // The production Swift archive is covered by test_forever_ui_archive.swift.
 // This UI fixture only needs its no-pending-restore bridge to open the launcher.
@@ -64,77 +64,18 @@ static CALayer *ActivityLayer(CALayer *layer) {
     return nil;
 }
 @interface TKWoWAddonManagerViewController (AddonFixture)
-- (void)runBulkUpdate:(NSArray<TKAddonRecord *> *)records;
-- (void)checkForUpdates;
-- (void)done;
-- (void)installCandidate:(TKCurseForgeFileCandidate *)candidate project:(NSDictionary *)project
-    replacing:(TKAddonRecord *)record client:(TKCurseForgeClient *)client name:(NSString *)name
-    completion:(void (^)(BOOL,NSError *))completion;
+- (void)browseCurseForge;
 @end
-@interface TKFixtureAddonCredentials : NSObject
-@end
-@implementation TKFixtureAddonCredentials
-- (NSString *)curseForgeKey:(NSError **)error { (void)error; return @"synthetic-key-never-sent"; }
-@end
-@interface TKDelayedAddonManager : TKWoWAddonManagerViewController
-@property(nonatomic) NSUInteger started;
-@property(nonatomic,copy) void (^pending)(BOOL,NSError *);
-@end
-@implementation TKDelayedAddonManager
-- (void)installCandidate:(TKCurseForgeFileCandidate *)candidate project:(NSDictionary *)project
-    replacing:(TKAddonRecord *)record client:(TKCurseForgeClient *)client name:(NSString *)name
-    completion:(void (^)(BOOL,NSError *))completion {
-    (void)candidate; (void)project; (void)record; (void)client; (void)name;
-    self.started+=1; self.pending=completion;
-}
-@end
-static void AddonBestFile(id self,SEL selector,NSNumber *project,NSString *version,
-                         void (^completion)(TKCurseForgeFileCandidate *,NSError *)) {
-    (void)self; (void)selector; (void)project;
-    assert([version isEqual:@"12.0.5"]);
-    completion(TKCurseForgeChooseFile(@[@{@"id":@2,@"fileDate":@"2026-11-09",@"isAvailable":@YES,@"gameVersions":@[@"12.0.5"]}],version),nil);
-}
-static void AwaitAddonStart(TKDelayedAddonManager *manager,NSUInteger count) {
-    NSDate *deadline=[NSDate dateWithTimeIntervalSinceNow:2];
-    while (manager.started<count && deadline.timeIntervalSinceNow>0)
-        [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
-    assert(manager.started==count);
-}
-static void TestAddonSequence(NSString *directory) {
-    Method method=class_getInstanceMethod(TKCurseForgeClient.class,@selector(bestFileForModID:gameVersion:completion:));
-    IMP saved=method_setImplementation(method,(IMP)AddonBestFile);
-    TKDelayedAddonManager *manager=[[TKDelayedAddonManager alloc] initWithAddOnsDirectory:directory edition:@"Retail" product:@"wow" gameVersion:@"12.0.5.99999"];
-    [manager setValue:[TKFixtureAddonCredentials new] forKey:@"credentials"];
-    UINavigationController *navigation=[[UINavigationController alloc] initWithRootViewController:[UIViewController new]];
-    [navigation pushViewController:manager animated:NO]; [manager loadViewIfNeeded];
-    TKAddonRecord *first=[TKAddonRecord new]; first.identifier=@"First"; first.name=@"First"; first.managed=YES;
-    first.provider=@{@"kind":@"curseforge",@"projectID":@1,@"fileID":@1};
-    TKAddonRecord *second=[TKAddonRecord new]; second.identifier=@"Second"; second.name=@"Second"; second.managed=YES;
-    second.provider=@{@"kind":@"curseforge",@"projectID":@2,@"fileID":@1};
-    [[manager valueForKey:@"store"] setValue:@[first,second] forKey:@"records"];
-    [manager checkForUpdates];
-    NSDate *deadline=[NSDate dateWithTimeIntervalSinceNow:2];
-    while ([[manager valueForKey:@"checkingUpdates"] boolValue] && deadline.timeIntervalSinceNow>0)
-        [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
-    assert([(UIButton *)Find(manager.view,@"wow.addons.updateAll") isEnabled]);
-    [manager runBulkUpdate:@[first,second]];
-    AwaitAddonStart(manager,1);
-    assert([[manager valueForKey:@"activeWrites"] unsignedIntegerValue]==1);
-    assert(!manager.navigationItem.leftBarButtonItem.enabled && manager.modalInPresentation);
-    assert(!manager.tableView.userInteractionEnabled && !navigation.interactivePopGestureRecognizer.enabled);
-    [manager done]; assert(navigation.topViewController==manager);
-    // An HTTP metadata response alone cannot advance the queue or enable Done.
-    [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.02]];
-    assert(manager.started==1 && [[manager valueForKey:@"bulkUpdating"] boolValue]);
-    void (^finish)(BOOL,NSError *)=manager.pending; manager.pending=nil; finish(YES,nil);
-    AwaitAddonStart(manager,2);
-    assert(!manager.navigationItem.leftBarButtonItem.enabled);
-    finish=manager.pending; manager.pending=nil; finish(YES,nil);
-    assert(![[manager valueForKey:@"bulkUpdating"] boolValue]);
-    assert([[manager valueForKey:@"activeWrites"] unsignedIntegerValue]==0);
-    assert(manager.navigationItem.leftBarButtonItem.enabled && !manager.modalInPresentation);
-    assert(manager.tableView.userInteractionEnabled);
-    method_setImplementation(method,saved);
+static void TestAddonBrowserPolicy(void) {
+    assert(TKAddonDownloadURLIsTrusted([NSURL URLWithString:@"https://edge.forgecdn.net/files/addon.zip"]));
+    assert(TKAddonDownloadURLIsTrusted([NSURL URLWithString:@"https://www.curseforge.com/wow/addons/example/download/1"]));
+    for (NSString *url in @[@"http://edge.forgecdn.net/a.zip",@"https://forgecdn.net.evil.test/a.zip",@"https://evil.test/a.zip",@"https://user:pass@forgecdn.net/a.zip",@"file:///tmp/a.zip"])
+        assert(!TKAddonDownloadURLIsTrusted([NSURL URLWithString:url]));
+    NSURL *url=[NSURL URLWithString:@"https://edge.forgecdn.net/addon.zip"];
+    assert(TKAddonResponseIsZIP([[NSURLResponse alloc] initWithURL:url MIMEType:@"application/zip" expectedContentLength:10 textEncodingName:nil]));
+    assert(!TKAddonResponseIsZIP([[NSURLResponse alloc] initWithURL:url MIMEType:@"text/html" expectedContentLength:10 textEncodingName:nil]));
+    assert([TKAddonBrowseURL(@"wowf").absoluteString containsString:@"gameVersionTypeId=88568"]);
+    assert(![TKAddonBrowseURL(@"wow").absoluteString containsString:@"88568"]);
 }
 
 @interface TKWoWFixtureDelegate : UIResponder <UIWindowSceneDelegate>
@@ -286,6 +227,10 @@ static void TestAddonSequence(NSString *directory) {
 }
 - (void)captureAddonManager {
     [self capture:@"wow-addons.png"];
+    TKWoWAddonManagerViewController *manager=(id)self.controller.navigationController.topViewController;
+    assert(Find(manager.view,@"wow.addons.browse"));
+    assert(![manager respondsToSelector:NSSelectorFromString(@"setupKey")]);
+    assert(!NSClassFromString(@"TKCurseForgeClient") && !NSClassFromString(@"TKAddonCredentialStore"));
     [self.controller.navigationController popToRootViewControllerAnimated:NO];
     [self tap]; [self performSelector:@selector(checkLaunch) withObject:nil afterDelay:0.3];
 }
@@ -370,8 +315,8 @@ static void TestAddonSequence(NSString *directory) {
     assert([[addons valueForKey:@"installedGameVersion"] isEqual:@"12.0.5"]);
     assert([[[addons valueForKey:@"store"] valueForKey:@"product"] isEqual:@"wow"]);
     [self.controller.navigationController popToRootViewControllerAnimated:NO];
-    TestAddonSequence([fixture.directory stringByAppendingPathComponent:@"Interface/AddOns"]);
-    puts("WoW UIKit PASS: addon launcher access, edition context, guarded serial updates; automatic check/update, offline retry, edition race, background cancellation, verified launch, inline preparation/failure/session end, no duplicate launches and bundled licenses."); fflush(stdout);
+    TestAddonBrowserPolicy();
+    puts("WoW UIKit PASS: addon launcher access, edition context, website download policy; automatic check/update, offline retry, edition race, background cancellation, verified launch, inline preparation/failure/session end, no duplicate launches and bundled licenses."); fflush(stdout);
     if (![NSProcessInfo.processInfo.arguments containsObject:@"--preview"]) exit(0);
     // Leave a ready home for visual inspection; no real download or guest runs.
     [self.controller refresh];

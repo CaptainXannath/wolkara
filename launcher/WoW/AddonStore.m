@@ -390,7 +390,13 @@ BOOL TKAddonProviderIsCurseForge(NSDictionary *provider) {
 - (BOOL)importZIPAtURL:(NSURL *)url error:(NSError **)error {
     return [self importZIPAtURL:url provider:nil error:error];
 }
+- (BOOL)installZIPAtURL:(NSURL *)url error:(NSError **)error {
+    return [self importZIPAtURL:url provider:nil replacingManaged:YES error:error];
+}
 - (BOOL)importZIPAtURL:(NSURL *)url provider:(NSDictionary *)provider error:(NSError **)error {
+    return [self importZIPAtURL:url provider:provider replacingManaged:NO error:error];
+}
+- (BOOL)importZIPAtURL:(NSURL *)url provider:(NSDictionary *)provider replacingManaged:(BOOL)replace error:(NSError **)error {
     NSData *archive=[NSData dataWithContentsOfURL:url options:NSDataReadingMappedIfSafe error:error];if(!archive||archive.length>128*1024*1024)return Fail(error,@"The selected ZIP is missing or exceeds the 128 MiB limit.");
     NSString *job=[_support stringByAppendingPathComponent:NSUUID.UUID.UUIDString],*extract=[job stringByAppendingPathComponent:@"extract"];
     if(![NSFileManager.defaultManager createDirectoryAtPath:job withIntermediateDirectories:YES attributes:nil error:error])return NO;
@@ -401,6 +407,21 @@ BOOL TKAddonProviderIsCurseForge(NSDictionary *provider) {
     if(!folders.count)return Fail(error,@"The ZIP contains no add-on folder with a .toc manifest.");
     NSArray<NSString *> *interfaces = nil; NSString *compatibility = nil;
     if(![self validatePackageFolders:folders from:root interfaces:&interfaces compatibility:&compatibility error:error])return NO;
+    if (replace) {
+        [self reload];
+        TKAddonRecord *candidate=nil;
+        for (TKAddonRecord *record in self.records) {
+            if (!record.managed) continue;
+            BOOL overlap=NO;
+            for (NSString *folder in folders) if ([record.folders containsObject:folder]) overlap=YES;
+            if (!overlap) continue;
+            if (candidate) return Fail(error, @"This ZIP overlaps more than one managed package. No files were changed.");
+            candidate=record;
+        }
+        // updateRecord rechecks ownership, pinning, collisions and disabled state
+        // under the shared lock before replacing anything. No provider is guessed.
+        if (candidate) return [self updateRecord:candidate archiveURL:url provider:provider error:error];
+    }
     int lock=[self lock:error];if(lock<0)return NO;BOOL success=NO;
     // The folders this call actually created, so a failure cleans up after itself and
     // nothing else. The cleanup used to remove every folder in the import on any failure,
@@ -552,6 +573,7 @@ BOOL TKAddonProviderIsCurseForge(NSDictionary *provider) {
             if (![item[@"uuid"] isKindOfClass:NSString.class]) item[@"uuid"] = NSUUID.UUID.UUIDString;
             NSDictionary *clean = CleanProvider(provider);
             if (clean) item[@"provider"] = clean;
+            else [item removeObjectForKey:@"provider"]; // A manually chosen ZIP has no verified provider file identity.
             packages[index] = item;
             if (![self writePackages:packages error:error]) return NO;
             committed = YES;

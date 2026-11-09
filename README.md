@@ -17,10 +17,10 @@ localization infrastructure, background pacing, the optional performance overlay
 and build optimizations. Thank you
 for that work. Wolkara's native keyboard, reviewed dictation, movable toolbar and
 saved-text key include the refinements developed and tested together on iPhone.
-The addon browser and package-update workflow incorporate WolkaraForever's
+The addon store incorporates WolkaraForever's
 [Add-ons management update](https://github.com/jklock/wolkaraforever/commit/c3fe78d),
-adapted to Wolkara's edition selection and shared update lock, with serial install
-completion and interrupted-update recovery fixes.
+adapted to Wolkara's edition selection and shared update lock, with interrupted-update
+recovery fixes. Wolkara's website download flow replaces the API browser and credential setup.
 The imported MIT [license](WolkaraForever-LICENSE) is retained and shipped in the app.
 
 This project is not affiliated with or endorsed by Blizzard Entertainment.
@@ -85,13 +85,15 @@ WoW gameplay under this capability set remain untested.
   or collapse; drag to reposition. Monitoring stops when hidden or backgrounded;
   it does not raise the rendering limit. GPU timing covers the presenting command
   buffer, not all GPU work in the system.
-- **Add-ons** on the launcher: import ZIPs, enable/disable/remove packages, browse
-  CurseForge with your own Core API key, and update managed packages individually
-  or with Update selected / Update all. Pin packages to keep their current version.
-  ZIP imports need no key; existing folders are never guessed to be a provider project.
-  Compatibility follows the selected installed client. Missing version tags are
-  shown as unverified; a matching tag is not a gameplay compatibility guarantee.
-  Downloads and writes finish before returning to the launcher.
+- **Add-ons** on the launcher: open **Browse CurseForge**, find the addon on the
+  real website and choose its ZIP download. Wolkara receives the browser download,
+  validates the archive and installs it automatically. No API key is needed.
+  The + button still imports ZIPs from Files. Download a newer ZIP to update a
+  managed package; pinned packages and existing unmanaged folders are protected.
+  There is no automatic update polling. Choose the correct game version on the
+  site; compatibility tags are advisory, not a gameplay guarantee.
+  Navigation stays locked through download/install, with cancellation available
+  while downloading. Installation uses the shared game-update lock.
 - Settings → Game tools also provides the addon manager, WTF + Interface backups,
   gamepad settings and graphics reset. Tools follow the selected edition.
 - Release builds and optimized adapters, shader cache hits without a full byte copy,
@@ -108,7 +110,7 @@ folder. Choose the same region and language in Wolkara. The released Forever
 client uses product `wowf` and `_forever_`; older beta files are not a current copy.
 
 Wolkara and WolkaraForever have separate app containers. Moving game files does
-not transfer saved passwords, CurseForge credentials or app preferences. Normal
+not transfer saved passwords or app preferences. Normal
 startup uses Wolkara's integrated Developer service after its one-time enrollment;
 no separate LocalDevVPN app is needed for that route. A matching installation is
 checked using metadata and its executable; full data verification is reserved for

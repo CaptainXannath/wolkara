@@ -171,6 +171,23 @@ int TestRealAddonImport(const char *fixtures, const char *temporary) {
         CHECK([different.records.firstObject.compatibility isEqual:TKAddonCompatibilityUnverified], "old compatibility does not carry over to a different client");
         CHECK([store removeRecord:ManagedRecord(store) error:&error], "remove flavor fixture");
 
+        CHECK([store importZIPAtURL:zip provider:identity error:&error], "older package retains its recorded provider identity");
+        CHECK([store installZIPAtURL:zip error:&error], "website ZIP installs without provider credentials");
+        CHECK(!ManagedRecord(store).providerUpdatable, "website replacement drops stale provider file identity");
+        NSInteger webRevision=store.manifestRevision;
+        CHECK([store installZIPAtURL:zip error:&error], "another download updates the same managed package");
+        CHECK(store.records.count==1 && store.manifestRevision>webRevision, "website re-download keeps one package");
+        CHECK([store setPinned:YES record:ManagedRecord(store) error:&error], "pin website package");
+        CHECK(![store installZIPAtURL:zip error:&error], "website update respects pinning");
+        CHECK([store setPinned:NO record:ManagedRecord(store) error:&error], "unpin website package");
+        CHECK([store setDisabled:YES record:ManagedRecord(store) error:&error], "disable website package");
+        CHECK([store installZIPAtURL:zip error:&error] && ManagedRecord(store).disabled, "website update preserves disabled state");
+        CHECK([store removeRecord:ManagedRecord(store) error:&error], "remove website fixture");
+        CHECK([fm createDirectoryAtPath:toc.stringByDeletingLastPathComponent withIntermediateDirectories:YES attributes:nil error:&error], "create existing unmanaged folder");
+        CHECK([before writeToFile:toc atomically:YES], "unmanaged bytes");
+        CHECK(![store installZIPAtURL:zip error:&error] && [before isEqual:[NSData dataWithContentsOfFile:toc]], "website never overwrites unmanaged files");
+        [fm removeItemAtPath:toc.stringByDeletingLastPathComponent error:NULL];
+
         // --- format-1 -> format-2 migration, and recovery from an interrupted one
         NSString *legacyRoot = [root stringByAppendingPathComponent:@"Legacy/Interface/AddOns"];
         CHECK([fm createDirectoryAtPath:[legacyRoot stringByAppendingPathComponent:@"LegacyAddon"]
