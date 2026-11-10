@@ -22,6 +22,13 @@ typedef struct Context {
 } Context;
 static pthread_mutex_t lock=PTHREAD_MUTEX_INITIALIZER;
 static Module *modules; static Context *contexts; static uintptr_t serial=1;
+static pthread_once_t trace_once=PTHREAD_ONCE_INIT;
+static bool trace_decrypts;
+static void configure_trace(void) {
+    const char *value=getenv("TOLKARA_TRACE_LEGACY_CRYPTO");
+    trace_decrypts=value && *value;
+}
+static bool trace_decrypt(void) { pthread_once(&trace_once,configure_trace); return trace_decrypts; }
 static Module *module(AKCSSMHandle id) { for(Module *p=modules;p;p=p->next) if(p->id==id)return p; return NULL; }
 static Context *context(AKCSSMHandle id) { for(Context *p=contexts;p;p=p->next) if(p->id==id)return p; return NULL; }
 static bool valid_guid(const AKCSSMGuid *g) { return g && !memcmp(g,&gGuidAppleCSP,sizeof *g); }
@@ -125,7 +132,7 @@ static AKCSSMReturn crypt_data(AKCSSMHandle id,const AKCSSMData *input,uint32_t 
         else {memcpy(output->Data,scratch,n);output->Length=n;*actual=n;}
     }
     wipe(scratch,capacity);free(scratch);pthread_mutex_unlock(&lock);
-    if(operation==kCCDecrypt)fprintf(stderr,"[legacy-crypto] decrypt status=%d\n",status);
+    if(operation==kCCDecrypt && trace_decrypt())fprintf(stderr,"[legacy-crypto] decrypt status=%d\n",status);
     return status;
 }
 AKCSSMReturn CSSM_EncryptData(AKCSSMHandle c,const AKCSSMData *i,uint32_t ni,AKCSSMData *o,uint32_t no,size_t *n,AKCSSMData *r){return crypt_data(c,i,ni,o,no,n,r,kCCEncrypt);}

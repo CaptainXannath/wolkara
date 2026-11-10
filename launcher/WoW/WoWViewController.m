@@ -3,6 +3,10 @@
 #import "Installation.h"
 #import "Updater.h"
 #import "AddonCleanup.h"
+#import "GameToolsViewController.h"
+#import "AddonManager.h"
+#import "ForeverUI.h"
+#import "UpdateLock.h"
 #import "../App/LaunchProgressView.h"
 
 static UIColor *Gold(void) { return [UIColor colorWithRed:0.88 green:0.73 blue:0.43 alpha:1]; }
@@ -40,7 +44,7 @@ static UIStackView *Stack(NSArray<UIView *> *views, CGFloat spacing) {
     NSLayoutConstraint *_leftWidth;
     UILabel *_stateLabel, *_detailLabel, *_versionLabel, *_startupLabel, *_compatibilityLabel;
     UIButton *_editionButton, *_preferencesButton, *_primaryButton;
-    UIBarButtonItem *_refreshItem;
+    UIBarButtonItem *_refreshItem, *_addonsItem;
     UIActivityIndicatorView *_activity;
 }
 - (instancetype)initWithLibrary:(TKAppLibrary *)library {
@@ -74,6 +78,10 @@ static UIStackView *Stack(NSArray<UIView *> *views, CGFloat spacing) {
         style:UIBarButtonItemStylePlain target:self action:@selector(settings)];
     self.navigationItem.rightBarButtonItem.accessibilityLabel=@"Settings";
     self.navigationItem.rightBarButtonItem.accessibilityIdentifier=@"wow.settings";
+    _addonsItem=[[UIBarButtonItem alloc] initWithTitle:@"Add-ons" style:UIBarButtonItemStylePlain
+        target:self action:@selector(manageAddons)];
+    _addonsItem.accessibilityIdentifier=@"wow.addons";
+    self.navigationItem.rightBarButtonItems=@[self.navigationItem.rightBarButtonItem,_addonsItem];
     self.navigationItem.backButtonTitle=@"Back";
     _refreshItem=[[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"arrow.clockwise"]
         style:UIBarButtonItemStylePlain target:self action:@selector(refresh)];
@@ -275,7 +283,17 @@ static UIStackView *Stack(NSArray<UIView *> *views, CGFloat spacing) {
 
         if (!error && !client.cancelled && installation.state==TKWoWInstallationReady && installation.app) {
             NSString *directory = [self->_library workingDirectoryForApp:installation.app error:&error];
-            if (directory && !error) TKWoWRetireTouchAddon(directory,&error);
+            if (directory && !error) {
+                int lock=TKWoWAcquireUpdateLock(directory.stringByDeletingLastPathComponent,&error);
+                if (lock>=0) {
+                    @try {
+                        if ([TKForeverUI recoverInterruptedRestoreInWorkingDirectory:directory error:&error]) {
+                            TKWoWRetireTouchAddon(directory,&error);
+                            if (!error) [TKForeverUI setLocale:locale inWorkingDirectory:directory error:&error];
+                        }
+                    } @finally { TKWoWReleaseUpdateLock(lock); }
+                }
+            }
         }
         dispatch_async(dispatch_get_main_queue(),^{
             if (generation!=self->_generation) return;
@@ -398,6 +416,7 @@ static UIStackView *Stack(NSArray<UIView *> *views, CGFloat spacing) {
     _stateLabel.text=title; _detailLabel.text=detail;
     [self configureButton:_primaryButton title:action filled:YES]; _primaryButton.enabled=enabled;
     _refreshItem.enabled=!_busy && !_sessionUsed && !_starting;
+    _addonsItem.enabled=!_busy && !_sessionUsed && !_starting && _installation.app!=nil;
     if (_busy) [_activity startAnimating]; else [_activity stopAnimating];
     if (_checkedAt) {
         NSString *time=[NSDateFormatter localizedStringFromDate:_checkedAt dateStyle:NSDateFormatterNoStyle timeStyle:NSDateFormatterShortStyle];
@@ -464,6 +483,23 @@ static UIStackView *Stack(NSArray<UIView *> *views, CGFloat spacing) {
     }
     [self presentSheet:sheet anchor:nil];
 }
+- (void)manageAddons {
+    if (_busy || _starting || _sessionUsed || !_installation.app) return;
+    NSError *error=nil;
+    NSString *directory=[_library workingDirectoryForApp:_installation.app error:&error];
+    if (!directory) {
+        UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"Add-ons"
+            message:error.localizedDescription ?: @"The installation folder is unavailable."
+            preferredStyle:UIAlertControllerStyleAlert];
+        [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+        [self presentViewController:alert animated:YES completion:nil];
+        return;
+    }
+    TKWoWAddonManagerViewController *manager=[[TKWoWAddonManagerViewController alloc]
+        initWithAddOnsDirectory:[directory stringByAppendingPathComponent:@"Interface/AddOns"]
+        edition:_product[@"name"] product:_product[@"id"] gameVersion:_installation.installedVersion ?: @""];
+    [self.navigationController pushViewController:manager animated:YES];
+}
 - (void)settings {
     UIAlertController *sheet=[UIAlertController alertControllerWithTitle:@"Settings"
         message:@"Updates install automatically while this app is open. Settings and addons are preserved. Startup preparation is separate from downloading updates." preferredStyle:UIAlertControllerStyleActionSheet];
@@ -475,6 +511,16 @@ static UIStackView *Stack(NSArray<UIView *> *views, CGFloat spacing) {
     if(!_busy && !_starting && !_sessionUsed && _installation.app) {
         [sheet addAction:[UIAlertAction actionWithTitle:@"Verify and repair game files" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
             (void)a; [self repairInstallation];
+        }]];
+    }
+    if (!_busy && !_starting && !_sessionUsed && _installation.app) {
+        [sheet addAction:[UIAlertAction actionWithTitle:@"Game tools and addons" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+            (void)action; NSError *error=nil;
+            NSString *directory=[self->_library workingDirectoryForApp:self->_installation.app error:&error];
+            if (!directory) return;
+            TKGameToolsViewController *tools=[[TKGameToolsViewController alloc] initWithWorkingDirectory:directory
+                product:self->_product[@"id"] edition:self->_product[@"name"] version:self->_installation.installedVersion ?: @""];
+            [self.navigationController pushViewController:tools animated:YES];
         }]];
     }
     [sheet addAction:[UIAlertAction actionWithTitle:@"Diagnostics and logs" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
@@ -512,8 +558,8 @@ static UIStackView *Stack(NSArray<UIView *> *views, CGFloat spacing) {
     UITextView *text=[UITextView new]; text.editable=NO;
     text.font=[UIFont preferredFontForTextStyle:UIFontTextStyleBody]; text.adjustsFontForContentSizeCategory=YES;
     text.textContainerInset=UIEdgeInsetsMake(20,20,20,20);
-    NSMutableString *credits=[@"Wolkara — an independent World of Warcraft launcher built on Tolkara. Not affiliated with or endorsed by Blizzard Entertainment. World of Warcraft belongs to Blizzard Entertainment.\n\n" mutableCopy];
-    for (NSString *name in @[@"LICENSE",@"NOTICE.md"]) {
+    NSMutableString *credits=[@"Wolkara — an independent World of Warcraft launcher built on Tolkara. Not affiliated with or endorsed by Blizzard Entertainment. World of Warcraft belongs to Blizzard Entertainment.\n\nSelected contributions by John Klockenkemper (jklock) and the WolkaraForever contributors.\n\n" mutableCopy];
+    for (NSString *name in @[@"LICENSE",@"NOTICE.md",@"WolkaraForever-LICENSE",@"ZIPFoundation-LICENSE"]) {
         NSString *path=[NSBundle.mainBundle.resourcePath stringByAppendingPathComponent:name];
         NSString *notice=[NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:NULL];
         if (notice) [credits appendFormat:@"%@\n%@\n\n",name,notice];

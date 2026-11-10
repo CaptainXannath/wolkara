@@ -34,7 +34,7 @@ plan = {"sdk": "", "translation": {}} if generic else json.load(open(surface))
 SDKNAME = {"ios": "iphoneos", "iossim": "iphonesimulator"}[platform]
 TARGET = {"ios": "arm64-apple-ios17.0", "iossim": "arm64-apple-ios17.0-simulator"}[platform]
 SDK = subprocess.run(["xcrun", "--sdk", SDKNAME, "--show-sdk-path"], capture_output=True, text=True, check=True).stdout.strip()
-CC = ["xcrun", "--sdk", SDKNAME, "clang", "-target", TARGET, "-isysroot", SDK, "-O1", "-g", "-fobjc-arc",
+CC = ["xcrun", "--sdk", SDKNAME, "clang", "-target", TARGET, "-isysroot", SDK, "-O2", "-g", "-fobjc-arc",
       "-I", os.path.join(ROOT, "translation/AKSupport"), "-Wno-deprecated-declarations"]
 if generic:
     plan["sdk"] = SDK   # sdk_tbd() below rewrites paths from the SDK classify used

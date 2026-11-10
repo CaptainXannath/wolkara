@@ -799,6 +799,7 @@ static void *hook(const char *name) {
 #define HOOK(n,f) if (!strcmp(name,n)) return (void *)&f
     HOOK("sigaction",guest_sigaction);
     HOOK("__ulock_wait",guest_ulock_wait);
+    HOOK("nanosleep",gw_nanosleep); HOOK("usleep",gw_usleep); HOOK("sleep",gw_sleep);
     HOOK("CFBundleGetMainBundle",guest_cf_main_bundle);
     HOOK("_NSGetExecutablePath",guest_executable_path);
     HOOK("_tlv_bootstrap",guest_tlv_bootstrap);

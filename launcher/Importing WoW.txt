@@ -1,0 +1,12 @@
+Importing World of Warcraft into Wolkara
+
+Close the game in the source app before moving its files.
+
+In Files, move the whole "World of Warcraft" folder into this Wolkara folder.
+Keep Data, _forever_ and the hidden .build.info file together. Do not put the
+folder inside a second folder also named "World of Warcraft".
+
+Open Wolkara and select the same edition, region and language as before.
+App preferences and saved passwords do not move with the game files.
+
+You can delete this guide after importing the game.

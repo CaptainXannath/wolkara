@@ -10,8 +10,12 @@
 #import "../WoW/WoWViewController.h"
 #import "LaunchProgressView.h"
 #import "NativeGuest.h"
+#include "GuestWait.h"
 #import "SignedFileProbe.h"
 #import "StartupActivity.h"
+#import "../Voice/Dictation.h"
+#import "../Voice/ToolbarDictationController.h"
+#import "SavedTextController.h"
 #if TOLKARA_EXTERNAL_JIT_PROTOTYPE
 #import "ExternalJITCoordinator.h"
 #endif
@@ -28,6 +32,8 @@
 
 @interface AKHostSceneDelegate : UIResponder <UIWindowSceneDelegate, TKLibraryViewControllerDelegate>
 @property(nonatomic, strong) UIWindow *window;
+@property(nonatomic, strong) AKToolbarDictationController *toolbarDictation;
+@property(nonatomic, strong) WKSavedTextController *savedTextController;
 @property(nonatomic, strong) UILabel *status;
 @property(nonatomic, strong) TKLaunchProgressView *launchProgress;
 @property(nonatomic, strong) TKStartupActivityView *startupActivity;
@@ -62,9 +68,18 @@
 // carry no code and no app data; the library adds a profile's app when its
 // files are present.
 static TKAppLibrary *OpenLibrary(void) {
+    NSString *documents=TKDocumentsPath(@"");
+    NSFileManager *files=NSFileManager.defaultManager;
+    // Files can hide an empty app container. Seed only a fresh Documents
+    // folder so the destination is visible before the user imports WoW.
+    if ([files createDirectoryAtPath:documents withIntermediateDirectories:YES attributes:nil error:NULL] &&
+        [files contentsOfDirectoryAtPath:documents error:NULL].count==0) {
+        NSString *guide=[NSBundle.mainBundle pathForResource:@"Importing WoW" ofType:@"txt"];
+        if (guide) [files copyItemAtPath:guide toPath:[documents stringByAppendingPathComponent:@"Importing WoW.txt"] error:NULL];
+    }
     NSString *profiles=[NSBundle.mainBundle.resourcePath stringByAppendingPathComponent:@"Guest/Profiles"];
     NSString *storage=[NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory,NSUserDomainMask,YES).firstObject stringByAppendingPathComponent:@"Tolkara"];
-    return [[TKAppLibrary alloc] initWithDocuments:TKDocumentsPath(@"") storage:storage profiles:[TKAppLibrary profilesInDirectory:profiles]];
+    return [[TKAppLibrary alloc] initWithDocuments:documents storage:storage profiles:[TKAppLibrary profilesInDirectory:profiles]];
 }
 // Starting apps needs compatibility
 // libraries built for the imported executables (tools/install.sh).
@@ -191,6 +206,18 @@ static BOOL PreparedFromOutside(void) { return hd_may_run_unsigned_code() || ng_
     ng_reserve_arena(NULL);
 #endif
 }
+// This notification follows the toolbar's explicit "Close app" confirmation.
+- (void)closeFromToolbar:(NSNotification *)note {
+    (void)note;
+    [AKDictation.shared cancel];
+    [self.window endEditing:YES];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,2*NSEC_PER_SEC),dispatch_get_main_queue(),^{ exit(0); });
+}
+- (void)gameTextInputAppeared:(NSNotification *)note {
+    UIView *view=[note.object isKindOfClass:UIView.class] ? note.object : nil;
+    [AKDictation setGameTextTarget:view];
+    self.savedTextController.gameTextTarget=view;
+}
 - (void)sceneDidBecomeActive:(UIScene *)scene {
     (void)scene; [self reserveExecutableMemory];
 }
@@ -198,6 +225,12 @@ static BOOL PreparedFromOutside(void) { return hd_may_run_unsigned_code() || ng_
     static BOOL started;
     if (started) return;
     started = YES;
+    self.toolbarDictation=[[AKToolbarDictationController alloc] initWithDictation:AKDictation.shared];
+    self.savedTextController=[WKSavedTextController new];
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(gameTextInputAppeared:)
+        name:@"AKTouchGameTextInputDidAppear" object:nil];
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(closeFromToolbar:)
+        name:@"AKTouchCloseAppNotification" object:nil];
     NSArray<NSString *> *arguments=NSProcessInfo.processInfo.arguments;
     // Normal Wolkara launches use the route included in this build. Development
     // arguments retain the original explicit mode selection.
@@ -831,6 +864,7 @@ static BOOL PreparedFromOutside(void) { return hd_may_run_unsigned_code() || ng_
     }
 }
 - (void)stopStartupActivity {
+    gw_set_startup_pump(NULL);
     [self.startupActivity stop];
     [NSNotificationCenter.defaultCenter removeObserver:self name:UIWindowDidBecomeVisibleNotification object:nil];
 }
@@ -924,7 +958,9 @@ static BOOL PreparedFromOutside(void) { return hd_may_run_unsigned_code() || ng_
         }
         fprintf(log,"[host] signed-image container=%s\n",shown.UTF8String); fflush(log);
     }
+    gw_set_startup_pump(fullStartup ? TKPumpStartupUI : NULL);
     BOOL ok = ng_initialize(path.fileSystemRepresentation, NSBundle.mainBundle.privateFrameworksPath.fileSystemRepresentation, map.fileSystemRepresentation, log, fullStartup);
+    gw_set_startup_pump(NULL);
     // The outcome as the host saw it (tools/run.sh requires "returned").
     fprintf(log,"[host] native %s %s\n",fullStartup?"startup":"first initializer",ok?"returned":"stopped"); fflush(log);
     self.status.text = ok ? (fullStartup ? [app.name stringByAppendingString:@" closed."] : @"Original client first initializer returned.") : @"Native startup stopped. See runtime log.";

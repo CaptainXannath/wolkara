@@ -3,6 +3,11 @@
 #import "AKSupport.h"
 #include <dlfcn.h>
 #include <stdatomic.h>
+static BOOL renderProbeEnabled(void) {
+    static BOOL enabled; static dispatch_once_t once;
+    dispatch_once(&once, ^{ enabled=[NSProcessInfo.processInfo.arguments containsObject:@"--trace-audio-render"]; });
+    return enabled;
+}
 @interface AKAudioRenderProbe : NSObject {
 @public
     AURenderCallbackStruct original;
@@ -62,9 +67,17 @@ AudioComponent AudioComponentFindNext(AudioComponent previous,const AudioCompone
     AudioComponentDescription mapped=*description;
     if(mapped.componentType==kAudioUnitType_Output && (mapped.componentSubType=='ahal' || mapped.componentSubType=='def ')) {
         mapped.componentSubType=kAudioUnitSubType_RemoteIO;
-        NSError *error=nil;AVAudioSession *session=AVAudioSession.sharedInstance;
-        BOOL active=[session setCategory:AVAudioSessionCategoryPlayback error:&error] && [session setActive:YES error:&error];
-        AKLog(@"audio playback session active=%d error_code=%ld",active,(long)error.code);
+        // The host owns the audio session, so this asks it for the game's playback lease and does
+        // nothing else with the session. Taking Playback here is what pulled the session out from
+        // under a dictation that was already recording: Playback is an output-only category, so the
+        // input went to digital silence while the engine kept running and reported itself healthy.
+        // This is the same request the CoreAudio adapter makes, found by dlsym because this adapter
+        // is its own image and cannot link against the app's symbol.
+        typedef BOOL (*TKWolkaraForeverPlaybackRequest)(void);
+        static TKWolkaraForeverPlaybackRequest ask; static dispatch_once_t once;
+        dispatch_once(&once,^{ ask=(TKWolkaraForeverPlaybackRequest)dlsym(RTLD_DEFAULT,"TKWolkaraForeverRequestGamePlayback"); });
+        BOOL active=ask?ask():NO;
+        AKLog(@"audio playback session active=%d",active);
     }
     AudioComponent component=f(previous,&mapped);
     AKLogC("audio component type=%#x subtype=%#x mapped=%#x found=%d",(unsigned)description->componentType,(unsigned)description->componentSubType,(unsigned)mapped.componentSubType,component!=NULL);
@@ -79,11 +92,11 @@ OSStatus AudioUnitSetProperty(AudioUnit unit,AudioUnitPropertyID property,AudioU
     OSStatus s;
     // Desktop HAL chooses a device explicitly. RemoteIO uses the session's
     // route. Accept only that actual default device, never an arbitrary ID.
-    if(property==2000 && scope==kAudioUnitScope_Global && element==0 && remoteOutput(unit)) {
+    if(property==2000 && scope==kAudioUnitScope_Global && element==0 && remoteOutput(unit) && renderProbeEnabled()) {
         UInt32 requested=0,current=0;
         if(!data || size!=sizeof requested)s=kAudioUnitErr_InvalidPropertyValue;
         else { memcpy(&requested,data,sizeof requested);s=defaultOutput(&current);if(!s && requested!=current)s=kAudioUnitErr_InvalidPropertyValue; }
-    } else if(property==kAudioUnitProperty_SetRenderCallback && scope==kAudioUnitScope_Input && element==0 && data && size==sizeof(AURenderCallbackStruct) && remoteOutput(unit)) {
+    } else if(property==kAudioUnitProperty_SetRenderCallback && scope==kAudioUnitScope_Input && element==0 && data && size==sizeof(AURenderCallbackStruct) && remoteOutput(unit) && renderProbeEnabled()) {
         prepareProbes();AKAudioRenderProbe *probe=[AKAudioRenderProbe new];memcpy(&probe->original,data,size);
         if(probe->original.inputProc) {
             AURenderCallbackStruct observed={observeRender,(__bridge void *)probe};
@@ -104,12 +117,12 @@ OSStatus AudioUnitSetProperty(AudioUnit unit,AudioUnitPropertyID property,AudioU
 OSStatus AudioUnitGetProperty(AudioUnit unit,AudioUnitPropertyID property,AudioUnitScope scope,AudioUnitElement element,void *data,UInt32 *size) {
     OSStatus (*f)(AudioUnit,AudioUnitPropertyID,AudioUnitScope,AudioUnitElement,void *,UInt32 *)=native(__func__);
     OSStatus s;
-    if(property==2000 && scope==kAudioUnitScope_Global && element==0 && remoteOutput(unit)) {
+    if(property==2000 && scope==kAudioUnitScope_Global && element==0 && remoteOutput(unit) && renderProbeEnabled()) {
         UInt32 current=0;
         if(!data || !size || *size<sizeof current)s=kAudioUnitErr_InvalidPropertyValue;
         else { s=defaultOutput(&current);if(!s) { memcpy(data,&current,sizeof current);*size=sizeof current; } }
     } else s=f?f(unit,property,scope,element,data,size):-4;
-    if(!s && property==kAudioUnitProperty_StreamFormat && data && size && *size==sizeof(AudioStreamBasicDescription) && remoteOutput(unit)) {
+    if(!s && property==kAudioUnitProperty_StreamFormat && data && size && *size==sizeof(AudioStreamBasicDescription) && remoteOutput(unit) && renderProbeEnabled()) {
         AudioStreamBasicDescription format;memcpy(&format,data,sizeof format);
         // RemoteIO exposes an unspecified rate before initialization. A desktop
         // HAL client expects the selected hardware device's concrete format.

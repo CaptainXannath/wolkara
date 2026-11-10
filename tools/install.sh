@@ -33,12 +33,15 @@ tools/generate.sh
 # NATIVE_GUEST_SHIMS=YES builds and signs only Tolkara's translation libraries
 # for the API surface those executables import. They stay outside the app.
 # GENERIC builds one adapter per framework instead, for no executable.
-xcodebuild -project Tolkara.xcodeproj -scheme Tolkara -destination "platform=iOS,id=$DEVICE" \
+xcodebuild -project Tolkara.xcodeproj -scheme Tolkara -configuration Release -destination "platform=iOS,id=$DEVICE" \
     -derivedDataPath build/device -allowProvisioningUpdates -allowProvisioningDeviceRegistration \
     GUEST_EXE="$GUEST_EXE" NATIVE_GUEST_SHIMS="$SHIMS" TOLKARA_PROFILE="${TOLKARA_PROFILE:-}" TOLKARA_MODE="${TOLKARA_MODE:-}" \
     build > "$LOG" 2>&1 \
     || { grep -E "error:" "$LOG" | head -20; echo "BUILD FAILED -> $LOG"; exit 1; }
-xcrun devicectl device install app --device "$DEVICE" build/device/Build/Products/Debug-iphoneos/Tolkara.app
+# Check again after the build: replacing a running guest can interrupt its writes.
+RUNNING=$(tools/running_app.sh "$DEVICE" "$BUNDLE") || { echo "Cannot verify whether Wolkara is running; installation stopped."; exit 1; }
+[ -z "$RUNNING" ] || { echo "Close Wolkara on the device before installing. Its data has not been changed."; exit 1; }
+xcrun devicectl device install app --device "$DEVICE" build/device/Build/Products/Release-iphoneos/Tolkara.app
 case "${TOLKARA_MODE:-}" in
 local-signing)
     # Each container is a copy of one executable's final code pages, signed with

@@ -1,293 +1,168 @@
-# Experimental touch input
+# Touch controls and text input
 
-The AppKit adapter provides two translucent toolbar buttons: keyboard and control
-settings (gear). They remain fixed at the top center inside the safe area, including
-with a physical controller or the keyboard open. The keyboard opens a visible draft
-editor above it; the guest's rendering size stays unchanged. The accessory row
-provides Escape, Tab, left/right arrows, game backspace, Return and a close button.
-The transparency setting also fades both toolbar buttons, but not the keyboard
-or settings panel.
+The toolbar offers mouse/trackpad, Apple keyboard, gamepad, settings, leave app,
+microphone and saved-text key controls. With mouse mode enabled, touches outside controls use the trackpad;
+opening an editor releases held inputs. Settings → Edit layout lets you move both
+the gamepad controls and individual toolbar buttons. Positions are saved relative
+to the safe area and stay on screen when the window changes size. Transparency,
+size, shoulder swapping and haptics remain configurable.
 
-Controller mode is always active: touch controls appear automatically without a
-physical controller, disappear when one connects, and return on disconnection.
-The layout provides two sticks, D-pad, ABXY, LB/LT/RB/RT and `+`. Opening the
-keyboard hides the touch controller and releases held inputs. Touches outside
-controls always use the trackpad, including with a physical controller; there
-are no mode toggles. Old mode preferences are ignored.
-See [touch controller details](TOUCH_CONTROLLER_PROPOSAL.md).
+## Controller modes
 
-The experimental touch adventure mode and bundled WolkaraTouch addon have been
-removed following reported Lua errors. The launcher moves an existing copy from
-`Interface/AddOns/WolkaraTouch` to `Interface/DisabledAddOns/WolkaraTouch-<unique ID>`
-before play. It preserves all files and other addons; WoW does not load the retired
-folder. There is no first-launch touch tutorial popup.
+Tap the toolbar controller button to alternate **Full** and **Simple**. Hold for
+0.6 seconds to turn the virtual controller on or off; the selected mode is remembered.
+Tapping while off changes the remembered layout without enabling it. VoiceOver
+also offers an on/off action. A physical controller continues to take priority.
 
-| Finger action in trackpad mode | Mouse input |
-| --- | --- |
-| Slide one finger | Relative cursor movement; lifting/repositioning does not move the cursor. |
-| Tap once / twice | Left click / double click. |
-| Tap with two fingers | Right click. |
-| Tap with three fingers | Middle click. |
-| Slide two fingers | Vertical or horizontal wheel scrolling, with accumulated partial steps. |
-| Hold one finger still for about half a second, then slide | Left-button drag until release. |
-| Hold two fingers still for about half a second, then slide | Right-button drag, including relative camera motion when the guest captures the mouse. |
+Simple keeps the left analog stick without its directional ring, LB/RB, the menu
+button and enabled touch ability circles. It hides the right stick, A/B/X/Y ring
+and LT/RT. Move LB/RB in Settings → Edit layout while Simple is selected to save
+their positions separately from Full; each mode restores its own placement.
+By default, Simple places LB/RB over the green/red target icons above the neutral
+abilities in the reference screenshot. They follow the ability block's position
+and scale until moved manually; saved positions take priority. Full mode's
+shoulder swapping does not swap these default targets.
+Hidden areas pass touches to the camera or pointer. Changing the
+mode releases held inputs without reconnecting the controller or altering saved
+positions. Use Full to edit controls that are hidden in Simple.
 
-Finger-count changes do not jump the cursor. Cancelled gestures, mode changes,
-window changes and app interruptions release a held touch-generated button.
-Temporary loss of focus keeps the keyboard open for system dictation panels;
-entering the background or removing the host view dismisses it.
-Touch input has a software cursor; physical mouse events retain their own
-path. Opening the keyboard cancels a current trackpad gesture.
+## Direct camera dragging
 
-Select a text field in the application, then open the keyboard manually.
-Write, select, correct, paste or dictate into the native **Draft** panel; tap
-**Replace** (or the system keyboard's **Done**) to replace **all** text in the
-selected game field. This does not press Return. Press **↵** separately to submit
-in the game. An empty draft clears the field: open the keyboard and tap Replace
-without entering text. A just-submitted draft is cleared locally and Replace is
-then disabled until another edit or keyboard session, preventing a second tap
-or queued Done callback from accidentally clearing the replacement.
+With mouse mode disabled, a tap clicks its screen position on lift; a drag turns
+the camera. Touch-down does not move the guest cursor. After 8 points of movement,
+the drag starts at the existing cursor position. Before mouse capture it moves
+that position by the finger delta, so clients using absolute positions can detect
+movement and request capture on every gesture. During capture, only relative
+motion is sent and the requested cursor anchor stays fixed. Cursor warps update
+both window and screen position queries. Lifting and restarting elsewhere never
+uses the new finger origin as a cursor position. The game still controls
+camera sensitivity. Enable mouse mode for pointer movement and dragging UI items.
 
-While a draft is present or recognition/composition is still pending, game
-accessory keys are disabled, so they cannot move to another field or submit an
-unfinished draft. **Clear draft** clears only this local document; the accessory
-**⌫** acts on existing game text when the draft is empty.
+The first finger owns the drag until it lifts. Opening native controls, losing
+focus, changing input mode or resizing the viewport releases it; remaining samples
+from that cancelled gesture cannot start another drag. A drag starting over an
+ability circle follows the same camera path, or moves the pointer in mouse mode.
 
-The editor keeps a normal UIKit text document during editing. It no longer
-clears the document/selection/undo history after every letter, and there is no
-per-keystroke asynchronous forwarding. The explicit Replace action queues
-**Command+A**, **Backspace**, then the draft's normal Unicode key events, in
-order. All keys have matching releases; Command is scoped to the A events.
-It does not query a field, use the clipboard, infer password length, send a
-fixed series of deletes, press Return or retry automatically. Newlines, tabs
-and control characters in pasted text become spaces rather than implicit game
-commands. Ordinary direct text input retains its insertion behavior.
-Closing the keyboard or entering the background discards the draft without
-sending it; temporary focus loss for the dictation UI keeps it available.
+## Touch abilities
 
-There is no automatic detection or reading of game text fields. This panel is a
-local draft, **not a mirror of the game field**: it starts empty rather than
-retrieving already-entered text. AppKit offers text-context queries through
-[`NSTextInputClient`](https://developer.apple.com/documentation/appkit/nstextinputclient),
-but the current adapter has no verified whole-field text/selection query for
-WoW. The user chose whole-field replacement as the fallback. No application
-memory inspection or game-specific hooks are used. The editor is visible plain
-text, including when the user selects a password field in the game.
-Autocorrection and smart substitutions are disabled. Drafts are not saved or logged.
+Open Settings → **Touch abilities…** and enable **Touch abilities**. The circles
+send button combinations through the same virtual controller as the sticks.
+They are active only while the touch controller is active; keyboard/draft entry,
+backgrounding, hiding the controller or opening its settings releases held input.
 
-The replacement path depends on the focused game field recognizing the macOS
-Select All shortcut. Original fixtures verify replacement with existing text,
-a cursor in the middle, partial selection, empty clearing, duplicate suppression,
-composition/dictation and exact key order/modifiers. The updated iOS build still
-needs a physical WoW login/chat-field check; the synthetic result does not
-prove every game field honors that shortcut. On 2026-10-07 the input fixture,
-translation suite, required ASan/UBSan suite, signed arm64 device build and strict
-signature verification passed. Manual simulator key taps replaced `a` with `b`
-without appending, then an empty Replace cleared the field. No game was run or
-credentials read during these checks.
+The initial 32 circles follow the reference layout: the neutral D-pad and Y/B/A/X
+diamonds are above, LT is on the left, RT on the right, and LT+RT below. The overlay
+does not detect spells or inspect the game. Align it with the matching action bars.
 
-## System keyboard dictation
+- **Whole layout:** drag any circle to move the block; pinch or use the size slider
+  to scale positions and diameters together. This is useful after changing WoW's UI scale.
+- **Group of 4:** select a circle and move or resize its whole diamond independently.
+  There are eight default groups: D-pad and face buttons for each modifier set.
+  Existing saved positions and bindings are preserved when the groups are added.
+- **One circle:** tap a circle to select it, drag it, resize it, and choose its button
+  and modifier. Buttons include A/B/X/Y, the four directions, **LB** and **RB**;
+  each supports None, LT, RT or LT+RT. Individual circles can be hidden/deleted; **Add** creates another.
+- **Borders** controls the outline while playing; zero leaves invisible touch zones.
+  The editor always shows labels and outlines. **Done** saves; **Reset** restores
+  the reference arrangement without changing whether the feature is enabled.
 
-The keyboard requests normal text entry instead of treating every guest
-field as a password. A native UIKit text view is the first responder, providing
-the `UITextInput` contract used by system dictation instead of only `UIKeyInput`.
-Select the game's chat field, open our keyboard and use its system
-microphone button. Dictated text appears in the editable draft;
-tap Replace, then press Return yourself to send it. Tolkara adds no speech engine or recording UI.
+Lifting a tap inside a circle commits one combination: modifiers first, then the
+ability button, button-up with modifiers still held, and finally modifier release.
+Resting a finger sends no controller input. Moving 8 points converts it into a drag;
+returning to the circle does not turn it back into a tap. These circles are tap
+shortcuts; use the regular controller buttons for held abilities. Opening controls or suspending
+the controller clears pending input. Shared modifiers remain held while another
+touch owns them. An incompatible simultaneous combination is rejected with
+an orange outline instead of becoming a different shortcut. A conflicting manual
+trigger press cancels the existing circle's chord before applying the manual input.
+The layout fits inside resized windows without overwriting the saved arrangement.
 
-Enable **Settings > General > Keyboard > Enable Dictation** on the iPhone and
-use Apple's keyboard with a supported language. iOS controls microphone
-availability and recognition. Because Tolkara does not inspect guest fields,
-it cannot automatically switch back to secure keyboard traits for passwords;
-the guest still controls its own text display and masking. The bridge does not
-record audio itself or retain text after insertion. The local draft is
-discarded when the keyboard closes or the app enters the background.
+## Apple keyboard
 
-The `feature/keyboard-dictation` branch starts at `9483e1a`, before the native
-mouse experiment; `feature/native-mouse` remains separate. On 2026-10-04,
-the first change (`72d7468`) made the microphone visible, but the user reported
-that tapping it did not start dictation on the iPhone, while other apps worked.
-Button visibility and injected phrases were insufficient validation.
+Select the game's text field before opening the keyboard. Write or dictate into
+the visible native draft; iOS autocorrection and spelling are enabled. **Replace**
+replaces the whole focused game field without submitting. **Send** (including the
+keyboard's Send key) replaces it, sends Return once and dismisses the keyboard.
+An empty Replace clears the field. Duplicate submission callbacks are ignored.
+Escape, Tab, arrows, game backspace and Return remain available on the accessory
+row. Newlines and control characters in pasted text cannot become extra commands.
 
-The follow-up replaces the simple key-input responder with the native text
-view and stops dismissing it on temporary window/app deactivation. The system
-dictation panel itself can trigger those notifications; dismissing the first
-responder cancels it. An A/B simulator check showed no panel with the original
-`UIKeyInput` responder even with the focus fix, and no panel with the native
-responder alone. With both changes, tapping the microphone opened iOS's
-"Enable Dictation" prompt, also seen with an unmodified UIKit reference field.
-The prompt was cancelled without granting permission or recording audio.
+The bridge cannot inspect which game field is focused. Whole-field replacement
+uses the game's macOS Select All/backspace behavior. Opening a draft never reads
+text or passwords from the game. Closing or backgrounding discards the local draft;
+temporary focus changes used by Apple's text UI preserve it.
 
-Simulator checks exercise actual `UITextInput` marked-text updates,
-commit/replacement, dictation placeholders, Unicode, backspace, cancelled
-composition, late results after closing, and focus restoration. They verify
-no duplicate text or automatic Return, preserve the keyboard through temporary
-focus loss, and close it on background entry. The test runner also requires its
-success marker, because `simctl launch` can return zero after an assertion.
-These are synthetic input tests. On 2026-10-06 the user confirmed that the
-microphone works on the iPhone, but reported long stalls after a few ordinary
-keystrokes even without using dictation. The bridge previously reset UIKit's
-document, selection and undo history synchronously inside text-edit callbacks.
-The earlier follow-up deferred that reset and text delivery until the callback returned,
-and preserves ordering for immediate Return, backspace and keyboard close.
-The user subsequently confirmed that the stall still occurs on the iPhone.
-The visible draft revision above replaces that per-key bridge; see the latest
-validation below. The minutes-long device stall has not been reproduced in the simulator.
-No microphone audio was captured as part of automated validation.
+## Microphone and reviewed dictation
 
-The expanded fixture can run inside the same timer-entered, nonblocking desktop
-event loop as the runtime (`--guest-poll-loop`). It covers 64 repeated groups of
-typing and deletion, delayed text delivery, immediate Return/close, cancelled
-callbacks after reopen and the existing composition/dictation cases. A separate
-watchdog makes a blocked main thread fail instead of waiting indefinitely.
+Tap the microphone to send one Return (opening WoW chat) and start on-device Apple
+Speech recognition. Partial and final results appear **only in the visible draft**.
+Tap the draft to pause recognition and edit it with Apple's keyboard. Confirm with
+✓ to send exactly the reviewed text, Return, then one Escape to close the empty chat.
+Cancel with × to discard it and send one Escape. Backgrounding discards without
+sending any keys. Late speech/permission callbacks cannot reopen or submit a draft.
 
-Validation for this follow-up on Xcode 27.0 / iOS 27.0:
-- `tools/test_touch_controls_ui.sh --self-test --guest-poll-loop`: passed.
-- `tools/test_emulation.sh`: passed, including the signing test that failed
-  under the previous Xcode installation; no signing code was changed here.
-- Signed arm64 `iphoneos` Debug build and strict code-signature verification:
-  passed.
-- Manual taps on the simulator's software keyboard produced the complete
-  phrase without a stall. This does not establish that the reported iPhone
-  freeze is fixed or validate live speech recognition after this change.
-- Installed in place on the iPhone 16 Pro Max with the game closed. Game-data,
-  settings and addon inventories were preserved, as were the configuration,
-  build metadata and original game executable hashes. Device typing/dictation
-  validation is pending.
+Check that chat opened before confirming; the compatibility layer cannot identify
+the game's focus. Speech and microphone permission, a supported language and
+on-device recognition availability are required. This uses `SFSpeechRecognizer`,
+not Whisper. You can also use Apple's own dictation microphone on its keyboard.
 
-For manual comparison, `tools/test_touch_controls_ui.sh
---native-keyboard-reference` opens an ordinary UIKit text view in the synthetic
-fixture, without the keyboard adapter.
+## Saved-text key
 
-## Native UI stalls while the guest continues (2026-10-06)
+Tap the key to edit and save a value. Its explanation is:
 
-The user reported that both software keys and settings sliders can stick while
-WoW keeps animating and responding to the controller. Beginning the deferred
-Control Center gesture releases the native UI. This broadens the issue beyond
-the text bridge; the earlier text-edit change did not establish a device fix.
+> Hold key to type what's in the box and send it. Useful for your password
 
-The adapter returned queued desktop events without ever servicing UIKit while
-that queue stayed nonempty. An original simulator fixture reproduced starvation:
-a native animation failed to complete within two seconds with continuous queued
-events, although the guest polling loop kept running. Empty-queue and
-source-driven polls passed before the correction. This demonstrates a defect in
-the adapter, not proof that it is the only cause of the reported device stall.
+Holding the key for 0.6 seconds types the stored value and sends one Return. It
+never opens chat first: select the destination field yourself. A tap only edits;
+an empty save deletes the value. Storage uses this device's unlocked Keychain,
+with no synchronization, clipboard copy, plaintext config or input diagnostics.
+Unsaved editor text is cleared when the app enters the background. Wolkara and
+WolkaraForever do not share this credential store.
 
-`nextEventMatchingMask:` now gives UIKit a short turn even with queued events,
-limited to once per 1/120 second on that path, before inspecting the queue.
-Masks, peeking, priority insertion and delivery order are preserved. The shared
-pump also flushes pending implicit Core Animation transactions after native
-callbacks return; it does not commit a caller's explicit transaction. The same
-pump is used by `NSApplication.run`. No system gesture is synthesized and no
-keyboard text or application memory is inspected.
+## Implementation and checks
 
-The input fixture no longer forces a display flush after each translated key
-or mouse event, which could conceal presentation problems. Checks on iOS 27 /
-Xcode 27 passed:
+`translation/AppKit/TouchControls.m` owns UIKit editing; `AppKit.m` converts an
+explicit submission into balanced macOS key events. `ToolbarDictationController`
+owns the reviewed voice transaction. `SavedTextController` and `SavedTextStore`
+keep stored values out of ordinary event diagnostics. The native-control event
+pump services both default and tracking modes while the guest owns the main loop.
 
-- `tools/test_touch_controls_ui.sh --self-test --ui-progress-test`: native
-  animation completion, main-queue work and timer-driven slider updates under
-  empty polling, source traffic, continuous queued events, non-dequeuing peeks
-  and `NSApplication.run`. The failing queued-event case now passes.
-- `tools/test_touch_controls_ui.sh --self-test --guest-poll-loop --queued-traffic`:
-  existing repeated typing, deletion, composition, dictation-placeholder,
-  immediate Return/close, cancellation and focus checks.
-- `tools/test_translation_sim.sh`: mask/peek/priority behavior, including native
-  callbacks changing the queue while it is being serviced, plus existing adapters.
-- `tools/test_emulation.sh`: required ASan/UBSan regression suite passed.
-- Manual simulator software-key taps produced `hola prueba`; actual drags changed
-  transparency and both size sliders while the synthetic queue stayed occupied,
-  without invoking Control Center. This did not run a game or record dictation.
-- Signed arm64 iOS Debug build and strict/deep signature verification passed.
+Run `tools/test_toolbar_dictation.sh --self-test` and
+`tools/test_touch_controls_ui.sh --self-test`. The latter also accepts
+`--saved-text-test`, `--review-draft-test`, `--toolbar-test` and
+`--tracking-progress-test` with `--self-test`. Tests use synthetic app views,
+speech/audio doubles and a Keychain double. The ad-hoc simulator fixture cannot
+prove real device Keychain persistence or microphone capture; those require the
+signed app on a physical device. No game input is automated by these tests.
 
-On 2026-10-07 the user confirmed that the physical-device stall persists:
-several typed keys queue up and all arrive after beginning Control Center or
-Notification Center. The earlier busy-queue fix therefore did **not** resolve
-the full reported issue.
+`tools/test_touch_abilities.sh` checks all modifier combinations, ownership and
+reference-layout geometry, plus quick taps and cancellation with a deterministic
+clock. Modifier/button delivery uses separate 1/30-second phases: virtual-controller
+callbacks read the live profile, so setter order within a single turn is insufficient.
+`tools/test_touch_gamepad_ui.sh --self-test-input` checks all three edit modes and
+the 32 tap-on-lift/quick-tap callback sequences through an actual iOS virtual controller in our
+synthetic fixture; `--self-test` covers controller lifecycle. Gameplay validation
+still requires the signed app on a physical device.
 
-### Visible draft and tracking-mode follow-up (2026-10-07)
+`tools/test_direct_touch_camera.sh` (also part of `test_translation_sim.sh`) checks
+cursor capture/warps, unchanged polled position on touch-down/restart, delta continuity
+at different touch positions and viewport sizes, tap intent, circle drag handoff,
+cancellation, finger ownership, trackpad movement and
+indirect pointer clicks. Its events are synthetic; it does not run a game.
 
-In addition to replacing per-key document resets with explicit draft insertion,
-the main-thread pump gives UIKit's tracking mode a nonblocking turn, at most
-120 times per second, **only while the native keyboard/editor or control settings
-are open**. It still services the default mode every turn and keeps the existing
-event mask/order/peek behavior. Normal gameplay with these panels closed retains
-the preceding pump path. No system gesture is synthesized and no private UIKit
-API is used.
+## Stick clicks
 
-A focused synthetic test schedules tracking-mode and default-mode work inside
-the timer-entered desktop loop. Before this change only default-mode work ran;
-after it both complete with the keyboard or settings open. This demonstrates the
-missing mode service, **not that it explains every real-device stall**. Apple
-documents [UITrackingRunLoopMode](https://developer.apple.com/documentation/uikit/uitrackingrunloopmode)
-as the mode used for tracking controls and describes mode-specific execution in
-[CFRunLoopRunInMode](https://developer.apple.com/documentation/corefoundation/cfrunloopruninmode(_:_:_:)).
+While the virtual controller is active, double-tap the left stick for L3 or the
+right stick for R3. Bare game content in the lower-right safe-area quadrant also
+accepts R3, including in Simple mode. Controls and ability circles keep their own
+touch behavior; settings/editing, keyboard visibility and physical controllers
+disable these gestures. A drag defeats tap recognition at the camera threshold.
+A background single tap waits briefly to distinguish it from the R3 double tap.
 
-Current checks use only original fixtures, with no game or accounts:
-- `tools/test_touch_controls_ui.sh --self-test --guest-poll-loop --queued-traffic`:
-  draft editing/selection/deletion, 64 repeated edits, explicit insertion without
-  duplicate text, Unicode, marked composition, synthetic dictation, cancellation,
-  control-character filtering, separate Return, focus and fixed toolbar geometry.
-- `tools/test_touch_controls_ui.sh --self-test --tracking-progress-test`:
-  default and tracking-mode progress with both native surfaces.
-- `tools/test_touch_controls_ui.sh --self-test --ui-progress-test`: ordinary
-  animation/timer/main-queue progress across empty/occupied queues and peeking.
-
-- Required `tools/test_emulation.sh` (ASan/UBSan) and
-  `tools/test_translation_sim.sh`: passed.
-- Signed arm64 iOS Debug build and strict/deep signature verification: passed.
-- Manual simulator keyboard taps, deletion and Insert produced exactly `hola`
-  in the original input fixture. Drags changed all three sliders without a
-  system-edge gesture. The draft/toolbar and non-overlapping settings layout
-  were inspected visually. No speech was recorded or game run.
-
-Physical typing, dictation, sliders and game frame-rate must be checked again
-before marking the user's stall resolved. The build is prepared for Xcode;
-this work does not install it or interrupt the user's game.
-
-## Validation
-
-On 2026-10-02, the following checks passed:
-
-- The synthetic trackpad and text tests on the Mac with `-Wall -Wextra
-  -Werror`, ASan and UBSan: motion, click buttons, slow/negative scrolling,
-  finger transitions, long holds, interruption, malformed traces, ANSI key
-  mapping, composed Unicode and newline normalization.
-- `SIMULATOR='iPhone 17 Pro' bash tools/test_translation_sim.sh` on iOS 26.5:
-  UIKit/AppKit event delivery, cursor bounds, captured deltas without a mouse,
-  wheel values, three buttons, double click and software keyboard events.
-- `bash tools/test_touch_controls_ui.sh --self-test`: our original fixture
-  opened the system keyboard, checked visible keyboard/controls geometry,
-  delivered text and backspace, closed it and restored hardware-key focus.
-  The keyboard-open and keyboard-closed layouts were also inspected visually.
-- The signed arm64 device build succeeded with Xcode 26.6 / iOS 26.5 SDK.
-
-The device build used the existing locally signed project:
-
-```bash
-xcodebuild -project Tolkara.xcodeproj -scheme Tolkara \
-  -configuration Debug -sdk iphoneos -destination 'generic/platform=iOS' \
-  -derivedDataPath build/iphone-touch-signed ARCHS=arm64 \
-  TOLKARA_SYSTEM_ROOTS=YES build
-```
-
-`tools/test_emulation.sh` was rerun and still fails at
-`tests.test_sign_guest_local.AdhocTests.test_matches_codesign_byte_for_byte`
-with `differs from codesign -s - for sgl-fixture.dylib`. This failure was
-previously reproduced on unchanged upstream `199da9e`; the full suite is not
-green. The commands after that failure were run separately and passed.
-
-To inspect or interact with the original fixture, run
-`bash tools/test_touch_controls_ui.sh` (set `SIMULATOR` to choose a device).
-It builds and launches only the test screen, never an imported application.
-`--show-keyboard` opens its keyboard for visual inspection; `--self-test`
-exits after the assertions. Synthetic tests are also registered in the
-standard emulation and translation test scripts.
-
-On 2026-10-02 the user confirmed that the new keyboard and trackpad controls
-work correctly in WoW Forever on the iPhone 16 Pro Max / iOS 27.0 setup. This
-is a manual usability report in addition to the synthetic and simulator
-checks above. Other devices, physical iPad input, other applications and rich
-text composition remain unverified. The earlier two-hour gameplay and 60 FPS
-report used the Bluetooth-keyboard/AssistiveTouch setup; it is not a new
-performance measurement of these controls.
+`TouchStickButtons` supplements missing buttons on our registered virtual
+controller using Apple's public writable snapshots. It extends only the owned
+profiles; physical controllers and unrelated snapshots are forwarded unchanged.
+The input fixture covers discovery, polling, button/profile notifications,
+captures and balanced press/release. Run `tools/test_touch_gamepad_ui.sh
+--self-test-input --unregistered-controller-test` for the separate isolation
+check (iOS permits only one active native virtual controller).

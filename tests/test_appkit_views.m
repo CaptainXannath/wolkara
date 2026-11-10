@@ -79,6 +79,25 @@
 - (void)keyUp:(NSEvent *)event { self.ups++;self.lastCode=event.keyCode; }
 @end
 
+// A text client whose physical-key handler ignores unknown virtual keys.
+// Committed Unicode must reach text input rather than depend on keyCode 255.
+@interface FixtureTextResponder : FixtureKeyResponder
+@property NSMutableString *text;
+@property unsigned commits, returns;
+@end
+@implementation FixtureTextResponder
+- (instancetype)init { if ((self=[super init])) _text=[NSMutableString new]; return self; }
+- (void)keyDown:(NSEvent *)event {
+    [super keyDown:event];
+    if (event.keyCode == 36) { self.returns++; return; }
+    if (event.keyCode < 128) [self.text appendString:event.characters ?: @""];
+}
+- (void)insertText:(id)text replacementRange:(NSRange)range {
+    assert(range.location == NSNotFound && range.length == 0);
+    [self.text appendString:text]; self.commits++;
+}
+@end
+
 static void run_main_queue(void) { CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.05, false); }
 static NSEvent *next_input(void) {
     NSEvent *event = [NSApp nextEventMatchingMask:UINT64_MAX untilDate:NSDate.distantPast inMode:NSDefaultRunLoopMode dequeue:YES];
@@ -197,8 +216,8 @@ int main(void) { @autoreleasepool {
     // change. The toolbar itself no longer supplies text input traits.
     UITextView *keyboard = [controls valueForKey:@"_keyboardInput"];
     assert([keyboard isKindOfClass:UITextView.class] && !keyboard.isSecureTextEntry);
-    assert(keyboard.autocorrectionType == UITextAutocorrectionTypeNo);
-    assert(keyboard.spellCheckingType == UITextSpellCheckingTypeNo);
+    assert(keyboard.autocorrectionType == UITextAutocorrectionTypeYes);
+    assert(keyboard.spellCheckingType == UITextSpellCheckingTypeYes);
     [controls insertText:@"@ñ🙂"];
     NSArray<NSString *> *typed = @[@"@", @"ñ", @"🙂"];
     for (unsigned i = 0; i < 3; i++) for (unsigned up = 0; up < 2; up++) {
@@ -236,6 +255,17 @@ int main(void) { @autoreleasepool {
     assert(next_input().keyCode == 51 && next_input().type == NSEventTypeKeyUp);
     [controls insertText:@"\n"];
     assert(next_input().keyCode == 36 && next_input().type == NSEventTypeKeyUp);
+
+    FixtureTextResponder *textClient=[FixtureTextResponder new];
+    [window makeFirstResponder:textClient];
+    NSString *accented=@"está, canción, mañana; ÁÉÍÓÚü e\u0301 🙂";
+    [controls insertText:accented];
+    [controls insertText:@"\n"];
+    NSEvent *textEvent;
+    while ((textEvent=[app nextEventMatchingMask:UINT64_MAX untilDate:NSDate.distantPast
+                                         inMode:NSDefaultRunLoopMode dequeue:YES])) [app sendEvent:textEvent];
+    assert([textClient.text isEqual:accented] && textClient.commits > 0 && textClient.returns == 1);
+    [window makeFirstResponder:responder];
 
     UIView *hostView = host;
     hostView.frame = CGRectMake(0, 0, 200, 100);

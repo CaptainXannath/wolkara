@@ -130,6 +130,8 @@ build/emulation/test_local_arena_poller
 build/emulation/test_guest_wait
 "${CC[@]}" runtime/GuestWait.c tests/test_guest_wait_runloop.c -framework CoreFoundation -o build/emulation/test_guest_wait_runloop
 build/emulation/test_guest_wait_runloop
+"${CC[@]}" runtime/GuestWait.c tests/test_startup_sleep.c -o build/emulation/test_startup_sleep
+build/emulation/test_startup_sleep
 "${CC[@]}" runtime/GuestMemory.c runtime/GuestImage.c runtime/GuestLink.c tests/test_link.c -o build/emulation/test_link
 build/emulation/test_link
 "${CC[@]}" runtime/GuestPaths.c tests/test_paths.c -o build/emulation/test_paths

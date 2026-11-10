@@ -9,9 +9,14 @@ experiment remains separate, and the inherited keyboard correction is retained.
 
 When the guest window is active and no physical gamepad is connected, a translucent
 controller appears automatically. Connecting a physical gamepad removes it;
-disconnecting the physical pad restores it. Controller mode is always active;
-the former gamepad and pointer toggles are removed. The toolbar stays at the top center
-in every state, including with a physical pad connected or the keyboard open.
+disconnecting the physical pad restores it if enabled. Tap the toolbar controller
+button to switch Full/Simple; hold to enable or disable it. Simple keeps the left
+stick without arrows, LB/RB and the menu, hides the right stick and both button
+rings, and hides LT/RT. LB/RB have separate saved positions in Simple and Full.
+Configured ability circles remain active. Mode changes
+release pending input without reconnecting the controller or changing saved
+positions. The toolbar remains reachable in every state, including with a physical
+pad connected or the keyboard open; its buttons can be moved in Edit layout.
 
 - LB then LT at the upper left; RT then RB at the upper right (left-to-right).
   Triggers are innermost by default; their order can be changed in settings.

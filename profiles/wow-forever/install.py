@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Copy your own installed WoW Forever (Classic beta) files into the Tolkara app's Documents.
+"""Copy your own installed WoW Forever files into the Tolkara app's Documents.
 
 The executable and bundle resources are copied unchanged. Account settings and
 credentials are not copied. devicectl skips unchanged files on subsequent runs.
@@ -34,13 +34,13 @@ def main():
     os.chdir(localenv.ROOT)
     os.environ.setdefault('DEVELOPER_DIR','/Applications/Xcode.app/Contents/Developer')
     source=args.source.resolve(); stage=Path('build/game-data/World of Warcraft')
-    app=Path('_classic_beta_/World of Warcraft Beta.app/Contents')
+    app=Path('_forever_/World of Warcraft.app/Contents')
     executable=app/'MacOS/World of Warcraft'
-    if not (source/executable).is_file(): parser.error('original Classic beta executable not found')
+    if not (source/executable).is_file(): parser.error('original Forever executable not found')
     if not args.skip_data and not (source/'Data').is_dir(): parser.error('game Data directory not found')
     (stage/app/'MacOS').mkdir(parents=True,exist_ok=True)
     for name in ['.build.info','.flavor.info']:
-        for parent in [Path('.'),Path('_classic_beta_')]:
+        for parent in [Path('.'),Path('_forever_')]:
             item=source/parent/name
             if item.is_file():
                 (stage/parent).mkdir(parents=True,exist_ok=True); shutil.copy2(item,stage/parent/name)
@@ -50,19 +50,19 @@ def main():
     shutil.copy2(source/executable,stage/executable)
     if sha256(stage/executable)!=before or sha256(source/executable)!=before:
         raise RuntimeError('original executable changed while staging')
-    # Files beside the executable, unchanged: the Classic beta keeps its ICU
+    # Files beside the executable, unchanged: the client keeps its ICU
     # data there (icudt78l.dat) and reports an error at every start without it.
     for item in sorted((source/executable).parent.iterdir()):
         if item.is_file() and item.name!=executable.name: shutil.copy2(item,stage/executable.parent/item.name)
-    for name in ['Logs','WTF','Cache']: (stage/'_classic_beta_'/name).mkdir(exist_ok=True)
-    configuration=source/'_classic_beta_/WTF/Config.wtf'
+    for name in ['Logs','WTF','Cache']: (stage/'_forever_'/name).mkdir(exist_ok=True)
+    configuration=source/'_forever_/WTF/Config.wtf'
     if configuration.is_file():
         allowed={'portal','textLocale','audioLocale'}
         lines=[]
         for line in configuration.read_text(errors='replace').splitlines():
             match=re.fullmatch(r'SET (\w+) "([A-Za-z0-9_-]+)"',line)
             if match and match[1] in allowed: lines.append(line)
-        if lines: (stage/'_classic_beta_/WTF/Config.wtf').write_text('\n'.join(lines)+'\n')
+        if lines: (stage/'_forever_/WTF/Config.wtf').write_text('\n'.join(lines)+'\n')
     def transfer(path,destination):
         subprocess.run(['xcrun','devicectl','device','copy','to','--device',args.device,
             '--domain-type','appDataContainer','--domain-identifier',BUNDLE_ID,
