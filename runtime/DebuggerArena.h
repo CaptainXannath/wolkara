@@ -10,6 +10,11 @@
 bool da_debugger_present(void);
 // An unserviced request leaves the breakpoint encoding, not a null.
 bool da_plausible_region(const void *address);
+// Before image placement, sample the first and last page markers of a grant
+// extending beyond 2^36. Missing markers indicate an unprepared grant.
+// Invalid bounds return false and are rejected separately by adoption.
+// These two samples do not prove every page was prepared.
+bool da_region_unprepared(const void *region, size_t size);
 // Request one arena and adopt it, with its writable alias.
 bool da_request_arena(NativeCodeMemory *memory, size_t size, FILE *log);
 // Adopt a region the enabler granted, or give it back.

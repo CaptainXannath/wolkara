@@ -46,6 +46,22 @@ jobs:
       - name: Install XcodeGen
         run: brew install xcodegen
 
+      - name: Start the test simulator while compiling
+        timeout-minutes: 5
+        run: |
+          python3 - <<'PY'
+          import json, subprocess
+          state = json.loads(subprocess.check_output(["xcrun", "simctl", "list", "devices", "available", "-j"]))
+          devices = [device for group in state["devices"].values() for device in group if device["name"] == "iPhone 17 Pro"]
+          devices.sort(key=lambda device: device["state"] != "Booted")
+          if not devices:
+              raise SystemExit("No iPhone 17 Pro simulator is available")
+          device = devices[0]
+          print("Starting test simulator:", device["udid"], flush=True)
+          if device["state"] == "Shutdown":
+              subprocess.run(["xcrun", "simctl", "boot", device["udid"]], check=True)
+          PY
+
       - name: Run launcher regression tests
         run: |
           set -euo pipefail
