@@ -10,7 +10,7 @@ permissions:
 jobs:
   build:
     name: Build JavierLasso StikDebug IPA
-    runs-on: macos-26-arm64
+    runs-on: macos-26
 
     steps:
       - name: Checkout JavierLasso-Version
