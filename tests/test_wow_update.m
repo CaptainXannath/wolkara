@@ -1,6 +1,7 @@
 #import <Foundation/Foundation.h>
 #import "../launcher/WoW/Updater.h"
 #import "../launcher/WoW/CASC.h"
+#import "../launcher/WoW/UpdateLock.h"
 #include <assert.h>
 #include <unistd.h>
 static NSData *Text(NSString *s){return [s dataUsingEncoding:NSUTF8StringEncoding];}
@@ -102,6 +103,65 @@ static void TestStorage(void) {
     assert([error.localizedDescription containsString:@"requirement is too large"]);
 }
 
+static void TestBuildInfoRepair(TKUpdateClient *client,NSDictionary *plan) {
+    NSFileManager *fm=NSFileManager.defaultManager;
+    NSString *base=[[NSTemporaryDirectory() stringByAppendingPathComponent:NSUUID.UUID.UUIDString] stringByResolvingSymlinksInPath];
+    NSString *root=[base stringByAppendingPathComponent:@"World of Warcraft"];
+    NSString *metadata=[root stringByAppendingPathComponent:@".build.info"];
+    NSString *game=[root stringByAppendingPathComponent:@"_forever_/fixture.dat"];
+    NSError *error=nil;
+    assert([fm createDirectoryAtPath:game.stringByDeletingLastPathComponent withIntermediateDirectories:YES attributes:nil error:&error]);
+    NSData *gameBytes=Text(@"our unchanged game data");assert([gameBytes writeToFile:game atomically:YES]);
+    NSDictionary *gameAttributes=[fm attributesOfItemAtPath:game error:&error];
+    NSDictionary *v=plan[@"version"];
+    NSString *legacy=[NSString stringWithFormat:
+        @"Product|Active|Build Key|CDN Key|Version|Custom!STRING:0|CDN Path|CDN Hosts\nwow|1|11111111111111111111111111111111|22222222222222222222222222222222|unrelated|keep retail|tpr/wow|retail.blizzard.com\nwowf|1|%@|%@|%@|keep forever|tpr/wow|level3.ssl.blizzard.com\n",
+        v[@"BuildConfig"],v[@"CDNConfig"],v[@"VersionsName"]];
+    assert([Text(legacy) writeToFile:metadata atomically:YES]);
+    TKWoWUpdater *updater=[[TKWoWUpdater alloc] initWithClient:client];
+    NSDictionary *requests=[client.counts copy];
+    assert([updater repairBuildInfoForPlan:plan root:root error:&error] && !error);
+    NSData *repaired=[NSData dataWithContentsOfFile:metadata];
+    NSArray *rows=TKWoWTable(repaired,&error);assert(rows.count==2);
+    assert([rows[0][@"Product"] isEqual:@"wow"] && [rows[0][@"Version"] isEqual:@"unrelated"]);
+    assert([rows[0][@"Build Key"] isEqual:@"11111111111111111111111111111111"]);
+    assert([rows[0][@"CDN Key"] isEqual:@"22222222222222222222222222222222"]);
+    assert([rows[0][@"CDN Hosts"] isEqual:@"retail.blizzard.com"] && [rows[0][@"CDN Servers"] isEqual:@""]);
+    assert([rows[0][@"Custom"] isEqual:@"keep retail"] && [rows[1][@"Custom"] isEqual:@"keep forever"]);
+    assert([rows[1][@"CDN Hosts"] isEqual:plan[@"cdnHosts"]] && [rows[1][@"CDN Servers"] isEqual:plan[@"cdnServers"]]);
+    assert([[NSData dataWithContentsOfFile:game] isEqual:gameBytes]);
+    assert([[fm attributesOfItemAtPath:game error:&error][NSFileModificationDate] isEqual:gameAttributes[NSFileModificationDate]]);
+    assert([client.counts isEqual:requests]);
+    // Repeat requests are idempotent and retain an existing custom header.
+    assert([updater repairBuildInfoForPlan:plan root:root error:&error]);
+    assert([[NSData dataWithContentsOfFile:metadata] isEqual:repaired]);
+    for(NSString *key in @[@"BuildConfig",@"CDNConfig",@"VersionsName"]) {
+        NSMutableDictionary *stalePlan=[plan mutableCopy], *staleVersion=[v mutableCopy];
+        staleVersion[key]=[key isEqual:@"VersionsName"]?@"different":@"33333333333333333333333333333333";
+        stalePlan[@"version"]=staleVersion;error=nil;
+        assert(![updater repairBuildInfoForPlan:stalePlan root:root error:&error]);
+        assert([error.localizedDescription containsString:@"installed build changed"]);
+        assert([[NSData dataWithContentsOfFile:metadata] isEqual:repaired]);
+    }
+    int lock=TKWoWAcquireUpdateLock(root,&error);assert(lock>=0);error=nil;
+    assert(![updater repairBuildInfoForPlan:plan root:root error:&error] && error);
+    TKWoWReleaseUpdateLock(lock);
+    assert([[NSData dataWithContentsOfFile:metadata] isEqual:repaired]);
+    NSMutableDictionary *invalidPlan=[plan mutableCopy];invalidPlan[@"cdnServers"]=@"invalid|column";error=nil;
+    assert(![updater repairBuildInfoForPlan:invalidPlan root:root error:&error] && error);
+    assert([[NSData dataWithContentsOfFile:metadata] isEqual:repaired]);
+    error=nil;assert(![updater repairBuildInfoForPlan:plan root:@"relative/path" error:&error] && error);
+    NSString *link=[base stringByAppendingPathComponent:@"linked-installation"];
+    assert([fm createSymbolicLinkAtPath:link withDestinationPath:root error:&error]);
+    error=nil;assert(![updater repairBuildInfoForPlan:plan root:link error:&error] && error);
+    assert([[NSData dataWithContentsOfFile:metadata] isEqual:repaired]);
+    assert([fm removeItemAtPath:metadata error:&error]);
+    error=nil;assert(![updater repairBuildInfoForPlan:plan root:root error:&error] && error);
+    assert(![fm fileExistsAtPath:metadata]);
+    assert([[NSData dataWithContentsOfFile:game] isEqual:gameBytes]);
+    assert([fm removeItemAtPath:base error:&error]);
+}
+
 int main(void){@autoreleasepool{
     TestStorage();
     TKUpdateClient *client=[TKUpdateClient new];NSData *old=Text(@"old code"),*original=Text(@"our own new code"),*raw=Wrap(original);
@@ -119,8 +179,11 @@ int main(void){@autoreleasepool{
     client.responses[[archiveKey stringByAppendingString:@".index"]]=Index(raw);
     NSData *cdnData=Text([NSString stringWithFormat:@"archives = %@\n",archiveKey]);NSString *cdn=TKWoWMD5(cdnData);client.responses[cdn]=cdnData;
     client.responses[@"versions"]=Text([NSString stringWithFormat:@"Region|BuildConfig|CDNConfig|VersionsName\neu|%@|%@|synthetic-2\n",build,cdn]);
-    client.responses[@"cdns"]=Text(@"Name|Path|Servers\neu|tpr/wow|https://level3.ssl.blizzard.com\n");
+    client.responses[@"cdns"]=Text(@"Name|Path|Hosts|Servers\neu|tpr/wow|level3.blizzard.com level3.ssl.blizzard.com|http://level3.blizzard.com/?maxhosts=8 https://level3.ssl.blizzard.com/?maxhosts=4&fallback=1\n");
     NSError *error=nil;NSDictionary *plan=[client planForProduct:@"wowf" region:@"eu" locale:@"enUS" error:&error];assert(plan);
+    assert([plan[@"cdnHosts"] isEqual:@"level3.blizzard.com level3.ssl.blizzard.com"]);
+    assert([plan[@"cdnServers"] isEqual:@"http://level3.blizzard.com/?maxhosts=8 https://level3.ssl.blizzard.com/?maxhosts=4&fallback=1"]);
+    TestBuildInfoRepair(client,plan);
     NSString *base=[NSTemporaryDirectory() stringByAppendingPathComponent:NSUUID.UUID.UUIDString],*root=[base stringByAppendingPathComponent:@"World of Warcraft"];
     NSFileManager *fm=NSFileManager.defaultManager;
     NSString *exe=[root stringByAppendingPathComponent:@"_forever_/Synthetic.app/Contents/MacOS/Synthetic"];
@@ -165,6 +228,7 @@ int main(void){@autoreleasepool{
     assert([[NSData dataWithContentsOfFile:exe] isEqual:original]);assert([[NSData dataWithContentsOfFile:addon] isEqual:Text(@"keep me")]);assert([[NSData dataWithContentsOfFile:settings] isEqual:Text(@"settings edited while paused")]);
     assert(!resume.counts[TKWoWMD5(asset)] && !resume.counts[TKWoWMD5(present)]);assert([resume.counts[@"range"] unsignedIntegerValue]==1);
     NSArray *rows=TKWoWTable([NSData dataWithContentsOfFile:[root stringByAppendingPathComponent:@".build.info"]],&error);assert(TKWoWBuildCurrent(rows,@"wowf",plan[@"version"]));
+    assert([rows[0][@"CDN Hosts"] isEqual:plan[@"cdnHosts"]] && [rows[0][@"CDN Servers"] isEqual:plan[@"cdnServers"]]);
     source=[[TKWoWCASCStore alloc] initWithDirectory:[root stringByAppendingPathComponent:@"Data/data"] error:&error];assert(source);assert([[source readKey:TKWoWMD5(asset) size:asset.length] isEqual:asset]);assert([[source readKey:TKWoWMD5(present) size:present.length] isEqual:present]);source=nil;
     // A new transaction clones the prior receipts and reads no unchanged CASC
     // payload, while still validating metadata and the original loose file.
@@ -274,6 +338,8 @@ int main(void){@autoreleasepool{
     fresh.importantCapacity=@115000000000ULL;fresh.freeCapacity=@0;
     result=[fresh updatePlan:plan root:freshRoot progress:^(NSString *phase,uint64_t done,uint64_t total){(void)phase;(void)done;(void)total;} error:&error];
     if(!result)fprintf(stderr,"Fresh install: %s\n",error.localizedDescription.UTF8String);assert(result);
+    NSArray *freshRows=TKWoWTable([NSData dataWithContentsOfFile:[freshRoot stringByAppendingPathComponent:@".build.info"]],&error);
+    assert([freshRows[0][@"CDN Hosts"] isEqual:plan[@"cdnHosts"]] && [freshRows[0][@"CDN Servers"] isEqual:plan[@"cdnServers"]]);
     NSString *freshConfig=[NSString stringWithContentsOfFile:[freshRoot stringByAppendingPathComponent:@"_forever_/WTF/Config.wtf"] encoding:NSUTF8StringEncoding error:&error];
     assert([freshConfig containsString:@"SET portal \"EU\""] && [freshConfig containsString:@"SET textLocale \"enUS\""]);
     // Reject oversized local metadata before cloning or allocating its contents.

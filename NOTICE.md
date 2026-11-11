@@ -110,6 +110,8 @@ Klockenkemper (jklock) and the WolkaraForever contributors. The public baseline
 is `0bacb997c148b08cc833ec44149b3d93070d8425`, with subsequent native-input changes
 developed in this collaboration. Their MIT copyright and permission notice are
 preserved in [WolkaraForever-LICENSE](WolkaraForever-LICENSE), shipped in the app.
+The CDN metadata repair and its regression coverage are adapted from
+[WolkaraForever pull request 24](https://github.com/jklock/wolkaraforever/pull/24).
 Original Tolkara and other third-party notices remain applicable.
 
 ZIPFoundation, used for addon archives and settings backups, is pinned to
