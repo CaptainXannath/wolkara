@@ -98,6 +98,7 @@ static void TestAddonBrowserPolicy(void) {
 @property(nonatomic) TKWoWViewController *controller;
 @property(nonatomic) NSUInteger launches, setups;
 @property(nonatomic) CGFloat activityPosition;
+@property(nonatomic) NSTimeInterval metadataDeadline;
 @end
 @implementation TKWoWFixtureDelegate
 - (UIButton *)primary { return (id)Find(self.controller.view,@"wow.primary"); }
@@ -128,31 +129,51 @@ static void TestAddonBrowserPolicy(void) {
     self.controller.executionMode=TKExecutionModeDeveloperService;
     self.window.rootViewController=[[UINavigationController alloc] initWithRootViewController:self.controller];
     [self.window makeKeyAndVisible];
-    if([NSProcessInfo.processInfo.arguments containsObject:@"--metadata-repair"])
-        [self performSelector:@selector(checkMetadataReady) withObject:nil afterDelay:0.9];
+    if([NSProcessInfo.processInfo.arguments containsObject:@"--metadata-repair"]) {
+        self.metadataDeadline=NSProcessInfo.processInfo.systemUptime+10;
+        [self performSelector:@selector(checkMetadataReady) withObject:nil afterDelay:0.1];
+    }
     else [self performSelector:@selector(changeSelection) withObject:nil afterDelay:0.1];
 }
+- (BOOL)awaitMetadataCheck:(SEL)selector {
+    BOOL pending=atomic_load(&requests)==0 || [[self.controller valueForKey:@"busy"] boolValue] ||
+        UIApplication.sharedApplication.applicationState!=UIApplicationStateActive;
+    if(pending && NSProcessInfo.processInfo.systemUptime<self.metadataDeadline) {
+        [self performSelector:selector withObject:nil afterDelay:0.1];return YES;
+    }
+    fprintf(stderr,"Metadata UI: status=%s requests=%u repairs=%u launches=%lu error=%s\n",
+        self.status.UTF8String?:"",atomic_load(&requests),atomic_load(&metadataRepairs),(unsigned long)self.launches,
+        [[self.controller valueForKey:@"error"] localizedDescription].UTF8String?:"");
+    return NO;
+}
 - (void)checkMetadataReady {
+    if([self awaitMetadataCheck:_cmd])return;
     assert([[self status] isEqual:@"Ready to play"] && atomic_load(&metadataRepairs)==1 && self.launches==0);
     NSString *info=[NSString stringWithContentsOfFile:[fixture.root stringByAppendingPathComponent:@".build.info"] encoding:NSUTF8StringEncoding error:NULL];
     assert([info containsString:@"CDN Servers!STRING:0"] && [info containsString:@"?fallback=1"]);
     [fixture writeMetadata:0 duplicate:NO];
     atomic_store(&failMetadataRepair,true);
+    self.metadataDeadline=NSProcessInfo.processInfo.systemUptime+10;
     [self.controller checkForUpdatesAndLaunch:YES];
     [self performSelector:@selector(checkMetadataFailure) withObject:nil afterDelay:0.3];
 }
 - (void)checkMetadataFailure {
+    if([self awaitMetadataCheck:_cmd])return;
     assert(self.launches==0 && atomic_load(&metadataRepairs)==2);
     assert(![[self status] isEqual:@"Ready to play"]);
+    self.metadataDeadline=NSProcessInfo.processInfo.systemUptime+10;
     [self.controller refresh];
     [self performSelector:@selector(checkMetadataRecovered) withObject:nil afterDelay:0.3];
 }
 - (void)checkMetadataRecovered {
+    if([self awaitMetadataCheck:_cmd])return;
     assert([[self status] isEqual:@"Ready to play"] && atomic_load(&metadataRepairs)==3 && self.launches==0);
+    self.metadataDeadline=NSProcessInfo.processInfo.systemUptime+10;
     [self tap];
     [self performSelector:@selector(checkMetadataLaunch) withObject:nil afterDelay:0.3];
 }
 - (void)checkMetadataLaunch {
+    if([self awaitMetadataCheck:_cmd])return;
     assert(self.launches==1 && atomic_load(&metadataRepairs)==3 && atomic_load(&updates)==0);
     assert([[NSData dataWithContentsOfFile:fixture.executable] isEqual:fixture.bytes]);
     puts("WoW UIKit PASS: legacy CDN metadata repaired before Play, failed repair blocks launch, retry launches without a content update.");fflush(stdout);_Exit(0);
