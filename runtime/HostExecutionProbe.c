@@ -16,6 +16,7 @@ void host_debugger_publish_code(void *address, size_t size) {
     __asm__ volatile("" : : "r"(address), "r"(size) : "memory");
 }
 
+#if defined(__aarch64__)
 static bool publish_sample(void *rx, size_t size, void *context) {
     FILE *log = context;
     fprintf(log, "[execution] RX view and shared alias allocated; debugger publication point\n"); fflush(log);
@@ -73,6 +74,7 @@ static int call_sample(void *code, size_t size, FILE *log, const char *stage, in
     fprintf(log, "[arena-probe] %s: returned %d\n", stage, value); fflush(log);
     return value;
 }
+#endif
 
 HPArenaResult arena_execution_probe(void *executable, void *writable, size_t size, FILE *log) {
     HPArenaResult result = {0};

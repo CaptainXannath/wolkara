@@ -12,7 +12,7 @@ print(devices[0]["udid"] if devices else "")' "$SIM")
 xcrun simctl bootstatus "$SIM_ID" -b > /dev/null
 APP=build/wow-launcher/WoWFixture.app
 mkdir -p "$APP"
-xcrun --sdk iphonesimulator clang -target arm64-apple-ios17.0-simulator -fobjc-arc -O1 -g \
+xcrun --sdk iphonesimulator clang -target "$(uname -m)-apple-ios17.0-simulator" -fobjc-arc -O1 -g \
     -Wall -Wextra -Werror -Wno-deprecated-declarations \
     launcher/WoW/*.m launcher/App/LaunchProgressView.m launcher/App/WKLocalization.m launcher/App/WolkaraForeverTheme.m launcher/App/WolkaraForeverLog.m -framework Security -framework WebKit -framework UniformTypeIdentifiers tests/test_wow_launcher_app.m -framework Foundation -framework UIKit -framework QuartzCore -framework CoreGraphics -lz \
     -o "$APP/WoWFixture"

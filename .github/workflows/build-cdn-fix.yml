@@ -23,11 +23,11 @@ concurrency:
 jobs:
   ipa:
     name: Test and build StikDebug IPA
-    # Try the older Apple Silicon image when macOS 26 capacity is unavailable.
-    runs-on: macos-15
+    # Cross-build iPhone code on Intel while Apple Silicon capacity is constrained.
+    runs-on: macos-26-intel
     timeout-minutes: 45
     env:
-      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
     defaults:
       run:
         shell: bash

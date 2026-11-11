@@ -16,7 +16,7 @@ print(devices[0]["udid"] if devices else "")' "$SIM")
     APP=build/public-roots/ios/PublicRoots.app
     mkdir -p "$APP"
     python3 tools/package_public_roots.py "$APP"
-    xcrun --sdk iphonesimulator clang -target arm64-apple-ios17.0-simulator \
+    xcrun --sdk iphonesimulator clang -target "$(uname -m)-apple-ios17.0-simulator" \
         -fobjc-arc -O1 -g -Wall -Wextra -Werror -Wno-deprecated-declarations \
         -Itranslation/Security -framework Foundation -framework Security -framework UIKit \
         translation/Security/Keychain.m tests/test_system_roots_app.m -o "$APP/PublicRoots"
