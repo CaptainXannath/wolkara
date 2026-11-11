@@ -239,6 +239,16 @@ static UIStackView *Stack(NSArray<UIView *> *views, CGFloat spacing) {
         NSError *error=nil;
         NSDictionary *plan=[client planForProduct:product[@"id"] region:region locale:locale error:&error];
         TKWoWInstallation *installation=plan?TKWoWInspectInstallation(self->_library,product,plan):nil;
+        if(!client.cancelled && installation.state==TKWoWInstallationReady && installation.metadataNeedsRepair && installation.app) {
+            NSString *directory=[self->_library workingDirectoryForApp:installation.app error:&error];
+            TKWoWUpdater *updater=[[TKWoWUpdater alloc] initWithClient:client];
+            if(directory && [updater repairBuildInfoForPlan:plan root:directory.stringByDeletingLastPathComponent error:&error]) {
+                [self->_library discover];
+                installation=TKWoWInspectInstallation(self->_library,product,plan);
+                if(installation.state!=TKWoWInstallationReady || installation.metadataNeedsRepair)
+                    error=installation.error?:TKWoWError(@"The installation metadata could not be verified after repair.");
+            } else error=error?:TKWoWError(@"Could not repair the installation metadata. Try again.");
+        }
         BOOL updateAttempted=plan && (install || installation.state==TKWoWInstallationOutdated) && !client.cancelled;
         if(updateAttempted) {
             __block NSString *lastPhase=nil;
@@ -281,7 +291,7 @@ static UIStackView *Stack(NSArray<UIView *> *views, CGFloat spacing) {
             NSLog(@"[wow-update] Verification bytes read=%llu reused=%llu",updater.verificationBytesRead,updater.verificationBytesReused);
         }
 
-        if (!error && !client.cancelled && installation.state==TKWoWInstallationReady && installation.app) {
+        if (!error && !client.cancelled && installation.state==TKWoWInstallationReady && !installation.metadataNeedsRepair && installation.app) {
             NSString *directory = [self->_library workingDirectoryForApp:installation.app error:&error];
             if (directory && !error) {
                 int lock=TKWoWAcquireUpdateLock(directory.stringByDeletingLastPathComponent,&error);
@@ -301,7 +311,7 @@ static UIStackView *Stack(NSArray<UIView *> *views, CGFloat spacing) {
             [self releaseCheckIdleTimer];
             self->_checkedAt=plan?NSDate.date:nil; self->_busy=NO; self->_updating=NO; self->_updateError=updateAttempted && error; [self render];
             // Returning from the background or changing edition invalidates this request.
-            if (launch && self->_launchWhenReady && UIApplication.sharedApplication.applicationState==UIApplicationStateActive && !error && !client.cancelled && installation.state==TKWoWInstallationReady && installation.app && !self->_sessionUsed &&
+            if (launch && self->_launchWhenReady && UIApplication.sharedApplication.applicationState==UIApplicationStateActive && !error && !client.cancelled && installation.state==TKWoWInstallationReady && !installation.metadataNeedsRepair && installation.app && !self->_sessionUsed &&
                 self.view.window && self.navigationController.topViewController==self && self.startApp) self.startApp(installation.app);
         });
     });

@@ -2,6 +2,7 @@
 #include "HostDiagnostics.h"
 #include <TargetConditionals.h>
 #include <errno.h>
+#include <mach/vm_prot.h>
 #include <stdint.h>
 #include <sys/mman.h>
 #include <unistd.h>
@@ -25,6 +26,28 @@ bool da_plausible_region(const void *address) {
     // Leftovers of an unserviced breakpoint rather than an address.
     if (value == 0x690000e0ull || value == 0xcccccccc690000e0ull) return false;
     return (value & ((uintptr_t)getpagesize() - 1)) == 0;
+}
+
+static bool region_bounds_valid(const void *region, size_t size) {
+    uintptr_t start = (uintptr_t)region;
+    size_t page = (size_t)getpagesize();
+    return start && !(start % page) && size >= page && !(size % page) &&
+           size <= NC_MAX_ARENA && size <= UINTPTR_MAX - start;
+}
+
+bool da_region_unprepared(const void *region, size_t size) {
+    if (!region_bounds_valid(region, size)) return false;
+    uintptr_t start = (uintptr_t)region;
+    // StikJIT's nine-hex-digit page-write packets truncate higher addresses.
+    // Check only an enabler-owned grant, before adopting or clearing it.
+    const uintptr_t reach = (uintptr_t)1 << 36;
+    if (start + size <= reach) return false;
+    size_t page = (size_t)getpagesize();
+    const unsigned char *first = region, *last = first + size - page;
+    if (!(hd_protection(first) & VM_PROT_READ) || !(hd_protection(last) & VM_PROT_READ)) return true;
+    // The current enabler writes 0x69. Accept other nonzero markers so corrected
+    // enablers can prepare high grants. Two samples cannot prove every page.
+    return !*first || !*last;
 }
 
 #if DA_PROTOCOL
@@ -90,14 +113,29 @@ bool da_request_arena(NativeCodeMemory *memory, size_t size, FILE *log) {
 }
 
 bool da_adopt_region(NativeCodeMemory *memory, void *region, size_t size, FILE *log) {
-    if (nc_adopt(memory, region, size)) return true;
-    int refusal = errno;
-    size_t page = (size_t)getpagesize();
+    bool valid = memory && !memory->size && !memory->executable && !memory->writable &&
+                 region_bounds_valid(region, size);
+    if (!valid) {
+        if (log) fprintf(log, "[debugger] region %p of %zu bytes refused errno=%d, not given back\n",
+                         region, size, EINVAL);
+        errno = EINVAL;
+        return false;
+    }
+    bool unprepared = da_region_unprepared(region, size);
+    if (!unprepared && nc_adopt(memory, region, size)) return true;
+    int refusal = unprepared ? EACCES : errno;
     // Give back exactly what was asked for, or nothing.
-    bool released = region && !((uintptr_t)region % page) && size && !(size % page) &&
-                    size <= NC_MAX_ARENA && !munmap(region, size);
-    if (log) fprintf(log, "[debugger] region %p of %zu bytes refused errno=%d, %s\n",
-                     region, size, refusal, released ? "given back" : "not given back");
+    bool released = !munmap(region, size);
+    if (log) {
+        if (unprepared)
+            fprintf(log, "[debugger] region %p of %zu bytes was granted but not prepared:"
+                         " it exceeds the enabler's page-write address range; %s\n",
+                    region, size, released ? "given back" : "not given back");
+        else
+            fprintf(log, "[debugger] region %p of %zu bytes refused errno=%d, %s\n",
+                    region, size, refusal, released ? "given back" : "not given back");
+    }
+    errno = refusal;
     return false;
 }
 

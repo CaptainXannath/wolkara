@@ -43,6 +43,9 @@ TKWoWInstallation *TKWoWInspectInstallation(TKAppLibrary *library, NSDictionary 
         if (!TKWoWBuildCurrent(rows,product[@"id"],plan[@"version"])) {
             result.state=TKWoWInstallationOutdated; return result;
         }
+        if (![[match[@"CDN Hosts"] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] length] ||
+            ![[match[@"CDN Servers"] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] length])
+            result.metadataNeedsRepair=YES;
         if (!TKWoWTagsContainLocale(match[@"Tags"],plan[@"locale"])) {
             result.state=TKWoWInstallationOutdated;
             result.localeNeedsUpdate=YES;

@@ -29,6 +29,32 @@ gameplay. No game was loaded or modified by the probe. Game-folder migration and
 gameplay in this Wolkara bundle remain for the user to test. The existing
 WolkaraForever installation was preserved.
 
+## External JIT on iPhone 17 Pro Max (2026-11-11)
+
+The user reports Forever 1.60.1 (70888), iOS 27.3 developer beta and StikDebug.
+CDN metadata repair and clearing the enabler's image memory allowed an earlier
+launch to reach the login screen, where it reported `BLZ51900003`. Direct
+email/password login to the Windows client was subsequently confirmed working.
+
+A later launch with the public certificate fallback installed closed before
+the login screen. Its runtime log stops at the first initializer in an arena
+based at `0x7000000000`. The earlier working log used `0x115000000` and returned
+from that initializer. No certificate-source diagnostic appears in the failed
+launch, so this result does not validate or reject the certificate repair.
+
+The allocation matches the address range affected by the enabler's
+[nine-digit page-write limit](https://github.com/StikDebug/StikJIT/issues/6).
+The runtime now checks the first and last page markers before adopting a high
+grant and returns apparently unprepared memory, allowing the existing
+size-halving reservation retry. Bounds, ownership and read protection are
+checked before sampling. The endpoint samples are a compatibility heuristic;
+they cannot prove every page was prepared. The debugger-detach requirement is
+unchanged. This adapts WolkaraForever patch 0051, credited in NOTICE.md.
+
+Physical startup with the new guard, certificate enumeration during game login,
+and successful iPhone authentication remain unverified. Synthetic host and
+simulator checks cannot establish those device results.
+
 ## External JIT prototype (2026-10-07)
 
 The isolated `WolkaraExternalJIT` target builds and installs on iPhone 16 Pro Max,

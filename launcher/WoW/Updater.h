@@ -9,5 +9,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property(nonatomic, readonly) uint64_t verificationBytesReused;
 - (BOOL)updatePlan:(NSDictionary *)plan root:(NSString *)root
     progress:(void (^)(NSString *phase, uint64_t done, uint64_t total))progress error:(NSError **)error;
+// Update only .build.info for an installed build that still matches the plan.
+- (BOOL)repairBuildInfoForPlan:(NSDictionary *)plan root:(NSString *)root error:(NSError **)error;
 @end
 NS_ASSUME_NONNULL_END

@@ -1,0 +1,146 @@
+name: Build Wolkara External JIT repair IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [fix/forever-cdn-startup]
+    paths:
+      - .github/workflows/build-cdn-fix.yml
+      - launcher/**
+      - runtime/**
+      - translation/**
+      - Mozilla-CA-LICENSE
+      - tests/**
+      - tools/**
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wolkara-cdn-repair-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ipa:
+    name: Test and build StikDebug IPA
+    # Cross-build iPhone code on Intel while Apple Silicon capacity is constrained.
+    runs-on: macos-26-intel
+    timeout-minutes: 45
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out the repair source
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Show source and toolchain
+        run: |
+          git log -1 --oneline
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Run launcher regression tests
+        run: |
+          set -euo pipefail
+          mkdir -p logs
+          bash tools/test_wow_launcher.sh 2>&1 | tee logs/wow-launcher-tests.log
+
+      - name: Test native image memory and External JIT
+        run: |
+          set -euo pipefail
+          mkdir -p build/emulation
+          CC=(xcrun clang -std=c11 -D_DARWIN_C_SOURCE -Wall -Wextra -Werror -O1 -g
+              -fsanitize=address,undefined -fno-omit-frame-pointer -Iruntime)
+          "${CC[@]}" runtime/NativeCodeMemory.c tests/test_native_memory.c -o build/emulation/test_native_memory
+          build/emulation/test_native_memory 2>&1 | tee logs/native-memory-tests.log
+          "${CC[@]}" runtime/DebuggerArena.c runtime/HostDiagnostics.c runtime/HostExecutionProbe.c runtime/NativeCodeMemory.c tests/test_debugger_arena.c -o build/emulation/test_debugger_arena
+          build/emulation/test_debugger_arena 2>&1 | tee logs/debugger-arena-tests.log
+          "${CC[@]}" tests/test_native_policy.c -o build/emulation/test_native_policy
+          build/emulation/test_native_policy 2>&1 | tee logs/native-policy-tests.log
+          bash tools/test_external_jit.sh 2>&1 | tee logs/external-jit-tests.log
+
+      - name: Test public certificate packaging and native trust
+        run: |
+          set -euo pipefail
+          bash tools/test_public_roots.sh 2>&1 | tee logs/public-roots-tests.log
+
+      - name: Build the StikDebug IPA
+        env:
+          TOLKARA_SYSTEM_ROOTS: "NO"
+        run: bash tools/package_external_jit_ipa.sh Wolkara-stikdebug-repaired.ipa
+
+      - name: Test automatic repair before Play in the simulator
+        timeout-minutes: 20
+        run: |
+          set -euo pipefail
+          bash tools/test_wow_launcher_ui.sh --metadata-repair 2>&1 | tee logs/wow-metadata-ui-tests.log
+
+      - name: Test bundled certificate fallback in iOS
+        timeout-minutes: 5
+        run: |
+          set -euo pipefail
+          bash tools/test_public_roots.sh --simulator 2>&1 | tee logs/public-roots-ios-tests.log
+
+      - name: Verify the IPA and record its checksum
+        run: |
+          set -euo pipefail
+          test -s Wolkara-stikdebug-repaired.ipa
+          unzip -tq Wolkara-stikdebug-repaired.ipa
+          unzip -l Wolkara-stikdebug-repaired.ipa | grep 'PublicRootCertificates.plist'
+          shasum -a 256 Wolkara-stikdebug-repaired.ipa > Wolkara-stikdebug-repaired.ipa.sha256
+          {
+            echo "Built source $(git rev-parse HEAD)"
+            echo
+            echo 'The IPA includes CDN repair, External JIT image initialization, and public certificate candidates filtered by native trust.'
+            echo 'Install it over Wolkara JIT with the same signing account and bundle ID to keep the existing game download.'
+            echo 'Use development signing that preserves get-task-allow, then launch through StikDebug as before.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the downloadable IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: Wolkara-StikDebug-repaired-IPA
+          path: |
+            Wolkara-stikdebug-repaired.ipa
+            Wolkara-stikdebug-repaired.ipa.sha256
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Keep validation logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Wolkara-CDN-repair-validation
+          path: logs/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  emulation:
+    name: Full emulation regression suite
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Run repository regression suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p logs
+          bash tools/test_emulation.sh 2>&1 | tee logs/emulation-tests.log
+      - name: Keep regression logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Wolkara-CDN-repair-emulation-validation
+          path: logs/
+          if-no-files-found: ignore
+          retention-days: 14
