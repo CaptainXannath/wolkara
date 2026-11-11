@@ -67,15 +67,18 @@ if [ "${NATIVE_GUEST_SHIMS:-NO}" = YES ] || [ "${NATIVE_GUEST_SHIMS:-NO}" = GENE
         cp "$W/map.json" "$OUT/Guest/libraries.json"
     fi
     # The builder's own Mac's public root certificates. TOLKARA_SYSTEM_ROOTS=NO
-    # leaves them out, as the published release build does: it is not built on
-    # the user's Mac, and nothing exported from macOS is redistributed.
-    rm -f "$OUT/CompatibilityRootCertificates.plist"
+    # selects public Mozilla candidates for release builds. The device still
+    # evaluates those candidates with its own native trust store.
+    rm -f "$OUT/CompatibilityRootCertificates.plist" "$OUT/PublicRootCertificates.plist" \
+      "$OUT/PublicRootCertificates.pem" "$OUT/PublicRootCertificates-source.txt" "$OUT/Mozilla-CA-LICENSE"
     if [ "${TOLKARA_SYSTEM_ROOTS:-YES}" != NO ]; then
         MACSDK=$(xcrun --sdk macosx --show-sdk-path)
         xcrun --sdk macosx clang -target arm64-apple-macos14.0 -isysroot "$MACSDK" \
           -fobjc-arc -Wno-deprecated-declarations -framework Foundation -framework Security \
           "$ROOT/tools/export_system_anchors.m" -o "$ROOT/build/export_system_anchors"
         "$ROOT/build/export_system_anchors" "$OUT/CompatibilityRootCertificates.plist"
+    else
+        python3 "$ROOT/tools/package_public_roots.py" "$OUT"
     fi
     for exe in "${EXES[@]}"; do
         RESOURCES="$(dirname "$(dirname "$exe")")/Resources"

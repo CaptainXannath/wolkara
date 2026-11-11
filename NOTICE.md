@@ -116,6 +116,13 @@ The External JIT image initialization repair is adapted from patch 0050 in
 [WolkaraForever pull request 37](https://github.com/jklock/wolkaraforever/pull/37).
 Original Tolkara and other third-party notices remain applicable.
 
+Public builds include Mozilla TLS CA certificate candidates from curl's
+[November 5, 2026 bundle](https://curl.se/ca/cacert-2026-11-05.pem), under the
+Mozilla Public License 2.0. The unmodified PEM source and source notice are
+packaged beside the converted plist; [Mozilla-CA-LICENSE](Mozilla-CA-LICENSE)
+is shipped with them. iOS independently evaluates the candidates using its
+native trust store before they are returned to the client.
+
 ZIPFoundation, used for addon archives and settings backups, is pinned to
 `22787ffb59de99e5dc1fbfe80b19c97a904ad48d`. Copyright (c) 2017–2025 Thomas Zoechling;
 MIT license, preserved in [ZIPFoundation-LICENSE](ZIPFoundation-LICENSE) and shipped

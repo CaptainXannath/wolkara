@@ -8,6 +8,8 @@ on:
       - .github/workflows/build-cdn-fix.yml
       - launcher/**
       - runtime/**
+      - translation/**
+      - Mozilla-CA-LICENSE
       - tests/**
       - tools/**
 
@@ -61,6 +63,11 @@ jobs:
           build/emulation/test_native_policy 2>&1 | tee logs/native-policy-tests.log
           bash tools/test_external_jit.sh 2>&1 | tee logs/external-jit-tests.log
 
+      - name: Test public certificate packaging and native trust
+        run: |
+          set -euo pipefail
+          bash tools/test_public_roots.sh 2>&1 | tee logs/public-roots-tests.log
+
       - name: Build the StikDebug IPA
         env:
           TOLKARA_SYSTEM_ROOTS: "NO"
@@ -72,16 +79,23 @@ jobs:
           set -euo pipefail
           bash tools/test_wow_launcher_ui.sh --metadata-repair 2>&1 | tee logs/wow-metadata-ui-tests.log
 
+      - name: Test bundled certificate fallback in iOS
+        timeout-minutes: 5
+        run: |
+          set -euo pipefail
+          bash tools/test_public_roots.sh --simulator 2>&1 | tee logs/public-roots-ios-tests.log
+
       - name: Verify the IPA and record its checksum
         run: |
           set -euo pipefail
           test -s Wolkara-stikdebug-repaired.ipa
           unzip -tq Wolkara-stikdebug-repaired.ipa
+          unzip -l Wolkara-stikdebug-repaired.ipa | grep 'PublicRootCertificates.plist'
           shasum -a 256 Wolkara-stikdebug-repaired.ipa > Wolkara-stikdebug-repaired.ipa.sha256
           {
             echo "Built source $(git rev-parse HEAD)"
             echo
-            echo 'The IPA includes automatic CDN metadata repair and zero-initializes image memory received from StikDebug.'
+            echo 'The IPA includes CDN repair, External JIT image initialization, and public certificate candidates filtered by native trust.'
             echo 'Install it over Wolkara JIT with the same signing account and bundle ID to keep the existing game download.'
             echo 'Use development signing that preserves get-task-allow, then launch through StikDebug as before.'
           } >> "$GITHUB_STEP_SUMMARY"

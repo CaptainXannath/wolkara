@@ -39,6 +39,9 @@ if find "$APP" -name CompatibilityRootCertificates.plist -print -quit | grep -q 
   echo "Refusing to package exported system roots" >&2
   exit 1
 fi
+for resource in PublicRootCertificates.plist PublicRootCertificates.pem PublicRootCertificates-source.txt Mozilla-CA-LICENSE; do
+  [ -s "$APP/$resource" ] || { echo "Missing public certificate resource: $resource" >&2; exit 1; }
+done
 if find "$APP" -name embedded.mobileprovision -print -quit | grep -q .; then
   echo "Refusing to package provisioning profiles" >&2
   exit 1
