@@ -1,4 +1,4 @@
-name: Build Wolkara CDN repair IPA
+name: Build Wolkara External JIT repair IPA
 
 on:
   workflow_dispatch:
@@ -7,6 +7,7 @@ on:
     paths:
       - .github/workflows/build-cdn-fix.yml
       - launcher/**
+      - runtime/**
       - tests/**
       - tools/**
 
@@ -46,10 +47,24 @@ jobs:
           mkdir -p logs
           bash tools/test_wow_launcher.sh 2>&1 | tee logs/wow-launcher-tests.log
 
+      - name: Test native image memory and External JIT
+        run: |
+          set -euo pipefail
+          mkdir -p build/emulation
+          CC=(xcrun clang -std=c11 -D_DARWIN_C_SOURCE -Wall -Wextra -Werror -O1 -g
+              -fsanitize=address,undefined -fno-omit-frame-pointer -Iruntime)
+          "${CC[@]}" runtime/NativeCodeMemory.c tests/test_native_memory.c -o build/emulation/test_native_memory
+          build/emulation/test_native_memory 2>&1 | tee logs/native-memory-tests.log
+          "${CC[@]}" runtime/DebuggerArena.c runtime/HostDiagnostics.c runtime/HostExecutionProbe.c runtime/NativeCodeMemory.c tests/test_debugger_arena.c -o build/emulation/test_debugger_arena
+          build/emulation/test_debugger_arena 2>&1 | tee logs/debugger-arena-tests.log
+          "${CC[@]}" tests/test_native_policy.c -o build/emulation/test_native_policy
+          build/emulation/test_native_policy 2>&1 | tee logs/native-policy-tests.log
+          bash tools/test_external_jit.sh 2>&1 | tee logs/external-jit-tests.log
+
       - name: Build the StikDebug IPA
         env:
           TOLKARA_SYSTEM_ROOTS: "NO"
-        run: bash tools/package_external_jit_ipa.sh Wolkara-stikdebug-cdn-repair.ipa
+        run: bash tools/package_external_jit_ipa.sh Wolkara-stikdebug-repaired.ipa
 
       - name: Test automatic repair before Play in the simulator
         timeout-minutes: 12
@@ -60,13 +75,13 @@ jobs:
       - name: Verify the IPA and record its checksum
         run: |
           set -euo pipefail
-          test -s Wolkara-stikdebug-cdn-repair.ipa
-          unzip -tq Wolkara-stikdebug-cdn-repair.ipa
-          shasum -a 256 Wolkara-stikdebug-cdn-repair.ipa > Wolkara-stikdebug-cdn-repair.ipa.sha256
+          test -s Wolkara-stikdebug-repaired.ipa
+          unzip -tq Wolkara-stikdebug-repaired.ipa
+          shasum -a 256 Wolkara-stikdebug-repaired.ipa > Wolkara-stikdebug-repaired.ipa.sha256
           {
             echo "Built source $(git rev-parse HEAD)"
             echo
-            echo 'The IPA includes the automatic CDN metadata repair before Play.'
+            echo 'The IPA includes automatic CDN metadata repair and zero-initializes image memory received from StikDebug.'
             echo 'Install it over Wolkara JIT with the same signing account and bundle ID to keep the existing game download.'
             echo 'Use development signing that preserves get-task-allow, then launch through StikDebug as before.'
           } >> "$GITHUB_STEP_SUMMARY"
@@ -74,10 +89,10 @@ jobs:
       - name: Upload the downloadable IPA
         uses: actions/upload-artifact@v4
         with:
-          name: Wolkara-StikDebug-CDN-repair-IPA
+          name: Wolkara-StikDebug-repaired-IPA
           path: |
-            Wolkara-stikdebug-cdn-repair.ipa
-            Wolkara-stikdebug-cdn-repair.ipa.sha256
+            Wolkara-stikdebug-repaired.ipa
+            Wolkara-stikdebug-repaired.ipa.sha256
           if-no-files-found: error
           retention-days: 30
 

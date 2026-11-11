@@ -112,6 +112,8 @@ developed in this collaboration. Their MIT copyright and permission notice are
 preserved in [WolkaraForever-LICENSE](WolkaraForever-LICENSE), shipped in the app.
 The CDN metadata repair and its regression coverage are adapted from
 [WolkaraForever pull request 24](https://github.com/jklock/wolkaraforever/pull/24).
+The External JIT image initialization repair is adapted from patch 0050 in
+[WolkaraForever pull request 37](https://github.com/jklock/wolkaraforever/pull/37).
 Original Tolkara and other third-party notices remain applicable.
 
 ZIPFoundation, used for addon archives and settings backups, is pinned to
