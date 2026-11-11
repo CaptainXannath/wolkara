@@ -1,0 +1,38 @@
+
+name: Build JavierLasso iPhone IPA
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build JavierLasso StikDebug IPA
+    runs-on: macos-26-arm64
+
+    steps:
+      - name: Checkout JavierLasso-Version
+        uses: actions/checkout@v5
+        with:
+          ref: JavierLasso-Version
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Build iPhone IPA
+        run: |
+          bash tools/package_external_jit_ipa.sh \
+            Wolkara-JavierLasso-StikDebug.ipa
+
+      - name: Verify IPA
+        run: |
+          unzip -tq Wolkara-JavierLasso-StikDebug.ipa
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: Wolkara-JavierLasso-StikDebug-IPA
+          path: Wolkara-JavierLasso-StikDebug.ipa
+          retention-days: 30
