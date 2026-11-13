@@ -16,7 +16,7 @@ mkdir -p "$APP"
 for lang in en de; do cp -R "launcher/App/$lang.lproj" "$APP/"; done
 if [ -n "${TOUCH_ABILITIES_REFERENCE:-}" ]; then cp "$TOUCH_ABILITIES_REFERENCE" "$APP/Reference.jpg"; fi
 SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
-xcrun --sdk iphonesimulator clang -target arm64-apple-ios17.0-simulator -isysroot "$SDK" -fobjc-arc -O1 -g \
+xcrun --sdk iphonesimulator clang -target "$(uname -m)-apple-ios17.0-simulator" -isysroot "$SDK" -fobjc-arc -O1 -g \
     -Wall -Wextra -Werror -Wno-unused-parameter -Wno-deprecated-declarations \
     translation/AppKit/TouchGamepad.m translation/AppKit/TouchStickButtons.m translation/AppKit/TouchGamepadLayout.m translation/AppKit/TouchHaptics.m translation/AppKit/TouchAction*.m translation/AppKit/AKHostLocalization.m tests/test_touch_abilities_ui.m tests/test_touch_gamepad_app.m \
     -framework Foundation -framework UIKit -framework GameController -framework CoreGraphics -framework QuartzCore -o "$APP/TouchGamepadFixture"

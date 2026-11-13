@@ -137,6 +137,19 @@ __attribute__((visibility("default"))) double AKMetalLastDrawableWaitMs(void) {
 static atomic_bool s_recordFrames = false;
 static atomic_uint s_statisticsGeneration;
 static id<MTLDevice> s_statisticsDevice;
+// Sample an already-observed native device, even when the frame HUD is off.
+// Reading these aggregate counters never discovers a GPU or installs hooks.
+__attribute__((visibility("default"))) bool AKMetalDeviceMemory(uint64_t *allocated, uint64_t *recommended) {
+    if (allocated) *allocated=0;
+    if (recommended) *recommended=0;
+    id<MTLDevice> device;
+    @synchronized(CAMetalLayer.class) { device=s_statisticsDevice; }
+    if (!device || ![device respondsToSelector:@selector(currentAllocatedSize)] ||
+        ![device respondsToSelector:@selector(recommendedMaxWorkingSetSize)]) return false;
+    if (allocated) *allocated=(uint64_t)device.currentAllocatedSize;
+    if (recommended) *recommended=device.recommendedMaxWorkingSetSize;
+    return true;
+}
 void AKInstallMetalPresentationDiagnostics(id<MTLDevice> device);
 __attribute__((visibility("default"))) void AKEnableMetalFrameStatistics(void) {
     if (atomic_exchange(&s_recordFrames, true)) return;

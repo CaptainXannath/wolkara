@@ -60,6 +60,8 @@ jobs:
               -fsanitize=address,undefined -fno-omit-frame-pointer -Iruntime)
           "${CC[@]}" runtime/NativeCodeMemory.c tests/test_native_memory.c -o build/emulation/test_native_memory
           build/emulation/test_native_memory 2>&1 | tee logs/native-memory-tests.log
+          "${CC[@]}" tests/test_native_memory_trim.c -o build/emulation/test_native_memory_trim
+          build/emulation/test_native_memory_trim 2>&1 | tee logs/native-memory-trim-tests.log
           "${CC[@]}" runtime/DebuggerArena.c runtime/HostDiagnostics.c runtime/HostExecutionProbe.c runtime/NativeCodeMemory.c tests/test_debugger_arena.c -o build/emulation/test_debugger_arena
           build/emulation/test_debugger_arena 2>&1 | tee logs/debugger-arena-tests.log
           "${CC[@]}" tests/test_native_policy.c -o build/emulation/test_native_policy
@@ -74,7 +76,7 @@ jobs:
       - name: Build the StikDebug IPA
         env:
           TOLKARA_SYSTEM_ROOTS: "NO"
-        run: bash tools/package_external_jit_ipa.sh Wolkara-stikdebug-repaired.ipa
+        run: bash tools/package_external_jit_ipa.sh Wolkara-stikdebug-memory-repair.ipa
 
       - name: Test automatic repair before Play in the simulator
         timeout-minutes: 20
@@ -88,17 +90,35 @@ jobs:
           set -euo pipefail
           bash tools/test_public_roots.sh --simulator 2>&1 | tee logs/public-roots-ios-tests.log
 
+      - name: Test Metal ownership and memory diagnostics
+        timeout-minutes: 8
+        run: |
+          set -euo pipefail
+          bash tools/test_metal_library_lifetime.sh 2>&1 | tee logs/metal-memory-tests.log
+
+      - name: Test touch-controller cancellation
+        timeout-minutes: 8
+        run: |
+          set -euo pipefail
+          bash tools/test_touch_gamepad_ui.sh --self-test 2>&1 | tee logs/touch-gamepad-tests.log
+
+      - name: Test late native Metal memory metrics
+        timeout-minutes: 10
+        run: |
+          set -euo pipefail
+          bash tools/test_touch_controls_ui.sh --self-test --performance-test 2>&1 | tee logs/late-metal-memory-tests.log
+
       - name: Verify the IPA and record its checksum
         run: |
           set -euo pipefail
-          test -s Wolkara-stikdebug-repaired.ipa
-          unzip -tq Wolkara-stikdebug-repaired.ipa
-          unzip -l Wolkara-stikdebug-repaired.ipa | grep 'PublicRootCertificates.plist'
-          shasum -a 256 Wolkara-stikdebug-repaired.ipa > Wolkara-stikdebug-repaired.ipa.sha256
+          test -s Wolkara-stikdebug-memory-repair.ipa
+          unzip -tq Wolkara-stikdebug-memory-repair.ipa
+          unzip -l Wolkara-stikdebug-memory-repair.ipa | grep 'PublicRootCertificates.plist'
+          shasum -a 256 Wolkara-stikdebug-memory-repair.ipa > Wolkara-stikdebug-memory-repair.ipa.sha256
           {
             echo "Built source $(git rev-parse HEAD)"
             echo
-            echo 'The IPA includes CDN repair, External JIT image initialization, and public certificate candidates filtered by native trust.'
+            echo 'The IPA includes the startup/login repairs, unused JIT-tail cleanup, idempotent touch cancellation, and aggregate memory diagnostics.'
             echo 'Install it over Wolkara JIT with the same signing account and bundle ID to keep the existing game download.'
             echo 'Use development signing that preserves get-task-allow, then launch through StikDebug as before.'
           } >> "$GITHUB_STEP_SUMMARY"
@@ -106,10 +126,10 @@ jobs:
       - name: Upload the downloadable IPA
         uses: actions/upload-artifact@v4
         with:
-          name: Wolkara-StikDebug-repaired-IPA
+          name: Wolkara-StikDebug-memory-repair-IPA
           path: |
-            Wolkara-stikdebug-repaired.ipa
-            Wolkara-stikdebug-repaired.ipa.sha256
+            Wolkara-stikdebug-memory-repair.ipa
+            Wolkara-stikdebug-memory-repair.ipa.sha256
           if-no-files-found: error
           retention-days: 30
 

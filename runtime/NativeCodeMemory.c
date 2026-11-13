@@ -33,23 +33,36 @@ size_t nc_arena_limit(void) {
 }
 
 void nc_destroy(NativeCodeMemory *memory) {
-    if (memory->quarantined) return;
-    if (memory->writable) vm_deallocate(mach_task_self(), (vm_address_t)memory->writable, memory->size);
-    if (memory->executable) munmap(memory->executable, memory->size);
-    *memory = (NativeCodeMemory){0};
+    if (!memory || memory->quarantined) return;
+    int saved = errno;
+    memory->published = false;
+    if (memory->writable && memory->writable != memory->executable && memory->writable_size &&
+        vm_deallocate(mach_task_self(), (vm_address_t)memory->writable, memory->writable_size) == KERN_SUCCESS) {
+        memory->writable = NULL; memory->writable_size = 0;
+    }
+    if (memory->executable && memory->executable_size && !munmap(memory->executable, memory->executable_size)) {
+        if (memory->writable == memory->executable) {
+            memory->writable = NULL; memory->writable_size = 0;
+        }
+        memory->executable = NULL; memory->executable_size = 0;
+    }
+    if (!memory->executable && !memory->writable) *memory = (NativeCodeMemory){0};
+    errno = saved;
 }
 bool nc_create_managed(NativeCodeMemory *memory, size_t size, NCPrepare prepare,
                        void *context, NativeCodeMemory *quarantine) {
     size_t page = (size_t)getpagesize();
     if (!memory || !quarantine || memory == quarantine ||
-        memory->size || memory->executable || memory->writable ||
-        quarantine->size || quarantine->executable || quarantine->writable || !size ||
+        memory->size || memory->executable || memory->writable || memory->executable_size || memory->writable_size ||
+        quarantine->size || quarantine->executable || quarantine->writable ||
+        quarantine->executable_size || quarantine->writable_size || !size ||
         size % page || size > NC_MAX_ARENA || !prepare) {
         errno = EINVAL; return false;
     }
     NativeCodeMemory staged = {.size = size};
     staged.executable = mmap(NULL, size, PROT_READ | PROT_EXEC, MAP_PRIVATE | MAP_ANON, -1, 0);
     if (staged.executable == MAP_FAILED) return false;
+    staged.executable_size = size;
     vm_address_t alias = 0;
     vm_prot_t current = 0, maximum = 0;
     kern_return_t result = vm_remap(mach_task_self(), &alias, size, 0, VM_FLAGS_ANYWHERE,
@@ -59,6 +72,7 @@ bool nc_create_managed(NativeCodeMemory *memory, size_t size, NCPrepare prepare,
         nc_destroy(&staged); errno = result == KERN_NO_SPACE ? ENOMEM : EACCES; return false;
     }
     staged.writable = (void *)alias;
+    staged.writable_size = size;
     NCPreparation outcome = prepare(staged.executable, size, context);
     if (outcome != NC_PREPARED && outcome != NC_REJECTED) {
         staged.quarantined = true; *quarantine = staged;
@@ -76,7 +90,8 @@ bool nc_create_managed(NativeCodeMemory *memory, size_t size, NCPrepare prepare,
 bool nc_adopt(NativeCodeMemory *memory, void *executable, size_t size) {
     size_t page = (size_t)getpagesize();
     // The caller sized the request; the ceiling still applies.
-    if (!memory || memory->size || memory->executable || memory->writable || !executable ||
+    if (!memory || memory->size || memory->executable || memory->writable ||
+        memory->executable_size || memory->writable_size || !executable ||
         !size || size % page || size > NC_MAX_ARENA || (uintptr_t)executable % page) {
         errno = EINVAL; return false;
     }
@@ -90,7 +105,7 @@ bool nc_adopt(NativeCodeMemory *memory, void *executable, size_t size) {
         int saved = errno; vm_deallocate(mach_task_self(), alias, size); errno = saved; return false;
     }
     *memory = (NativeCodeMemory){.executable = executable, .writable = (void *)alias,
-                                 .size = size, .published = true};
+                                 .size = size, .executable_size = size, .writable_size = size, .published = true};
     return true;
 }
 typedef struct { NCPublish function; void *context; } LegacyPublisher;
@@ -120,5 +135,37 @@ bool nc_clear(NativeCodeMemory *memory, size_t size) {
     memset(memory->writable, 0, size);
     sys_dcache_flush(memory->writable, size);
     sys_icache_invalidate(memory->executable, size);
+    return true;
+}
+bool nc_trim(NativeCodeMemory *memory, size_t size) {
+    size_t page = (size_t)getpagesize();
+    if (!memory || !memory->published || memory->quarantined || !size || size % page ||
+        !memory->size || memory->size % page || memory->size > NC_MAX_ARENA || size > memory->size ||
+        memory->executable_size != memory->size || memory->writable_size != memory->size) {
+        errno = EINVAL; return false;
+    }
+    uintptr_t executable = (uintptr_t)memory->executable, writable = (uintptr_t)memory->writable;
+    if (!executable || !writable || executable % page || writable % page ||
+        memory->size > UINTPTR_MAX - executable || memory->size > UINTPTR_MAX - writable ||
+        (executable < writable + memory->size && writable < executable + memory->size)) {
+        errno = EINVAL; return false;
+    }
+    if (size == memory->size) return true;
+    size_t tail = memory->size - size;
+    kern_return_t result = vm_deallocate(mach_task_self(), (vm_address_t)(writable + size), tail);
+    if (result != KERN_SUCCESS) {
+        memory->published = false;
+        errno = result == KERN_NO_SPACE ? ENOMEM : EACCES;
+        return false;
+    }
+    memory->writable_size = size;
+    if (munmap((void *)(executable + size), tail)) {
+        // The writable tail is already free and may have been reused. Keep
+        // each remaining owned length, and prohibit any further arena writes.
+        memory->published = false;
+        return false;
+    }
+    memory->executable_size = size;
+    memory->size = size;
     return true;
 }

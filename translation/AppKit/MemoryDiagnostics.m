@@ -3,6 +3,7 @@
 #import <UIKit/UIKit.h>
 #include <mach/mach.h>
 #include <os/proc.h>
+#include <dlfcn.h>
 
 // At most one hour at 30-second intervals, plus lifetime extrema. A previous
 // session is kept separately; no text, app memory, endpoints or identifiers.
@@ -34,7 +35,10 @@
 }
 @end
 
-static NSDictionary *memorySample(NSString *event, BOOL foreground) {
+typedef void *(*AKMemorySymbolLookup)(void *, const char *);
+typedef bool (*AKMetalDeviceMemoryReader)(uint64_t *, uint64_t *);
+typedef void (*AKMetalLibraryCounterReader)(uint64_t *, uint64_t *, uint64_t *, uint64_t *, uint64_t *);
+static NSDictionary *memorySampleWithLookup(NSString *event, BOOL foreground, AKMemorySymbolLookup lookup) {
     NSMutableDictionary *sample=[@{@"time":@(NSDate.date.timeIntervalSince1970),
         @"uptime_s":@(NSProcessInfo.processInfo.systemUptime), @"event":event,
         @"foreground":@(foreground), @"available_bytes":@(os_proc_available_memory())} mutableCopy];
@@ -45,7 +49,28 @@ static NSDictionary *memorySample(NSString *event, BOOL foreground) {
         sample[@"resident_bytes"]=@(info.resident_size);
         sample[@"compressed_bytes"]=@(info.compressed);
     } else sample[@"query_error"]=@(result);
+    // Metal is optional and may load after diagnostics starts. Resolve again on
+    // each existing sample; never discover a device or enable frame statistics.
+    AKMetalDeviceMemoryReader deviceMemory=(AKMetalDeviceMemoryReader)lookup(RTLD_DEFAULT,"AKMetalDeviceMemory");
+    uint64_t allocated=0, recommended=0;
+    if (deviceMemory && deviceMemory(&allocated,&recommended)) {
+        sample[@"metal_allocated_bytes"]=@(allocated);
+        sample[@"metal_recommended_working_set_bytes"]=@(recommended);
+    }
+    AKMetalLibraryCounterReader libraryCounters=(AKMetalLibraryCounterReader)lookup(RTLD_DEFAULT,"AKMetalLibraryCounters");
+    if (libraryCounters) {
+        uint64_t hits=0, misses=0, nativeLoads=0, inFlight=0, purges=0;
+        libraryCounters(&hits,&misses,&nativeLoads,&inFlight,&purges);
+        sample[@"metal_library_cache_hits"]=@(hits);
+        sample[@"metal_library_cache_misses"]=@(misses);
+        sample[@"metal_library_native_loads"]=@(nativeLoads);
+        sample[@"metal_library_requests_in_flight"]=@(inFlight);
+        sample[@"metal_library_cache_purges"]=@(purges);
+    }
     return sample;
+}
+static NSDictionary *memorySample(NSString *event, BOOL foreground) {
+    return memorySampleWithLookup(event,foreground,dlsym);
 }
 void AKStartMemoryDiagnostics(void) {
     static dispatch_once_t once;

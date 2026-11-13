@@ -500,6 +500,7 @@ static void TestStickMapping(void) {
     assert(CGPointEqualToPoint(AKTouchGamepadStickPosition(CGPointMake(CGFLOAT_MAX,CGFLOAT_MAX),CGSizeMake(0.001,0.001)),CGPointZero));
 }
 
+static void TestPendingCancellation(UIView *host, BOOL keyboard);
 static void TestLifecycle(UIView *host) {
     TestStickMapping();
     TestHaptics();
@@ -535,7 +536,40 @@ static void TestLifecycle(UIView *host) {
     host.hidden=NO; [pad refresh];
     [pad invalidate]; [pad.lastConnection finish:nil]; assert(!pad.visible);
     count=pad.connections; [pad refresh]; assert(pad.connections==count);
+    TestPendingCancellation(host,YES);
+    TestPendingCancellation(host,NO);
     puts("TOUCH_GAMEPAD_LIFECYCLE_PASS: physical priority, own/snapshot filtering, keyboard/focus cancellation, late replies, failure, retry and teardown.");
+    puts("TOUCH_GAMEPAD_CANCELLATION_PASS: one cancellation per pending attempt during repeated keyboard/focus notifications, neutral input and reply-gated retry.");
+}
+
+static void TestPendingCancellation(UIView *host, BOOL keyboard) {
+    AKFixtureGamepad *pad=[[AKFixtureGamepad alloc] initWithHostView:host];
+    [pad refresh];
+    AKFixtureConnection *pending=pad.lastConnection;
+    assert(pad.connections==1 && !pad.visible && !pending.disconnects);
+    if (keyboard) pad.keyboardVisible=YES;
+    else { host.hidden=YES; [pad refresh]; }
+    assert(pending.disconnects==1);
+    for (NSUInteger i=0; i<100; i++) {
+        [pad refresh];
+        [NSNotificationCenter.defaultCenter postNotificationName:UIWindowDidBecomeKeyNotification object:host.window];
+        [NSNotificationCenter.defaultCenter postNotificationName:GCControllerDidDisconnectNotification object:nil];
+    }
+    Drain();
+    assert(pending.disconnects==1 && pad.connections==1 && pad.lastConnection==pending && !pad.visible);
+    assert(![[[pad valueForKey:@"_actionInput"] valueForKey:@"pressedButtons"] count]);
+    // Restoring input while the old reply is pending must not start a replacement.
+    if (keyboard) pad.keyboardVisible=NO;
+    else { host.hidden=NO; [pad refresh]; }
+    [pad refresh];
+    assert(pending.disconnects==1 && pad.connections==1 && pad.lastConnection==pending && !pad.visible);
+    [pending finish:nil];
+    assert(pending.disconnects==2 && pad.connections==2 && pad.lastConnection!=pending && !pad.visible);
+    assert(![[[pad valueForKey:@"_actionInput"] valueForKey:@"pressedButtons"] count]);
+    [pad.lastConnection finish:nil];
+    assert(pad.visible && pad.connections==2);
+    assert(![[[pad valueForKey:@"_actionInput"] valueForKey:@"pressedButtons"] count]);
+    [pad invalidate];
 }
 
 @interface AKGamepadFixtureScene : UIResponder <UIWindowSceneDelegate>

@@ -7,6 +7,17 @@
 #import <CommonCrypto/CommonDigest.h>
 #import <UIKit/UIKit.h>
 #include <stdatomic.h>
+static atomic_uint_fast64_t libraryCacheHits, libraryCacheMisses, libraryNativeLoads;
+static atomic_uint_fast64_t libraryRequestsInFlight, libraryCachePurges;
+// Process-wide totals only; no shader keys, object identities or contents.
+__attribute__((visibility("default"))) void AKMetalLibraryCounters(uint64_t *hits, uint64_t *misses,
+    uint64_t *nativeLoads, uint64_t *inFlight, uint64_t *purges) {
+    if (hits) *hits=atomic_load_explicit(&libraryCacheHits,memory_order_relaxed);
+    if (misses) *misses=atomic_load_explicit(&libraryCacheMisses,memory_order_relaxed);
+    if (nativeLoads) *nativeLoads=atomic_load_explicit(&libraryNativeLoads,memory_order_relaxed);
+    if (inFlight) *inFlight=atomic_load_explicit(&libraryRequestsInFlight,memory_order_relaxed);
+    if (purges) *purges=atomic_load_explicit(&libraryCachePurges,memory_order_relaxed);
+}
 static atomic_uint shaderWaiters;
 bool AKShaderWaitPending(void) { return atomic_load(&shaderWaiters)>0; }
 static UIWindow *shaderPauseWindow;
@@ -57,6 +68,11 @@ static NSUInteger builtInLocation(id self,SEL selector) { (void)self; (void)sele
 static NSUInteger builtInNumber(id self,SEL selector) { (void)self; (void)selector; return 1; }
 typedef id<MTLLibrary> (*LibraryLoader)(id,SEL,dispatch_data_t,NSError *__autoreleasing *) __attribute__((ns_returns_retained));
 static LibraryLoader originalLibraryLoader;
+static id<MTLLibrary> loadNativeLibrary(id receiver,SEL selector,dispatch_data_t data,NSError *__autoreleasing *error) __attribute__((ns_returns_retained));
+static id<MTLLibrary> loadNativeLibrary(id receiver,SEL selector,dispatch_data_t data,NSError *__autoreleasing *error) {
+    atomic_fetch_add_explicit(&libraryNativeLoads,1,memory_order_relaxed);
+    return originalLibraryLoader(receiver,selector,data,error);
+}
 static NSCache<NSString *,id<MTLLibrary>> *libraryCache(id<MTLDevice> device) {
     static NSMapTable *devices; static dispatch_once_t once;
     dispatch_once(&once,^{
@@ -66,6 +82,7 @@ static NSCache<NSString *,id<MTLLibrary>> *libraryCache(id<MTLDevice> device) {
                 @synchronized(devices) {
                     for (NSCache *cache in devices.objectEnumerator) [cache removeAllObjects];
                 }
+                atomic_fetch_add_explicit(&libraryCachePurges,1,memory_order_relaxed);
                 AKLog(@"memory warning: released adapter shader-library cache");
             } }];
     });
@@ -97,17 +114,19 @@ static id<MTLLibrary> captureLibrary(id receiver,SEL selector,dispatch_data_t da
     // compiler temporaries to one request, including cache hits and failures.
     id<MTLLibrary> library;
     NSError *failure=nil;
-    @autoreleasepool { library=loadLibraryInPool(receiver,selector,data,&failure); }
+    atomic_fetch_add_explicit(&libraryRequestsInFlight,1,memory_order_relaxed);
+    @try { @autoreleasepool { library=loadLibraryInPool(receiver,selector,data,&failure); } }
+    @finally { atomic_fetch_sub_explicit(&libraryRequestsInFlight,1,memory_order_relaxed); }
     // Retain both results across the pool before writing the +0 error back.
     if (error) *error=failure;
     return library;
 }
 static id<MTLLibrary> loadLibraryInPool(id receiver,SEL selector,dispatch_data_t data,NSError *__autoreleasing *error) {
     size_t length=dispatch_data_get_size(data);
-    if(!length || length>64*1024*1024) return originalLibraryLoader(receiver,selector,data,error);
+    if(!length || length>64*1024*1024) return loadNativeLibrary(receiver,selector,data,error);
     const void *mappedBytes=NULL; size_t mappedLength=0;
     __attribute__((objc_precise_lifetime)) dispatch_data_t mapped=dispatch_data_create_map(data,&mappedBytes,&mappedLength);
-    if(!mapped || !mappedBytes || mappedLength!=length) return originalLibraryLoader(receiver,selector,data,error);
+    if(!mapped || !mappedBytes || mappedLength!=length) return loadNativeLibrary(receiver,selector,data,error);
     unsigned char digest[CC_SHA256_DIGEST_LENGTH]; CC_SHA256(mappedBytes,(CC_LONG)mappedLength,digest);
     NSMutableString *key=[NSMutableString new]; for(unsigned i=0;i<sizeof digest;i++) [key appendFormat:@"%02x",digest[i]];
     // Library contents are immutable. Reuse native library objects for identical
@@ -115,7 +134,11 @@ static id<MTLLibrary> loadLibraryInPool(id receiver,SEL selector,dispatch_data_t
     // NSCache bounds retention and can purge objects under memory pressure.
     NSCache *libraries=libraryCache(receiver);
     id<MTLLibrary> existing=[libraries objectForKey:key];
-    if(existing) { if(error)*error=nil; return existing; }
+    if(existing) {
+        atomic_fetch_add_explicit(&libraryCacheHits,1,memory_order_relaxed);
+        if(error)*error=nil; return existing;
+    }
+    atomic_fetch_add_explicit(&libraryCacheMisses,1,memory_order_relaxed);
     NSString *documents=[NSHomeDirectory() stringByAppendingPathComponent:@"Documents"];
     NSString *name=[key stringByAppendingString:@".metallib"];
     NSString *cached=[[documents stringByAppendingPathComponent:@"TranslatedShaders"] stringByAppendingPathComponent:name];
@@ -128,7 +151,7 @@ static id<MTLLibrary> loadLibraryInPool(id receiver,SEL selector,dispatch_data_t
     if(local) {
         dispatch_data_t input=dispatch_data_create(local.bytes,local.length,NULL,DISPATCH_DATA_DESTRUCTOR_DEFAULT);
         NSError *localError=nil;
-        id<MTLLibrary> library=originalLibraryLoader(receiver,selector,input,&localError);
+        id<MTLLibrary> library=loadNativeLibrary(receiver,selector,input,&localError);
         AKLog(@"On-device Metal library %@: %@%@",key,library?@"loaded":@"rejected",library?@"":[NSString stringWithFormat:@" error=%@",localError]);
         if(library) {
             [libraries setObject:library forKey:[key copy] cost:local.length];
@@ -177,12 +200,12 @@ static id<MTLLibrary> loadLibraryInPool(id receiver,SEL selector,dispatch_data_t
     }
     if(translated) {
         dispatch_data_t input=dispatch_data_create(translated.bytes,translated.length,NULL,DISPATCH_DATA_DESTRUCTOR_DEFAULT);
-        id<MTLLibrary> library=originalLibraryLoader(receiver,selector,input,error);
+        id<MTLLibrary> library=loadNativeLibrary(receiver,selector,input,error);
         AKLog(@"Translated Metal library %@: %@ (%zu bytes)%@",key,library?@"loaded":@"rejected",translated.length,library?@"":[NSString stringWithFormat:@" error=%@",error?*error:nil]);
         if(library) { [libraries setObject:library forKey:[key copy] cost:translated.length]; return library; }
     }
     NSError *localError=nil;
-    id<MTLLibrary> library=originalLibraryLoader(receiver,selector,data,&localError);
+    id<MTLLibrary> library=loadNativeLibrary(receiver,selector,data,&localError);
     if(error) *error=localError;
     if(!library) {
         AKLog(@"Metal library %@ rejected: %@",key,localError);

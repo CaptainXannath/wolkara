@@ -8,6 +8,10 @@ typedef struct {
     void *executable;
     void *writable;
     size_t size;
+    // Owned lengths can differ after an incomplete trim. Cleanup releases only
+    // the ranges still owned, even if a released tail has since been reused.
+    size_t executable_size;
+    size_t writable_size;
     bool published;
     bool quarantined;
 } NativeCodeMemory;
@@ -46,5 +50,10 @@ bool nc_write(NativeCodeMemory *memory, size_t offset, const void *bytes, size_t
 // Clears the image's extent through RW and flushes both aliases before placement.
 // Caller must ensure no thread is executing the range while it is being changed.
 bool nc_clear(NativeCodeMemory *memory, size_t size);
-// Unmaps both views, adopted ones too; quarantine is kept.
+// Release both unused tails before placing an image or entering any code.
+// The retained prefix must be nonempty and page aligned. On an incomplete
+// release, publication is revoked; only nc_destroy may use that owner again.
+bool nc_trim(NativeCodeMemory *memory, size_t size);
+// Unmaps both views, adopted ones too; quarantine is kept. Preserves errno.
+// A failed unmap retains that view's ownership for a later cleanup attempt.
 void nc_destroy(NativeCodeMemory *memory);

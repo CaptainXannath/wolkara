@@ -1399,7 +1399,8 @@ static bool signed_image_prepare(uint64_t end, char *error, size_t error_size) {
         (unsigned long long)(image.size / GM_PAGE_SIZE));
     arena = mmap(NULL, span, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
     if (arena == MAP_FAILED) { snprintf(error, error_size, "arena reservation failed errno=%d", errno); goto fail; }
-    guest.arena = (NativeCodeMemory){ .executable = arena, .writable = arena, .size = span, .published = true };
+    guest.arena = (NativeCodeMemory){ .executable = arena, .writable = arena, .size = span,
+        .executable_size = span, .writable_size = span, .published = true };
     LOG("[signed-image] dlopen ok; shadow region %llu pages, signed suffix %llu pages\n",
         (unsigned long long)(shadow_size / GM_PAGE_SIZE),
         (unsigned long long)((image.size - shadow_size) / GM_PAGE_SIZE));
@@ -1720,6 +1721,20 @@ bool ng_initialize(const char *path, const char *frameworks, const char *library
         arena_ready=nc_create(&guest.arena,total,publish,NULL);
     if (!arena_ready) { LOG("[native] arena preparation failed errno=%d %s; guest entry blocked\n",errno,signed_backend?error:""); goto done; }
     if (enabler_arena) {
+        // The enabler touches its entire reservation. Keep only the images,
+        // configured code pool and probe page calculated above, before entry.
+        size_t reserved_size=guest.arena.size, available_before=nc_available_memory();
+        if (!nc_trim(&guest.arena,total)) {
+            int failure=errno;
+            nc_destroy(&guest.arena);
+            errno=failure;
+            LOG("[native] could not trim the enabler arena errno=%d; guest entry blocked\n",failure);
+            goto done;
+        }
+        size_t available_after=nc_available_memory();
+        if (reserved_size>total)
+            LOG("[native] enabler arena trimmed from %zu to %zu bytes; unmapped_tail=%zu available_before=%zu available_after=%zu\n",
+                reserved_size,total,reserved_size-total,available_before,available_after);
         // StikDebug writes a marker into each prepared page. Pages with only
         // zero-fill have no staged bytes below, so clear the image span first.
         if (!nc_clear(&guest.arena,total)) {

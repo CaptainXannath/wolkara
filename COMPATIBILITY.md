@@ -51,9 +51,35 @@ checked before sampling. The endpoint samples are a compatibility heuristic;
 they cannot prove every page was prepared. The debugger-detach requirement is
 unchanged. This adapts WolkaraForever patch 0051, credited in NOTICE.md.
 
-Physical startup with the new guard, certificate enumeration during game login,
-and successful iPhone authentication remain unverified. Synthetic host and
-simulator checks cannot establish those device results.
+The user subsequently confirmed startup, successful login and world entry on
+this phone. The log uses a low arena address and records the public certificate
+source opening successfully, with 87 of 118 candidates accepted by native trust.
+This validates that login session; the log does not show whether a high grant was
+rejected during preparation.
+
+The user then reported repeated touch-controller connect/disconnect messages
+after taking a screenshot, followed by a return to the Home Screen. The memory
+journal records two memory warnings, a peak footprint of 6,978,426,944 bytes and
+only 894,912 bytes of remaining process allowance. In that session, footprint
+plus allowance was 6.5 GiB. On 2026-11-13 the user reports repeated closures in
+Orgrimmar with Forever 1.60.1 (70938); that log again contains a memory warning
+and ends without a native exception report. Memory exhaustion is the leading
+explanation; no jetsam event report was supplied to confirm the termination.
+
+The newer runtime unmaps the unused tail of both enabler arena views before
+image placement. The retained span includes all images, configured code pool
+and probe pages. The observed 1 GiB grant has about 929 MiB beyond that span.
+Per-view ownership makes partial failure and cleanup safe; incomplete trimming
+blocks guest entry. The log records native allowance before and after trimming
+to measure the actual process-budget effect, which need not equal the unmapped
+virtual span. The shared backing is not counted twice.
+
+Pending virtual-controller cancellation is now idempotent, preventing repeated
+cancellation calls while one asynchronous reply is outstanding. This does not
+establish the cause of the reported reconnect loop. Existing memory samples now
+also include optional aggregate native Metal allocation/working-set counters
+and library-loader activity, without inspecting guest memory. Physical city
+stability and the resulting memory saving remain unverified for these changes.
 
 ## External JIT prototype (2026-10-07)
 

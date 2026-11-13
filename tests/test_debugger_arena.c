@@ -54,6 +54,16 @@ static void test_high_grants(FILE *record) {
     assert(high != MAP_FAILED && (uintptr_t)high >= reach);
     assert(!da_adopt_region(NULL, high, 2 * page, record) && errno == EINVAL);
     assert(mapped(high));
+    // A destination with owned-length metadata is not empty. Refuse it before
+    // classifying this untouched high grant, and leave the grant mapped.
+    NativeCodeMemory stale = {.executable_size = page};
+    assert(!da_adopt_region(&stale, high, 2 * page, record) && errno == EINVAL);
+    assert(stale.executable_size == page && !stale.writable_size && !stale.size && !stale.published);
+    assert(mapped(high));
+    stale = (NativeCodeMemory){.writable_size = page};
+    assert(!da_adopt_region(&stale, high, 2 * page, record) && errno == EINVAL);
+    assert(stale.writable_size == page && !stale.executable_size && !stale.size && !stale.published);
+    assert(mapped(high));
     assert(da_region_unprepared(high, 2 * page));
     high[0] = 0x69;
     assert(da_region_unprepared(high, 2 * page));

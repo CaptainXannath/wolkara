@@ -757,7 +757,10 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     if (_connecting) {
         // Wait for this attempt's reply before starting another one. A late
         // successful connect must not bring controls back after suspension.
-        if (![self wantsController]) { _cancelConnect = YES; [_virtualController disconnect]; }
+        if (!_cancelConnect && ![self wantsController]) {
+            _cancelConnect = YES;
+            [_virtualController disconnect];
+        }
         return;
     }
     if (![self wantsController] || [self hasPhysicalController]) {

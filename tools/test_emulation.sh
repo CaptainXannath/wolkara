@@ -103,6 +103,8 @@ for test in tunnel_manager developer_session; do
 done
 "${CC[@]}" runtime/NativeCodeMemory.c tests/test_native_memory.c -o build/emulation/test_native_memory
 build/emulation/test_native_memory
+"${CC[@]}" tests/test_native_memory_trim.c -o build/emulation/test_native_memory_trim
+build/emulation/test_native_memory_trim
 "${CC[@]}" runtime/HostDiagnostics.c runtime/HostExecutionProbe.c runtime/NativeCodeMemory.c tests/test_host_diagnostics.c -o build/emulation/test_host_diagnostics
 build/emulation/test_host_diagnostics
 "${CC[@]}" runtime/HostExecutionProbe.c runtime/NativeCodeMemory.c tests/test_arena_probe.c -o build/emulation/test_arena_probe

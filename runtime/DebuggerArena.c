@@ -114,6 +114,7 @@ bool da_request_arena(NativeCodeMemory *memory, size_t size, FILE *log) {
 
 bool da_adopt_region(NativeCodeMemory *memory, void *region, size_t size, FILE *log) {
     bool valid = memory && !memory->size && !memory->executable && !memory->writable &&
+                 !memory->executable_size && !memory->writable_size &&
                  region_bounds_valid(region, size);
     if (!valid) {
         if (log) fprintf(log, "[debugger] region %p of %zu bytes refused errno=%d, not given back\n",

@@ -6,16 +6,36 @@
 
 extern void AKInstallMetalPresentationDiagnostics(id<MTLDevice> device);
 extern void AKRecordMetalFramePresented(double timestamp);
+extern bool AKMetalDeviceMemory(uint64_t *allocated,uint64_t *recommended);
 void AKLog(NSString *format, ...) { (void)format; }
 void AKInstallRenderDiagnostics(Class cls) { (void)cls; }
 NSArray *AKRenderStatsForCommand(id command) { (void)command; return @[]; }
 
+@interface AKFixtureMemoryDevice : NSObject
+@end
+@implementation AKFixtureMemoryDevice
+- (NSUInteger)currentAllocatedSize { return 123456; }
+- (uint64_t)recommendedMaxWorkingSetSize { return 8589934592ULL; }
+@end
+
 static IMP originalDrawable;
 void AKTestPrepareLateMetal(void) {
     originalDrawable = class_getMethodImplementation(CAMetalLayer.class, @selector(nextDrawable));
+    uint64_t allocated=1, recommended=1;
+    assert(!AKMetalDeviceMemory(&allocated,&recommended) && !allocated && !recommended);
+    AKInstallMetalPresentationDiagnostics((id)[NSObject new]);
+    allocated=recommended=1;
+    assert(!AKMetalDeviceMemory(&allocated,&recommended) && !allocated && !recommended);
+    AKInstallMetalPresentationDiagnostics((id)[AKFixtureMemoryDevice new]);
+    assert(AKMetalDeviceMemory(&allocated,&recommended));
+    assert(allocated==123456 && recommended==8589934592ULL);
+    assert(AKMetalDeviceMemory(NULL,NULL));
+    assert(originalDrawable == class_getMethodImplementation(CAMetalLayer.class, @selector(nextDrawable)));
     id<MTLDevice> device = MTLCreateSystemDefaultDevice();
     assert(device);
     AKInstallMetalPresentationDiagnostics(device);
+    assert(AKMetalDeviceMemory(&allocated,&recommended));
+    assert(AKMetalDeviceMemory(NULL,NULL));
     assert(originalDrawable == class_getMethodImplementation(CAMetalLayer.class, @selector(nextDrawable)));
 }
 void AKTestRecordMetalFrames(void) {
