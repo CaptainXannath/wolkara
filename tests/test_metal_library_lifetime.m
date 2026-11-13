@@ -68,8 +68,12 @@ int main(void) { @autoreleasepool {
     assertCounters(1,1,1002,0,1);
     raiseLoad=YES;
     BOOL caught=NO;
-    @try { (void)captureLibrary(device,@selector(newLibraryWithData:error:),dispatch_data_empty,NULL); }
-    @catch (NSException *exception) { caught=[exception.name isEqual:@"Fixture"]; }
+    // An exception does not drain the callee's pool. Catch inside a caller-owned
+    // recovery pool, then leave it normally before checking temporary lifetime.
+    @autoreleasepool {
+        @try { (void)captureLibrary(device,@selector(newLibraryWithData:error:),dispatch_data_empty,NULL); }
+        @catch (NSException *exception) { caught=[exception.name isEqual:@"Fixture"]; }
+    }
     assert(caught && !AKFixtureLiveTemporaries());
     assertCounters(1,1,1003,0,1);
     __weak NSObject *cached;
