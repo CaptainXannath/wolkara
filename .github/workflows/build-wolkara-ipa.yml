@@ -1,0 +1,43 @@
+# Put this file at .github/workflows/build-wolkara-ipa.yml in your own fork.
+# Builds an unsigned, experimental External JIT IPA. This DOES NOT validate
+# game execution, signing entitlements, or World of Warcraft login.
+name: Build Wolkara unsigned IPA
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - name: Check out Wolkara
+        uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Build Wolkara's experimental External JIT IPA
+        env:
+          TOLKARA_SYSTEM_ROOTS: "NO"
+        run: bash tools/package_ipa.sh Wolkara-unsigned.ipa
+
+      - name: Upload unsigned IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: Wolkara-unsigned-IPA
+          path: Wolkara-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload build logs if build fails
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Wolkara-build-logs
+          path: logs/
+          if-no-files-found: ignore
+          retention-days: 7

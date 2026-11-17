@@ -1,0 +1,46 @@
+
+name: Build Wolkara Debug IPA
+
+on:
+  workflow_dispatch:
+    inputs:
+      public_root_certificates:
+        description: "Include public macOS certificate roots for a private WoW TLS test"
+        required: true
+        type: choice
+        default: "YES"
+        options:
+          - "YES"
+          - "NO"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-26
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v5
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Build experimental IPA
+        env:
+          TOLKARA_SYSTEM_ROOTS: ${{ inputs.public_root_certificates }}
+        run: tools/package_ipa.sh Wolkara-debug.ipa
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: Wolkara-Debug-IPA
+          path: Wolkara-debug.ipa
+
+      - name: Upload build logs if failed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Wolkara-Build-Logs
+          path: logs/
