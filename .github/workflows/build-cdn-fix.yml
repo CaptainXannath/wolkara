@@ -3,7 +3,7 @@ name: Build Wolkara External JIT repair IPA
 on:
   workflow_dispatch:
   push:
-    branches: [fix/forever-cdn-startup]
+    branches: [fix/forever-cdn-startup, fix/forever-release-ci]
     paths:
       - .github/workflows/build-cdn-fix.yml
       - launcher/**
