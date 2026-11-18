@@ -47,7 +47,10 @@ int main(void) {
     errno=0; assert(gw_nanosleep(&invalid,NULL)==-1 && errno==EINVAL && !pumps);
     nest=true; errno=EAGAIN; double began=now();
     assert(!gw_nanosleep(&request,&remaining));
-    assert(now()-began>=.08 && pumps>2 && errno==EAGAIN);
+    double elapsed=now()-began;
+    if (!(elapsed>=.08 && pumps>2 && errno==EAGAIN))
+        fprintf(stderr,"cooperative wait: elapsed=%.9f pumps=%u errno=%d\n",elapsed,pumps,errno);
+    assert(elapsed>=.08 && pumps>2 && errno==EAGAIN);
     assert(remaining.tv_sec==123 && remaining.tv_nsec==456); // Success leaves it alone.
     nest=false; slow=true; began=now(); request=(struct timespec){0,50000000};
     assert(!gw_nanosleep(&request,NULL)); assert(now()-began>=.05 && now()-began<.15);
