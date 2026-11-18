@@ -1,0 +1,104 @@
+name: Publish tested StikDebug preview
+
+on:
+  push:
+    branches: [release/forever-stikdebug-v0.1.0-rc1]
+    paths:
+      - .github/workflows/release-stikdebug-preview.yml
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  group: wolkara-stikdebug-preview
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Verify and publish tested IPA
+    runs-on: macos-26-intel
+    timeout-minutes: 20
+    env:
+      TAG: v0.1.0-stikdebug.1
+      SOURCE_COMMIT: c85fa233d817af4359c81f56ce423ea05214eeda
+      IPA: Wolkara-stikdebug-repaired.ipa
+      IPA_SHA256: df8a805d454e1bf3228a39d5e759a39e1afeb84d110e321652a614aa5d8c914f
+    steps:
+      - name: Check out the tested source commit
+        uses: actions/checkout@v5
+        with:
+          ref: c85fa233d817af4359c81f56ce423ea05214eeda
+          persist-credentials: false
+
+      - name: Download the original Actions artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: Wolkara-StikDebug-repaired-IPA
+          path: release-assets
+          repository: CaptainXannath/wolkara
+          run-id: 43078796731
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify artifact checksum and IPA contents
+        env:
+          IPA: ${{ env.IPA }}
+          IPA_SHA256: ${{ env.IPA_SHA256 }}
+        run: |
+          set -euo pipefail
+          cd release-assets
+          test -s "$IPA"
+          test -s "$IPA.sha256"
+          shasum -a 256 -c "$IPA.sha256"
+          test "$(shasum -a 256 "$IPA" | awk '{print $1}')" = "$IPA_SHA256"
+          unzip -tq "$IPA"
+          unzip -q "$IPA" -d extracted
+          APP=extracted/Payload/WolkaraExternalJIT.app
+          test -d "$APP"
+          test ! -e "$APP/embedded.mobileprovision"
+          codesign --verify --strict "$APP"
+          codesign -d --entitlements :- "$APP" > entitlements.plist 2>/dev/null
+          python3 - "$APP/Info.plist" entitlements.plist <<'PY'
+          import plistlib, sys
+          with open(sys.argv[1], 'rb') as f:
+              info = plistlib.load(f)
+          with open(sys.argv[2], 'rb') as f:
+              entitlements = plistlib.load(f)
+          assert info['CFBundleIdentifier'] == 'local.tolkara.app.externaljit', info.get('CFBundleIdentifier')
+          assert info['MinimumOSVersion'] == '26.0', info.get('MinimumOSVersion')
+          assert entitlements.get('get-task-allow') is True, entitlements
+          print('Bundle ID, minimum iOS version, and External JIT entitlement verified.')
+          PY
+          python3 - "$IPA" <<'PY'
+          import sys, zipfile
+          with zipfile.ZipFile(sys.argv[1]) as z:
+              names = z.namelist()
+          forbidden = ('.wmo', '.adt', '.blp', '.m2', 'world of warcraft', '/documents/')
+          bad = [n for n in names if any(x in n.lower() for x in forbidden) or 'embedded.mobileprovision' in n]
+          assert not bad, bad
+          print('No game assets, Documents data, or provisioning profile in the IPA.')
+          PY
+
+      - name: Publish as a prerelease
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          cat > release-notes.md <<'EOF'
+          ## Wolkara StikDebug preview
+
+          This prerelease packages the exact StikDebug IPA from Actions run [43078796731](https://github.com/CaptainXannath/wolkara/actions/runs/43078796731), built from commit `c85fa233d817af4359c81f56ce423ea05214eeda`. Its SHA-256 is `df8a805d454e1bf3228a39d5e759a39e1afeb84d110e321652a614aa5d8c914f`.
+
+          The user reports that WoW Forever 1.60.1.70755 launched without the prior startup crash on one device. This is a single-device result; it does not establish stability across devices or extended gameplay.
+
+          Requires a sideloaded development-signed installation that preserves `get-task-allow`, launched with External JIT through StikDebug. The bundle ID is `local.tolkara.app.externaljit`. Install over the matching app to retain its Documents data. No WoW executable or game data is included.
+
+          This preview is based on commit `c85fa23`. Later memory-trimming and gameplay diagnostics from PR #4 are not included and have no device validation in this release.
+          EOF
+          gh release create "$TAG" \
+            --target "$SOURCE_COMMIT" \
+            --prerelease \
+            --latest=false \
+            --title "Wolkara StikDebug 0.1.0 Preview 1" \
+            --notes-file release-notes.md \
+            "release-assets/$IPA" "release-assets/$IPA.sha256"
