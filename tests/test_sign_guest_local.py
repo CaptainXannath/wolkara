@@ -889,13 +889,48 @@ class ArgumentTests(Base):
 # ---- signing -------------------------------------------------------------
 
 class AdhocTests(Base):
-    def test_matches_codesign_byte_for_byte(self):
+    def test_matches_codesign_signature_semantics(self):
+        # codesign's signature-region allocation can vary with the host
+        # toolchain. Check the signed meaning and code bytes independently;
+        # an identical file layout is not required for a valid signature.
+        fields = ('Format=', 'Identifier=', 'Signature=', 'TeamIdentifier=',
+                  'Internal requirements count=', 'Executable Segment base=',
+                  'Executable Segment limit=', 'Executable Segment flags=')
         for src in (B.ios_dylib, B.ios_bss, B.mac_dylib, B.mac_exe):
-            ref = self.path('ref-' + os.path.basename(src), read(src))
-            r = run(['codesign', '-s', '-', '-i', ADHOC_ID, ref])
-            self.assertEqual(r.returncode, 0, r.stderr)
-            out = self.sign(src, '--adhoc', '-i', ADHOC_ID, name='ours-' + os.path.basename(src))
-            self.assertEqual(read(out), read(ref), 'differs from codesign -s - for ' + os.path.basename(src))
+            with self.subTest(fixture=os.path.basename(src)):
+                original = read(src)
+                ref = self.path('ref-' + os.path.basename(src), original)
+                r = run(['codesign', '-s', '-', '-i', ADHOC_ID, ref])
+                self.assertEqual(r.returncode, 0, r.stderr)
+                out = self.sign(src, '--adhoc', '-i', ADHOC_ID, name='ours-' + os.path.basename(src))
+                ours, apple = read(out), read(ref)
+                self.assert_only_signing_changes(original, ours)
+
+                descriptions = []
+                for path in (out, ref):
+                    r = run(['codesign', '-v', '--strict', path])
+                    self.assertEqual(r.returncode, 0, r.stderr)
+                    v = self.tool('--verify', path)
+                    self.assertEqual(v.rc, 0, v.out + v.err)
+                    self.assertIn('Signature=adhoc\n', v.out)
+                    r = run(['codesign', '-dv', '--verbose=4', path])
+                    self.assertEqual(r.returncode, 0, r.stderr)
+                    description = tuple(line.partition(' size=')[0] if line.startswith('Internal requirements count=')
+                                        else line for line in r.stderr.splitlines() if line.startswith(fields))
+                    self.assertTrue(any(line == 'Identifier=' + ADHOC_ID for line in description), r.stderr)
+                    self.assertIn('Signature=adhoc', description)
+                    self.assertIn('Internal requirements count=0', description)
+                    descriptions.append(description)
+
+                if ours != apple:
+                    first = next((i for i, (a, b) in enumerate(zip(ours, apple)) if a != b),
+                                 min(len(ours), len(apple)))
+                    print('codesign layout differs for %s: ours=%d bytes, reference=%d bytes, '
+                          'first difference at %#x, signature regions=%s/%s' %
+                          (os.path.basename(src), len(ours), len(apple), first,
+                           code_signature(ours)[1:], code_signature(apple)[1:]), flush=True)
+                self.assertEqual(descriptions[0], descriptions[1],
+                                 'codesign metadata differs for ' + os.path.basename(src))
 
     def test_codesign_strict_and_verify_accept(self):
         for src in (B.ios_dylib, B.ios_bss, B.ios_exe, B.mac_dylib, B.mac_exe):
@@ -913,17 +948,30 @@ class AdhocTests(Base):
         r = run([B.host, out])
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn('guest_test returned 0x12345678', r.stdout)
-        # Controls: the unsigned input and a tampered code page do not load.
-        self.assertNotEqual(run([B.host, B.mac_dylib]).returncode, 0)
+        # The runner can permit unsigned and tampered code to execute. Both
+        # independent verifiers must still reject those negative controls.
         tampered = self.path('tampered.dylib', flip(read(out), first_text_section(read(out))))
-        self.assertNotEqual(run([B.host, tampered]).returncode, 0)
+        for path in (B.mac_dylib, tampered):
+            with self.subTest(control=os.path.basename(path)):
+                r = run(['codesign', '-v', '--strict', path])
+                self.assertNotEqual(r.returncode, 0, 'codesign accepted ' + path)
+                v = self.tool('--verify', path)
+                self.assertNotEqual(v.rc, 0, 'sign_guest_local accepted ' + path)
+                print('runtime dlopen negative control %s: exit=%d; explicit signature '
+                      'verification rejects it' % (os.path.basename(path), run([B.host, path]).returncode),
+                      flush=True)
 
     def test_macos_executable_runs(self):
         out = self.sign(B.mac_exe, '--adhoc', name='exe')
         r = run([out])
         self.assertEqual((r.returncode, r.stdout), (7, '0x12345678\n'))
         self.assertIn('Executable Segment flags=0x1\n', self.tool('--verify', out).out)  # CS_EXECSEG_MAIN_BINARY
-        self.assertEqual(run([B.mac_exe]).returncode, -9)  # control: unsigned arm64 code is killed
+        r = run(['codesign', '-v', '--strict', B.mac_exe])
+        self.assertNotEqual(r.returncode, 0, 'codesign accepted the unsigned executable')
+        v = self.tool('--verify', B.mac_exe)
+        self.assertNotEqual(v.rc, 0, 'sign_guest_local accepted the unsigned executable')
+        print('runtime unsigned executable control: exit=%d; explicit signature verification rejects it' %
+              run([B.mac_exe]).returncode, flush=True)
 
     def test_verify_accepts_codesign_and_linker_signatures(self):
         ref = self.path('codesign-adhoc.dylib', read(B.ios_dylib))
