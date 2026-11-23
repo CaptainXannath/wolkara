@@ -17,7 +17,7 @@ build="$root/build/localization"
 mkdir -p "$build"
 
 
-xcrun --sdk macosx clang -fobjc-arc -O1 -g -arch arm64 -mmacosx-version-min=14.0 \
+xcrun --sdk macosx clang -fobjc-arc -O1 -g -arch "$(uname -m)" -mmacosx-version-min=14.0 \
     -Wall -Wextra -Werror -Wno-deprecated-declarations -Ilauncher/App \
     launcher/App/WKLocalization.m tests/test_localization.m \
     -framework Foundation -o "$build/test_localization"

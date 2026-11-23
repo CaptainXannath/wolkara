@@ -10,7 +10,7 @@ SIM_ID=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; d
 xcrun simctl bootstatus "$SIM_ID" -b > /dev/null
 SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
 mkdir -p build/direct-touch-camera
-xcrun --sdk iphonesimulator clang -target arm64-apple-ios17.0-simulator -isysroot "$SDK" -fobjc-arc -O1 -g \
+xcrun --sdk iphonesimulator clang -target "$(uname -m)-apple-ios17.0-simulator" -isysroot "$SDK" -fobjc-arc -O1 -g \
     -Wall -Wextra -Werror -Wno-unused-parameter -Wno-deprecated-declarations \
     -Itranslation/AKSupport -Itranslation/AppKit translation/AKSupport/AKSupport.m \
     translation/AppKit/*.m translation/AppKit/*.c translation/CoreGraphics/Displays.m tests/test_direct_touch_camera.m \
