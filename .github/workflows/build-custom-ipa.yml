@@ -62,11 +62,28 @@ jobs:
           export SIMULATOR="$SIM_ID"
           xcrun simctl boot "$SIM_ID" || true
           xcrun simctl bootstatus "$SIM_ID" -b
-          bash tools/test_touch_abilities.sh
-          bash tools/test_direct_touch_camera.sh
-          bash tools/test_touch_gamepad_ui.sh --self-test
-          bash tools/test_touch_gamepad_ui.sh --self-test-input
-          bash tools/test_touch_controls_ui.sh --self-test
+          mkdir -p logs
+          echo "=== test_touch_abilities ==="
+          bash tools/test_touch_abilities.sh 2>&1 | tee logs/test-touch-abilities.log
+          echo "=== test_direct_touch_camera ==="
+          bash tools/test_direct_touch_camera.sh 2>&1 | tee logs/test-direct-touch-camera.log
+          echo "=== test_touch_gamepad_ui --self-test ==="
+          bash tools/test_touch_gamepad_ui.sh --self-test 2>&1 | tee logs/test-gamepad-lifecycle.log
+          echo "=== test_touch_gamepad_ui --self-test-input ==="
+          bash tools/test_touch_gamepad_ui.sh --self-test-input 2>&1 | tee logs/test-gamepad-input.log
+          echo "=== test_touch_controls_ui --self-test ==="
+          bash tools/test_touch_controls_ui.sh --self-test 2>&1 | tee logs/test-controls.log
+          echo "=== test_touch_controls_ui --self-test --toolbar-test ==="
+          bash tools/test_touch_controls_ui.sh --self-test --toolbar-test 2>&1 | tee logs/test-toolbar.log
+
+      - name: Keep test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Wolkara-custom-hud-logs
+          path: logs/
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Verify IPA
         run: |

@@ -134,6 +134,9 @@
     [self releaseTouches];
     for (UIView *view in _circles) [view removeFromSuperview];
     _circles = [NSMutableArray new];
+    if (_selected && ![self.layout.actions containsObject:_selected]) {
+        _selected = self.layout.actions.firstObject;
+    }
     for (AKTouchAction *action in self.layout.actions) {
         AKActionCircle *circle = [AKActionCircle buttonWithType:UIButtonTypeCustom];
         circle.action = action;

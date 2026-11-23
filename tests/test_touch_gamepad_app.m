@@ -369,7 +369,7 @@ static void TestNativeInput(UIView *host, AKPreviewGamepad *manager) {
             UIView *hud=Find(host,ident);
             assert(hud && !hud.hidden);
         }
-        CGPoint arrow=[top convertPoint:CGPointMake(108,26) toView:host];
+        CGPoint arrow=[leftStick convertPoint:CGPointMake(52,-24) toView:host];
         assert([host hitTest:arrow withEvent:nil]==host);
         CGPoint rightCenter=[rightStick convertPoint:CGPointMake(52,52) toView:host];
         UIView *rightHit=[host hitTest:rightCenter withEvent:nil];

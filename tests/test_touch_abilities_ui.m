@@ -58,7 +58,9 @@ void TestTouchAbilitiesUI(UIView *host,AKTouchGamepad *manager,GCVirtualControll
     Tap(host,@"wolkara.abilities.addLeft"); assert(overlay.layout.actions.count==17);
     Tap(host,@"wolkara.abilities.addRight"); assert(overlay.layout.actions.count==18);
     Tap(host,@"wolkara.abilities.delete"); assert(overlay.layout.actions.count==17);
-    [overlay.layout resetToClassicLayout]; [overlay rebuildCircles]; [overlay updateEditor];
+    [overlay.layout resetToClassicLayout]; [overlay rebuildCircles];
+    UISegmentedControl *mode=(id)Find(host,@"wolkara.abilities.mode"); assert(mode.numberOfSegments==3);
+    mode.selectedSegmentIndex=0; [mode sendActionsForControlEvents:UIControlEventValueChanged];
     UIControl *first=(id)Find(host,@"wolkara.ability.0.up"); assert(first);
     [overlay layoutIfNeeded];
     UISwitch *enabled=(id)Find(host,@"wolkara.abilities.enabled"); enabled.on=YES;
@@ -72,7 +74,6 @@ void TestTouchAbilitiesUI(UIView *host,AKTouchGamepad *manager,GCVirtualControll
     AKAbilityTestPan *pan=[AKAbilityTestPan new]; [first addGestureRecognizer:pan]; pan.phase=UIGestureRecognizerStateBegan;
     pan.movement=CGPointMake(12,-10); CGPoint old=overlay.layout.center; [overlay drag:pan];
     assert(overlay.layout.center.x>old.x && overlay.layout.center.y<old.y);
-    UISegmentedControl *mode=(id)Find(host,@"wolkara.abilities.mode"); assert(mode.numberOfSegments==3);
     mode.selectedSegmentIndex=1; [mode sendActionsForControlEvents:UIControlEventValueChanged];
     NSMutableArray *positions=[NSMutableArray new];
     for (AKTouchAction *action in overlay.layout.actions) [positions addObject:[NSValue valueWithCGPoint:action.position]];
