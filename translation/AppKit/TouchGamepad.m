@@ -1112,23 +1112,14 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
         _overlay.actions.press = ^BOOL(AKTouchAction *action) {
             AKTouchGamepad *self = weakSelf;
             if (!self || !self->_visible || self->_overlay.configuring) return NO;
-            if (action.kind == AKTouchActionKindKeyboard) {
+            if (action.kind == AKTouchActionKindKeyboard || action.kind == AKTouchActionKindMouse) {
                 [self->_haptics buttonPressed];
                 if (action.behavior == AKTouchActionBehaviorTap) {
-                    [self triggerKeyboardAction:action];
+                    if (action.kind == AKTouchActionKindKeyboard) [self triggerKeyboardAction:action];
+                    else [self triggerMouseAction:action];
                 } else {
                     self->_heldCustomActions[action.identifier] = action;
-                    [self sendKeyCode:action.keyCode characters:action.keyCharacters modifiers:action.keyModifiers pressed:YES];
-                }
-                return YES;
-            }
-            if (action.kind == AKTouchActionKindMouse) {
-                [self->_haptics buttonPressed];
-                if (action.behavior == AKTouchActionBehaviorTap) {
-                    [self triggerMouseAction:action];
-                } else {
-                    self->_heldCustomActions[action.identifier] = action;
-                    [self sendMouseButton:action.mouseButton pressed:YES];
+                    [self sendCustomAction:action pressed:YES];
                 }
                 return YES;
             }
@@ -1147,11 +1138,7 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
                 AKTouchAction *held = self->_heldCustomActions[action.identifier];
                 if (!held) return;
                 [self->_heldCustomActions removeObjectForKey:action.identifier];
-                if (held.kind == AKTouchActionKindKeyboard) {
-                    [self sendKeyCode:held.keyCode characters:held.keyCharacters modifiers:held.keyModifiers pressed:NO];
-                } else if (held.kind == AKTouchActionKindMouse) {
-                    [self sendMouseButton:held.mouseButton pressed:NO];
-                }
+                [self sendCustomAction:held pressed:NO];
             }
         };
         _overlay.actions.cancelledAll = ^{
@@ -1379,6 +1366,14 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     [NSRunLoop.mainRunLoop addTimer:pending.timer forMode:NSRunLoopCommonModes];
 }
 
+- (void)sendCustomAction:(AKTouchAction *)action pressed:(BOOL)pressed {
+    if (action.kind == AKTouchActionKindMouse) {
+        [self sendMouseButton:action.mouseButton pressed:pressed];
+    } else if (action.kind == AKTouchActionKindKeyboard) {
+        [self sendKeyCode:action.macKeyCode characters:action.macCharacters modifiers:action.keyModifiers pressed:pressed];
+    }
+}
+
 - (void)releaseAllHeldWasdKeys {
     if (!_heldWasdKeys.count) return;
     NSDictionary<NSNumber *, NSString *> *chars = @{@13: @"w", @0: @"a", @1: @"s", @2: @"d"};
@@ -1400,8 +1395,7 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     NSArray<AKTouchAction *> *heldCustom = [_heldCustomActions.allValues copy];
     [_heldCustomActions removeAllObjects];
     for (AKTouchAction *action in heldCustom) {
-        if (action.kind == AKTouchActionKindMouse) [self sendMouseButton:action.mouseButton pressed:NO];
-        else if (action.kind == AKTouchActionKindKeyboard) [self sendKeyCode:action.keyCode characters:action.keyCharacters modifiers:action.keyModifiers pressed:NO];
+        [self sendCustomAction:action pressed:NO];
     }
     [self releaseAllHeldWasdKeys];
 }

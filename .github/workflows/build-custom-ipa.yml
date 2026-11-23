@@ -53,6 +53,15 @@ jobs:
           TOLKARA_SYSTEM_ROOTS: "NO"
         run: bash tools/package_external_jit_ipa.sh Wolkara-custom-hud.ipa
 
+      - name: Keep IPA build logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Wolkara-custom-hud-ipa-logs
+          path: logs/
+          if-no-files-found: ignore
+          retention-days: 14
+
       - name: Verify IPA
         run: |
           set -euo pipefail
