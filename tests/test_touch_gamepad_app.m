@@ -491,8 +491,11 @@ static void TestStickMapping(void) {
 }
 
 static void TestLifecycle(UIView *host) {
+    fprintf(stderr, "[TouchGamepadFixture] TestLifecycle: stick+haptics\n");
     TestStickMapping();
     TestHaptics();
+    fprintf(stderr, "[TouchGamepadFixture] TestLifecycle: create pad (active=%ld key=%d)\n",
+        (long)UIApplication.sharedApplication.applicationState, host.window.isKeyWindow);
     AKFixtureGamepad *pad=[[AKFixtureGamepad alloc] initWithHostView:host];
     [pad refresh]; assert(pad.connections==1 && !pad.visible);
     AKFixtureController *physical=[AKFixtureController new]; physical.extendedGamepad=@YES;
@@ -518,11 +521,13 @@ static void TestLifecycle(UIView *host) {
     assert(!pad.visible); count=pad.connections;
     [pad refresh]; [pad refresh]; assert(pad.connections==count); // no retry loop
     pad.enabled=NO; pad.enabled=YES; [pad.lastConnection finish:nil]; assert(pad.visible);
+    fprintf(stderr, "[TouchGamepadFixture] TestLifecycle: toggleSettings\n");
     [pad toggleSettings]; assert(pad.configuring);
     pad.devices=@[(id)physical]; [pad refresh]; assert(!pad.visible && !pad.configuring);
     physical.isSnapshot=YES; [pad refresh]; [pad.lastConnection finish:nil]; assert(pad.visible);
     host.hidden=YES; [pad refresh]; assert(!pad.visible);
     host.hidden=NO; [pad refresh];
+    fprintf(stderr, "[TouchGamepadFixture] TestLifecycle: invalidate\n");
     [pad invalidate]; [pad.lastConnection finish:nil]; assert(!pad.visible);
     count=pad.connections; [pad refresh]; assert(pad.connections==count);
     puts("TOUCH_GAMEPAD_LIFECYCLE_PASS: physical priority, own/snapshot filtering, keyboard/focus cancellation, late replies, failure, retry and teardown.");
@@ -537,6 +542,8 @@ static void TestLifecycle(UIView *host) {
 @property NSUInteger presses;
 @property NSUInteger axisUpdates;
 @property BOOL inputTestScheduled;
+@property BOOL started;
+@property NSTimeInterval readyDeadline;
 @end
 @implementation AKGamepadFixtureScene
 - (void)scene:(UIScene *)scene willConnectToSession:(UISceneSession *)session options:(UISceneConnectionOptions *)options {
@@ -561,7 +568,20 @@ static void TestLifecycle(UIView *host) {
         [self.input.widthAnchor constraintLessThanOrEqualToAnchor:vc.view.widthAnchor constant:-100]
     ]];
     [self.window makeKeyAndVisible];
-    [self performSelector:@selector(start) withObject:nil afterDelay:.5];
+    self.readyDeadline=NSProcessInfo.processInfo.systemUptime+10.0;
+    [self performSelector:@selector(awaitReadyAndStart) withObject:nil afterDelay:.2];
+}
+- (void)awaitReadyAndStart {
+    if (self.started) return;
+    BOOL active=UIApplication.sharedApplication.applicationState==UIApplicationStateActive;
+    BOOL key=self.window.isKeyWindow && !self.window.hidden;
+    if ((!active || !key) && NSProcessInfo.processInfo.systemUptime<self.readyDeadline) {
+        [self performSelector:@selector(awaitReadyAndStart) withObject:nil afterDelay:.1];
+        return;
+    }
+    self.started=YES;
+    fprintf(stderr,"[TouchGamepadFixture] launching start active=%d key=%d hidden=%d\n",active,key,self.window.hidden);
+    [self start];
 }
 - (void)start {
     if ([NSProcessInfo.processInfo.arguments containsObject:@"--unregistered-controller-test"]) {
@@ -580,8 +600,10 @@ static void TestLifecycle(UIView *host) {
         return;
     }
     BOOL test=[NSProcessInfo.processInfo.arguments containsObject:@"--self-test"];
-    if (test || [NSProcessInfo.processInfo.arguments containsObject:@"--self-test-input"])
+    if (test || [NSProcessInfo.processInfo.arguments containsObject:@"--self-test-input"]) {
         [NSUserDefaults.standardUserDefaults removeObjectForKey:@"WolkaraForeverTouchLayoutV1"];
+        [NSUserDefaults.standardUserDefaults removeObjectForKey:@"WolkaraTouchAbilitiesV2"];
+    }
     if (test) { TestLifecycle(self.window.rootViewController.view); fflush(stdout); exit(0); }
     self.gamepad=[[AKPreviewGamepad alloc] initWithHostView:self.window.rootViewController.view];
     UIButton *settings=[UIButton buttonWithType:UIButtonTypeSystem];
@@ -641,6 +663,8 @@ static void TestLifecycle(UIView *host) {
 @end
 int main(int argc, char **argv) {
     @autoreleasepool {
+        setvbuf(stdout, NULL, _IONBF, 0);
+        setvbuf(stderr, NULL, _IONBF, 0);
         BOOL inputTest=[NSProcessInfo.processInfo.arguments containsObject:@"--self-test-input"];
         if ([NSProcessInfo.processInfo.arguments containsObject:@"--self-test"] || inputTest)
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(inputTest?60:30)*NSEC_PER_SEC),dispatch_get_global_queue(QOS_CLASS_DEFAULT,0),^{

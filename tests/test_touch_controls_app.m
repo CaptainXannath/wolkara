@@ -1014,4 +1014,10 @@ static void AKSavedTextSettle(UIViewController *presenter) {
     return config;
 }
 @end
-int main(int argc, char **argv) { @autoreleasepool { return UIApplicationMain(argc, argv, nil, NSStringFromClass(AKInputFixtureApp.class)); } }
+int main(int argc, char **argv) {
+    @autoreleasepool {
+        setvbuf(stdout, NULL, _IONBF, 0);
+        setvbuf(stderr, NULL, _IONBF, 0);
+        return UIApplicationMain(argc, argv, nil, NSStringFromClass(AKInputFixtureApp.class));
+    }
+}

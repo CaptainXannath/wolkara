@@ -62,19 +62,37 @@ jobs:
           export SIMULATOR="$SIM_ID"
           xcrun simctl boot "$SIM_ID" || true
           xcrun simctl bootstatus "$SIM_ID" -b
-          mkdir -p logs
-          echo "=== test_touch_abilities ==="
-          bash tools/test_touch_abilities.sh 2>&1 | tee logs/test-touch-abilities.log
-          echo "=== test_direct_touch_camera ==="
-          bash tools/test_direct_touch_camera.sh 2>&1 | tee logs/test-direct-touch-camera.log
-          echo "=== test_touch_gamepad_ui --self-test ==="
-          bash tools/test_touch_gamepad_ui.sh --self-test 2>&1 | tee logs/test-gamepad-lifecycle.log
-          echo "=== test_touch_gamepad_ui --self-test-input ==="
-          bash tools/test_touch_gamepad_ui.sh --self-test-input 2>&1 | tee logs/test-gamepad-input.log
-          echo "=== test_touch_controls_ui --self-test ==="
-          bash tools/test_touch_controls_ui.sh --self-test 2>&1 | tee logs/test-controls.log
-          echo "=== test_touch_controls_ui --self-test --toolbar-test ==="
-          bash tools/test_touch_controls_ui.sh --self-test --toolbar-test 2>&1 | tee logs/test-toolbar.log
+          mkdir -p logs logs/crash-reports
+          failed=0
+          run_log() {
+            local label="$1" logfile="$2"
+            shift 2
+            echo "=== $label ==="
+            if ! ("$@" 2>&1 | tee "$logfile"); then
+              echo "::error::$label failed (see $logfile)"
+              failed=1
+            fi
+          }
+          run_log "test_touch_abilities" logs/test-touch-abilities.log bash tools/test_touch_abilities.sh
+          run_log "test_direct_touch_camera" logs/test-direct-touch-camera.log bash tools/test_direct_touch_camera.sh
+          run_log "test_touch_gamepad_ui --self-test" logs/test-gamepad-lifecycle.log bash tools/test_touch_gamepad_ui.sh --self-test
+          run_log "test_touch_gamepad_ui --self-test-input" logs/test-gamepad-input.log bash tools/test_touch_gamepad_ui.sh --self-test-input
+          run_log "test_touch_controls_ui --self-test" logs/test-controls.log bash tools/test_touch_controls_ui.sh --self-test
+          run_log "test_touch_controls_ui --self-test --toolbar-test" logs/test-toolbar.log bash tools/test_touch_controls_ui.sh --self-test --toolbar-test
+
+          if [ "$failed" -ne 0 ]; then
+            echo "=== Collecting Simulator & Diagnostic Crash Logs ==="
+            find "$HOME/Library/Logs/DiagnosticReports" -maxdepth 2 \( -name '*.ips' -o -name '*.crash' \) -exec cp {} logs/crash-reports/ \; 2>/dev/null || true
+            if [ -f "$HOME/Library/Logs/CoreSimulator/${SIM_ID}/system.log" ]; then
+              tail -n 200 "$HOME/Library/Logs/CoreSimulator/${SIM_ID}/system.log" > logs/crash-reports/simulator-system-tail.log || true
+            fi
+            for f in logs/crash-reports/*; do
+              [ -f "$f" ] || continue
+              echo "--- $f ---"
+              head -n 80 "$f" || true
+            done
+            exit 1
+          fi
 
       - name: Keep test logs
         if: always()
