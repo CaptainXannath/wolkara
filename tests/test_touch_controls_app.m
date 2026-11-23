@@ -87,6 +87,19 @@
     self.lastAction = @"Keyboard input received";
     [self refresh];
 }
+- (void)insertText:(id)text {
+    [self insertText:text replacementRange:NSMakeRange(NSNotFound, 0)];
+}
+- (void)insertText:(id)text replacementRange:(NSRange)replacementRange {
+    NSString *value = [text isKindOfClass:NSAttributedString.class] ? [(NSAttributedString *)text string] : (NSString *)text;
+    if (!value.length) return;
+    NSRange range = replacementRange.location == NSNotFound ? self.selection : replacementRange;
+    assert(NSMaxRange(range) <= self.text.length);
+    [self.text replaceCharactersInRange:range withString:value];
+    self.selection = NSMakeRange(range.location + value.length, 0);
+    self.lastAction = @"Keyboard input received";
+    [self refresh];
+}
 - (void)mouseMoved:(NSEvent *)event {
     self.lastAction = [NSString stringWithFormat:@"Pointer %.0f, %.0f", event.locationInWindow.x, event.locationInWindow.y];
     [self refresh];
@@ -828,6 +841,12 @@ static void AKSavedTextSettle(UIViewController *presenter) {
                 assert([input.text isEqual:@"Draft @ñ"]);
                 [insert sendActionsForControlEvents:UIControlEventTouchUpInside];
                 AKDrainFixtureEvents();
+                if (![fixture.text isEqual:@"Draft @ñ"] || input.text.length != 0 || insert.enabled || clear.enabled) {
+                    fprintf(stderr, "TOUCH_UI_REPLACE_MISMATCH: guest='%s' input='%s' insert=%d clear=%d\n",
+                            fixture.text.UTF8String ?: "", input.text.UTF8String ?: "",
+                            (int)insert.enabled, (int)clear.enabled);
+                    fflush(stderr);
+                }
                 assert([fixture.text isEqual:@"Draft @ñ"] && input.text.length == 0 && !insert.enabled && !clear.enabled);
                 NSUInteger replacements = fixture.replacements;
                 [insert sendActionsForControlEvents:UIControlEventTouchUpInside];

@@ -68,6 +68,7 @@ static void TestHaptics(void) {
 @property NSUInteger disconnects;
 - (void)finish:(NSError *)error;
 @end
+static void Drain(void);
 @implementation AKFixtureConnection
 - (void)connectWithReplyHandler:(void (^)(NSError *))reply { self.reply=reply; }
 - (void)disconnect { self.disconnects++; self.controller=nil; }
@@ -77,7 +78,7 @@ static void TestHaptics(void) {
         self.controller=(id)controller;
     }
     void (^reply)(NSError *)=self.reply; self.reply=nil; reply(error);
-    CFRunLoopRunInMode(kCFRunLoopDefaultMode,0.03,false);
+    Drain();
 }
 @end
 @interface AKFixtureGamepad : AKTouchGamepad
@@ -133,7 +134,15 @@ static UIControl *Button(UIView *host, NSString *name) {
     UIControl *control=(id)Find(host,[@"tolkara.gamepad." stringByAppendingString:name]);
     assert(control && !control.hidden); return control;
 }
-static void Drain(void) { CFRunLoopRunInMode(kCFRunLoopDefaultMode,0.03,false); }
+static void Drain(void) {
+    __block BOOL drained=NO;
+    dispatch_async(dispatch_get_main_queue(), ^{ drained=YES; });
+    CFTimeInterval deadline=CFAbsoluteTimeGetCurrent()+2.0;
+    while (!drained && CFAbsoluteTimeGetCurrent()<deadline) {
+        CFRunLoopRunInMode(kCFRunLoopDefaultMode,0.02,false);
+    }
+    CFRunLoopRunInMode(kCFRunLoopDefaultMode,0.03,false);
+}
 @interface AKFixtureTouch : UITouch
 @property CGPoint point;
 @property(nonatomic,weak) UIView *targetView;
@@ -500,12 +509,17 @@ static void TestLifecycle(UIView *host) {
     [pad refresh]; assert(pad.connections==1 && !pad.visible);
     AKFixtureController *physical=[AKFixtureController new]; physical.extendedGamepad=@YES;
     pad.devices=@[(id)physical]; [pad refresh];
-    [pad.lastConnection finish:nil]; assert(!pad.visible && pad.lastConnection.disconnects);
+    [pad.lastConnection finish:nil];
+    if (pad.visible || !pad.lastConnection.disconnects) {
+        fprintf(stderr, "[TouchGamepadFixture] TestLifecycle line503 mismatch: visible=%d disconnects=%lu\n",
+            pad.visible, (unsigned long)pad.lastConnection.disconnects);
+    }
+    assert(!pad.visible && pad.lastConnection.disconnects);
     pad.devices=@[]; [pad refresh]; [pad.lastConnection finish:nil]; assert(pad.visible);
     // Our own connect event must never be mistaken for physical hardware.
     pad.devices=@[pad.lastConnection.controller];
     [NSNotificationCenter.defaultCenter postNotificationName:GCControllerDidConnectNotification object:pad.lastConnection.controller];
-    CFRunLoopRunInMode(kCFRunLoopDefaultMode,0.03,false);
+    Drain();
     assert(pad.visible && pad.connections==2);
     pad.devices=@[]; pad.keyboardVisible=YES; assert(!pad.visible && pad.lastConnection.disconnects);
     pad.keyboardVisible=NO; [pad.lastConnection finish:nil]; assert(pad.visible);
