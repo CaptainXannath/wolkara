@@ -104,21 +104,48 @@ static void LayoutTests(void) {
     NSString *suite=[@"org.wolkara.tests.abilities." stringByAppendingString:NSUUID.UUID.UUIDString];
     NSUserDefaults *defaults=[[NSUserDefaults alloc] initWithSuiteName:suite];
     AKTouchActionLayout *layout=[[AKTouchActionLayout alloc] initWithDefaults:defaults];
-    assert(layout.actions.count==16 && layout.enabled && layout.showLabels);
+    assert(layout.actions.count==16 && layout.enabled && layout.showLabels && layout.snapToGrid);
     assert(layout.actions[0].anchor==AKTouchActionAnchorLeft && layout.actions[0].kind==AKTouchActionKindKeyboard);
-    assert(layout.actions[8].anchor==AKTouchActionAnchorRight && layout.actions[8].keyModifiers==AKTouchKeyModifierControl);
-    assert([layout.actions[0].label isEqualToString:@"1"] && [layout.actions[8].label isEqualToString:@"C-1"]);
+    assert(layout.actions[8].anchor==AKTouchActionAnchorRight && layout.actions[8].keyModifiers==0);
+    assert([layout.actions[0].label isEqualToString:@"1"] && [layout.actions[8].label isEqualToString:@"9"]);
+    assert([layout.actions[12].label isEqualToString:@"F1"] && layout.actions[15].keyModifiers==0);
     assert(layout.actions[0].macKeyCode==18 && [layout.actions[0].macCharacters isEqualToString:@"1"]);
     AKTouchAction *addedLeft=[layout addActionOnAnchor:AKTouchActionAnchorLeft];
     AKTouchAction *addedRight=[layout addActionOnAnchor:AKTouchActionAnchorRight];
     assert(addedLeft && addedRight && layout.actions.count==18);
     assert(addedLeft.anchor==AKTouchActionAnchorLeft && addedRight.anchor==AKTouchActionAnchorRight);
+    assert(addedLeft.keyModifiers==0 && addedRight.keyModifiers==0);
     addedLeft.customLabel=@"Bolt"; assert([addedLeft.label isEqualToString:@"Bolt"]);
+    AKTouchAction *dropped=[layout addActionAtCenter:CGPointMake(320,180) inBounds:CGRectMake(0,0,1000,500) snap:YES];
+    assert(dropped && layout.actions.count==19 && dropped.keyModifiers==0);
+    CGRect dropFrame=[layout frameForAction:dropped inBounds:CGRectMake(0,0,1000,500)];
+    assert(fabs(CGRectGetMidX(dropFrame)-320)<=16 && fabs(CGRectGetMidY(dropFrame)-180)<=16);
+    AKTouchAction *dup=[layout duplicateAction:dropped inBounds:CGRectMake(0,0,1000,500)];
+    assert(dup && layout.actions.count==20 && dup!=dropped);
+    dup.kind=AKTouchActionKindMouse; dup.mouseButton=1; assert([dup.label isEqualToString:@"RMB"]);
     [layout save];
     layout=[[AKTouchActionLayout alloc] initWithDefaults:defaults];
-    assert(layout.actions.count==18 && [layout.actions[16].customLabel isEqualToString:@"Bolt"]);
+    assert(layout.actions.count==20 && [layout.actions[16].customLabel isEqualToString:@"Bolt"]);
+    assert(layout.actions[19].kind==AKTouchActionKindMouse && layout.actions[19].mouseButton==1 && [layout.actions[19].label isEqualToString:@"RMB"]);
     [layout removeAction:layout.actions.lastObject];
     [layout removeAction:layout.actions.lastObject];
+    [layout removeAction:layout.actions.lastObject];
+    [layout removeAction:layout.actions.lastObject];
+
+    // Legacy V2 layouts carrying unmodified C-1..C-8 right buttons strip Ctrl automatically.
+    [layout resetToSideLayout];
+    for (NSUInteger i=0;i<8;i++) {
+        layout.actions[8+i].keyName=[NSString stringWithFormat:@"%lu",(unsigned long)(i+1)];
+        layout.actions[8+i].keyModifiers=AKTouchKeyModifierControl;
+    }
+    [layout save];
+    NSDictionary *v3Payload=[defaults dictionaryForKey:@"WolkaraTouchAbilitiesV3"];
+    [defaults removeObjectForKey:@"WolkaraTouchAbilitiesV3"];
+    [defaults setObject:v3Payload forKey:@"WolkaraTouchAbilitiesV2"];
+    layout=[[AKTouchActionLayout alloc] initWithDefaults:defaults];
+    assert(layout.actions[8].keyModifiers==0 && [layout.actions[8].keyName isEqualToString:@"9"]);
+    [layout clearActions]; assert(layout.actions.count==0); [layout save];
+    layout=[[AKTouchActionLayout alloc] initWithDefaults:defaults]; assert(layout.actions.count==0);
 
     [layout resetToClassicLayout];
     assert(layout.actions.count==32 && layout.enabled);
@@ -166,10 +193,10 @@ static void LayoutTests(void) {
     AKTouchAction *added=[layout addAction]; assert(added && layout.actions.count==33); [layout removeAction:added];
     layout.scale=NAN; layout.center=CGPointMake(INFINITY,NAN); assert(isfinite(layout.scale)&&isfinite(layout.center.x)&&isfinite(layout.center.y));
     [layout reset]; [layout save]; assert(layout.actions.count==16 && layout.enabled);
-    [defaults setObject:@{@"actions":@[@{},@"bad",@{@"id":@"bad",@"button":@"unknown"}],@"scale":@"bad"} forKey:@"WolkaraTouchAbilitiesV2"];
+    [defaults setObject:@{@"actions":@[@{},@"bad",@{@"id":@"bad",@"button":@"unknown"}],@"scale":@"bad"} forKey:@"WolkaraTouchAbilitiesV3"];
     layout=[[AKTouchActionLayout alloc] initWithDefaults:defaults]; assert(layout.actions.count==0 && layout.scale==1);
     [defaults removePersistentDomainForName:suite];
-    puts("TOUCH_ABILITIES_LAYOUT_PASS: photo side layout, add left/right, keyboard/gamepad bindings, classic mapping, clamping and malformed preferences.");
+    puts("TOUCH_ABILITIES_LAYOUT_PASS: non-ctrl side layout, drag-drop placement, duplicate/clear, mouse/keyboard bindings, V2 migration and clamping.");
 }
 static BOOL SameFrame(CGRect a,CGRect b) {
     return fabs(a.origin.x-b.origin.x)<.001 && fabs(a.origin.y-b.origin.y)<.001 &&
@@ -208,10 +235,10 @@ static void GroupTests(void) {
     // identifiers, so changing an arrow's binding cannot move it to another diamond.
     [layout resetToClassicLayout];
     layout.enabled=YES; layout.actions[0].button=@"B"; [layout save];
-    NSMutableDictionary *stored=[[defaults dictionaryForKey:@"WolkaraTouchAbilitiesV2"] mutableCopy];
+    NSMutableDictionary *stored=[[defaults dictionaryForKey:@"WolkaraTouchAbilitiesV3"] mutableCopy];
     NSMutableArray *legacy=[NSMutableArray new];
     for (NSDictionary *item in stored[@"actions"]) { NSMutableDictionary *a=item.mutableCopy; [a removeObjectForKey:@"group"]; [legacy addObject:a]; }
-    stored[@"actions"]=legacy; [defaults setObject:stored forKey:@"WolkaraTouchAbilitiesV2"];
+    stored[@"actions"]=legacy; [defaults setObject:stored forKey:@"WolkaraTouchAbilitiesV3"];
     CGPoint position=layout.actions[0].position;
     layout=[[AKTouchActionLayout alloc] initWithDefaults:defaults];
     assert(layout.enabled && [layout groupForAction:layout.actions[0]].count==4 && [layout.actions[0].button isEqual:@"B"]);

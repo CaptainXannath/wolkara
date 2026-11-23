@@ -1,7 +1,8 @@
 #import "TouchActionLayout.h"
 #include <math.h>
 
-static NSString *const ActionsKey = @"WolkaraTouchAbilitiesV2";
+static NSString *const ActionsKey = @"WolkaraTouchAbilitiesV3";
+static NSString *const V2ActionsKey = @"WolkaraTouchAbilitiesV2";
 static NSString *const LegacyActionsKey = @"WolkaraTouchAbilitiesV1";
 
 typedef struct {
@@ -123,6 +124,9 @@ static NSString *DefaultGroup(NSString *identifier, AKTouchActionAnchor anchor) 
     if (self.kind == AKTouchActionKindKeyboard) {
         return [AKTouchAction shortLabelForKeyName:self.keyName modifiers:self.keyModifiers];
     }
+    if (self.kind == AKTouchActionKindMouse) {
+        return self.mouseButton == 1 ? @"RMB" : self.mouseButton == 2 ? @"MMB" : @"LMB";
+    }
     NSString *prefix = @[@"", @"LT + ", @"RT + ", @"LT + RT + "][MIN(self.modifiers, 3)];
     NSString *button = @{@"up": @"↑", @"right": @"→", @"down": @"↓", @"left": @"←"}[self.button] ?: self.button;
     return [prefix stringByAppendingString:button ?: @"A"];
@@ -140,23 +144,54 @@ static NSString *DefaultGroup(NSString *identifier, AKTouchActionAnchor anchor) 
         _defaults = defaults;
         [self resetToSideLayout];
         id stored = [defaults objectForKey:ActionsKey];
+        BOOL migratingFromV2 = NO;
         if (![stored isKindOfClass:NSDictionary.class]) {
-            // Preserve explicit legacy V1 ability layouts only if the user enabled them.
-            id legacy = [defaults objectForKey:LegacyActionsKey];
-            if ([legacy isKindOfClass:NSDictionary.class] && Number(legacy[@"enabled"], 0) != 0) {
-                stored = legacy;
+            id v2 = [defaults objectForKey:V2ActionsKey];
+            if ([v2 isKindOfClass:NSDictionary.class]) {
+                stored = v2;
+                migratingFromV2 = YES;
             } else {
-                return self;
+                // Preserve explicit legacy V1 ability layouts only if the user enabled them.
+                id legacy = [defaults objectForKey:LegacyActionsKey];
+                if ([legacy isKindOfClass:NSDictionary.class] && Number(legacy[@"enabled"], 0) != 0) {
+                    stored = legacy;
+                } else {
+                    return self;
+                }
             }
         }
         [self loadFromDictionary:stored];
+        if (migratingFromV2) [self stripUnmodifiedCtrlDefaults];
     }
     return self;
+}
+
+- (void)stripUnmodifiedCtrlDefaults {
+    NSArray<NSString *> *replacementKeys = @[@"9", @"0", @"-", @"=", @"F1", @"F2", @"F3", @"F4"];
+    NSMutableArray<AKTouchAction *> *rightDefaults = [NSMutableArray new];
+    for (AKTouchAction *a in _items) {
+        if (![a.identifier hasPrefix:@"side.right."]) continue;
+        NSInteger idx = [[a.identifier substringFromIndex:@"side.right.".length] integerValue];
+        if (idx < 0 || idx >= (NSInteger)replacementKeys.count) continue;
+        if (a.kind != AKTouchActionKindKeyboard || a.keyModifiers != AKTouchKeyModifierControl || a.customLabel.length) {
+            return;
+        }
+        NSString *oldKey = [NSString stringWithFormat:@"%ld", (long)(idx + 1)];
+        if (![a.keyName isEqualToString:oldKey]) return;
+        [rightDefaults addObject:a];
+    }
+    if (!rightDefaults.count) return;
+    for (AKTouchAction *a in rightDefaults) {
+        NSInteger idx = [[a.identifier substringFromIndex:@"side.right.".length] integerValue];
+        a.keyName = replacementKeys[idx];
+        a.keyModifiers = 0;
+    }
 }
 
 - (void)loadFromDictionary:(NSDictionary *)saved {
     _enabled = Number(saved[@"enabled"], 1) != 0;
     _showLabels = Number(saved[@"showLabels"], 1) != 0;
+    _snapToGrid = Number(saved[@"snapToGrid"], 1) != 0;
     self.scale = Number(saved[@"scale"], 1);
     self.borderOpacity = Number(saved[@"border"], 0.45);
     self.fillOpacity = Number(saved[@"fill"], 0.55);
@@ -173,13 +208,15 @@ static NSString *DefaultGroup(NSString *identifier, AKTouchActionAnchor anchor) 
         NSString *identifier = item[@"id"];
         if (![identifier isKindOfClass:NSString.class] || !identifier.length || identifier.length > 80 ||
             [ids containsObject:identifier]) continue;
-        AKTouchActionKind kind = (AKTouchActionKind)Bounded(Number(item[@"kind"], 0), 0, 1, 0);
+        AKTouchActionKind kind = (AKTouchActionKind)Bounded(Number(item[@"kind"], 0), 0, 2, 0);
         NSString *button = item[@"button"];
         NSString *keyName = item[@"key"];
         if (kind == AKTouchActionKindGamepad) {
             if (![button isKindOfClass:NSString.class] || ![validButtons containsObject:button]) continue;
-        } else {
+        } else if (kind == AKTouchActionKindKeyboard) {
             if (![keyName isKindOfClass:NSString.class] || !FindKeyEntry(keyName)) continue;
+            if (![button isKindOfClass:NSString.class] || ![validButtons containsObject:button]) button = @"A";
+        } else {
             if (![button isKindOfClass:NSString.class] || ![validButtons containsObject:button]) button = @"A";
         }
         AKTouchAction *a = [AKTouchAction new];
@@ -189,6 +226,7 @@ static NSString *DefaultGroup(NSString *identifier, AKTouchActionAnchor anchor) 
         a.button = button ?: @"A";
         a.keyName = FindKeyEntry(keyName) ? keyName : @"1";
         a.keyModifiers = (AKTouchKeyModifier)Bounded(Number(item[@"keyMods"], 0), 0, 15, 0);
+        a.mouseButton = (unsigned)Bounded(Number(item[@"mouseBtn"], 0), 0, 2, 0);
         id custom = item[@"label"];
         if ([custom isKindOfClass:NSString.class] && [custom length] > 0 && [custom length] <= 24) a.customLabel = custom;
         id group = item[@"group"];
@@ -220,6 +258,7 @@ static NSString *DefaultGroup(NSString *identifier, AKTouchActionAnchor anchor) 
 - (void)resetToSideLayout {
     _enabled = YES;
     _showLabels = YES;
+    _snapToGrid = YES;
     _scale = 1;
     _borderOpacity = 0.45;
     _fillOpacity = 0.55;
@@ -246,8 +285,8 @@ static NSString *DefaultGroup(NSString *identifier, AKTouchActionAnchor anchor) 
         [_items addObject:a];
     }
 
-    // Right cluster: 2 rows x 4 columns below the minimap and above Camera (keys C-1..C-8).
-    NSArray<NSString *> *rightKeys = @[@"1", @"2", @"3", @"4", @"5", @"6", @"7", @"8"];
+    // Right cluster: 2 rows x 4 columns below the minimap (plain keys 9,0,-,=,F1-F4; no Ctrl+).
+    NSArray<NSString *> *rightKeys = @[@"9", @"0", @"-", @"=", @"F1", @"F2", @"F3", @"F4"];
     const CGFloat rightCols[4] = {-168, -124, -80, -36};
     const CGFloat rightRows[2] = {8, 54};
     for (NSUInteger i = 0; i < rightKeys.count; i++) {
@@ -257,7 +296,7 @@ static NSString *DefaultGroup(NSString *identifier, AKTouchActionAnchor anchor) 
         a.anchor = AKTouchActionAnchorRight;
         a.kind = AKTouchActionKindKeyboard;
         a.keyName = rightKeys[i];
-        a.keyModifiers = AKTouchKeyModifierControl;
+        a.keyModifiers = 0;
         a.position = CGPointMake(rightCols[i % 4], rightRows[i / 4]);
         a.diameter = 40;
         a.enabled = YES;
@@ -268,6 +307,7 @@ static NSString *DefaultGroup(NSString *identifier, AKTouchActionAnchor anchor) 
 - (void)resetToClassicLayout {
     _enabled = YES;
     _showLabels = NO;
+    _snapToGrid = YES;
     _scale = 1;
     _borderOpacity = 0.25;
     _fillOpacity = 0.20;
@@ -393,6 +433,29 @@ static NSString *DefaultGroup(NSString *identifier, AKTouchActionAnchor anchor) 
     if (action) [self moveActions:@[action] by:delta inBounds:bounds];
 }
 
+- (void)setCenter:(CGPoint)point forAction:(AKTouchAction *)action inBounds:(CGRect)bounds snap:(BOOL)snap {
+    if (!action || bounds.size.width <= 0 || bounds.size.height <= 0 || !isfinite(point.x) || !isfinite(point.y)) return;
+    CGFloat unit = [self unitScaleForAnchor:action.anchor inBounds:bounds];
+    if (unit <= 0) return;
+    CGFloat cx = point.x, cy = point.y;
+    if (snap) {
+        const CGFloat step = 16.0;
+        cx = CGRectGetMinX(bounds) + round((cx - CGRectGetMinX(bounds)) / step) * step;
+        cy = CGRectGetMinY(bounds) + round((cy - CGRectGetMinY(bounds)) / step) * step;
+    }
+    CGFloat diameter = MIN(action.diameter * unit, MIN(bounds.size.width - 8, bounds.size.height - 8));
+    diameter = MAX(16, diameter);
+    CGFloat minCx = CGRectGetMinX(bounds) + 4 + diameter / 2;
+    CGFloat maxCx = MAX(minCx, CGRectGetMaxX(bounds) - 4 - diameter / 2);
+    CGFloat minCy = CGRectGetMinY(bounds) + 4 + diameter / 2;
+    CGFloat maxCy = MAX(minCy, CGRectGetMaxY(bounds) - 4 - diameter / 2);
+    cx = Bounded(cx, minCx, maxCx, minCx);
+    cy = Bounded(cy, minCy, maxCy, minCy);
+    CGPoint origin = [self originForAnchor:action.anchor inBounds:bounds unit:unit];
+    action.position = CGPointMake(Bounded((cx - origin.x) / unit, -1200, 1200, action.position.x),
+                                  Bounded((cy - origin.y) / unit, -900, 900, action.position.y));
+}
+
 - (NSArray<AKTouchAction *> *)groupForAction:(AKTouchAction *)action {
     if (!action) return @[];
     NSMutableArray *group = [NSMutableArray new];
@@ -462,31 +525,42 @@ static NSString *DefaultGroup(NSString *identifier, AKTouchActionAnchor anchor) 
 }
 
 - (NSString *)nextSuggestedKeyForAnchor:(AKTouchActionAnchor)anchor modifierOut:(AKTouchKeyModifier *)modOut {
-    NSArray<NSString *> *barKeys = @[@"1", @"2", @"3", @"4", @"5", @"6", @"7", @"8", @"9", @"0", @"-", @"="];
+    NSArray<NSString *> *barKeys = anchor == AKTouchActionAnchorRight
+        ? @[@"9", @"0", @"-", @"=", @"1", @"2", @"3", @"4", @"5", @"6", @"7", @"8"]
+        : @[@"1", @"2", @"3", @"4", @"5", @"6", @"7", @"8", @"9", @"0", @"-", @"="];
     NSArray<NSString *> *fKeys = @[@"F1", @"F2", @"F3", @"F4", @"F5", @"F6", @"F7", @"F8", @"F9", @"F10", @"F11", @"F12"];
-    NSArray<NSNumber *> *mods = anchor == AKTouchActionAnchorRight
-        ? @[@(AKTouchKeyModifierControl), @(AKTouchKeyModifierShift), @0, @(AKTouchKeyModifierOption)]
-        : @[@0, @(AKTouchKeyModifierShift), @(AKTouchKeyModifierControl), @(AKTouchKeyModifierOption)];
+    NSArray<NSString *> *extraKeys = @[@"Q", @"E", @"R", @"T", @"G", @"V", @"C", @"X", @"Z", @"B", @"H", @"J", @"K", @"L"];
     NSMutableSet<NSString *> *used = [NSMutableSet new];
     for (AKTouchAction *item in _items) {
         if (item.kind == AKTouchActionKindKeyboard) {
             [used addObject:[NSString stringWithFormat:@"%lu:%@", (unsigned long)item.keyModifiers, item.keyName]];
         }
     }
-    for (NSNumber *m in mods) {
+    for (NSString *k in barKeys) {
+        if (![used containsObject:[@"0:" stringByAppendingString:k]]) {
+            if (modOut) *modOut = 0;
+            return k;
+        }
+    }
+    for (NSString *k in fKeys) {
+        if (![used containsObject:[@"0:" stringByAppendingString:k]]) {
+            if (modOut) *modOut = 0;
+            return k;
+        }
+    }
+    for (NSString *k in extraKeys) {
+        if (![used containsObject:[@"0:" stringByAppendingString:k]]) {
+            if (modOut) *modOut = 0;
+            return k;
+        }
+    }
+    for (NSNumber *m in @[@(AKTouchKeyModifierShift), @(AKTouchKeyModifierOption)]) {
         for (NSString *k in barKeys) {
             NSString *sig = [NSString stringWithFormat:@"%lu:%@", (unsigned long)m.unsignedIntegerValue, k];
             if (![used containsObject:sig]) {
                 if (modOut) *modOut = m.unsignedIntegerValue;
                 return k;
             }
-        }
-    }
-    for (NSString *k in fKeys) {
-        NSString *sig = [NSString stringWithFormat:@"0:%@", k];
-        if (![used containsObject:sig]) {
-            if (modOut) *modOut = 0;
-            return k;
         }
     }
     if (modOut) *modOut = 0;
@@ -537,8 +611,54 @@ static NSString *DefaultGroup(NSString *identifier, AKTouchActionAnchor anchor) 
     return a;
 }
 
+- (AKTouchAction *)addActionAtCenter:(CGPoint)point inBounds:(CGRect)bounds snap:(BOOL)snap {
+    AKTouchActionAnchor anchor = (bounds.size.width > 0 && point.x >= CGRectGetMidX(bounds))
+        ? AKTouchActionAnchorRight : AKTouchActionAnchorLeft;
+    AKTouchAction *added = [self addActionOnAnchor:anchor];
+    if (added && bounds.size.width > 0 && bounds.size.height > 0) {
+        [self setCenter:point forAction:added inBounds:bounds snap:snap];
+    }
+    return added;
+}
+
+- (AKTouchAction *)duplicateAction:(AKTouchAction *)action inBounds:(CGRect)bounds {
+    if (!action || _items.count >= 64) return nil;
+    AKTouchAction *copy = [AKTouchAction new];
+    copy.identifier = NSUUID.UUID.UUIDString;
+    copy.anchor = action.anchor == AKTouchActionAnchorCenter ? AKTouchActionAnchorLeft : action.anchor;
+    copy.groupIdentifier = DefaultGroup(copy.identifier, copy.anchor);
+    copy.kind = action.kind;
+    if (action.kind == AKTouchActionKindKeyboard) {
+        AKTouchKeyModifier mods = 0;
+        copy.keyName = [self nextSuggestedKeyForAnchor:copy.anchor modifierOut:&mods];
+        copy.keyModifiers = mods;
+    } else if (action.kind == AKTouchActionKindMouse) {
+        copy.mouseButton = action.mouseButton;
+    } else {
+        copy.button = action.button;
+        copy.modifiers = action.modifiers;
+    }
+    copy.diameter = action.diameter;
+    copy.enabled = YES;
+    [_items addObject:copy];
+    if (bounds.size.width > 0 && bounds.size.height > 0) {
+        CGRect srcFrame = [self frameForAction:action inBounds:bounds];
+        CGFloat offset = (copy.anchor == AKTouchActionAnchorRight ? -1 : 1) * MAX(44, srcFrame.size.width + 6);
+        CGPoint dst = CGPointMake(CGRectGetMidX(srcFrame) + offset, CGRectGetMidY(srcFrame));
+        if (!CGRectContainsPoint(CGRectInset(bounds, 20, 20), dst)) {
+            dst = CGPointMake(CGRectGetMidX(srcFrame), CGRectGetMidY(srcFrame) + MAX(44, srcFrame.size.height + 6));
+        }
+        [self setCenter:dst forAction:copy inBounds:bounds snap:self.snapToGrid];
+    }
+    return copy;
+}
+
 - (void)removeAction:(AKTouchAction *)action {
     if (action) [_items removeObject:action];
+}
+
+- (void)clearActions {
+    [_items removeAllObjects];
 }
 
 - (void)save {
@@ -553,6 +673,7 @@ static NSString *DefaultGroup(NSString *identifier, AKTouchActionAnchor anchor) 
             @"modifiers": @(a.modifiers),
             @"key": a.keyName ?: @"1",
             @"keyMods": @(a.keyModifiers),
+            @"mouseBtn": @(a.mouseButton),
             @"x": @(a.position.x),
             @"y": @(a.position.y),
             @"diameter": @(a.diameter),
@@ -564,6 +685,7 @@ static NSString *DefaultGroup(NSString *identifier, AKTouchActionAnchor anchor) 
     [_defaults setObject:@{
         @"enabled": @(self.enabled),
         @"showLabels": @(self.showLabels),
+        @"snapToGrid": @(self.snapToGrid),
         @"scale": @(self.scale),
         @"border": @(self.borderOpacity),
         @"fill": @(self.fillOpacity),

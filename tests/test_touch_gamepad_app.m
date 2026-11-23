@@ -617,6 +617,7 @@ static void TestLifecycle(UIView *host) {
     if (test || [NSProcessInfo.processInfo.arguments containsObject:@"--self-test-input"]) {
         [NSUserDefaults.standardUserDefaults removeObjectForKey:@"WolkaraForeverTouchLayoutV1"];
         [NSUserDefaults.standardUserDefaults removeObjectForKey:@"WolkaraTouchAbilitiesV2"];
+        [NSUserDefaults.standardUserDefaults removeObjectForKey:@"WolkaraTouchAbilitiesV3"];
     }
     if (test) { TestLifecycle(self.window.rootViewController.view); fflush(stdout); exit(0); }
     self.gamepad=[[AKPreviewGamepad alloc] initWithHostView:self.window.rootViewController.view];

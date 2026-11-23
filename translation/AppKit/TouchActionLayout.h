@@ -3,6 +3,7 @@
 typedef NS_ENUM(NSUInteger, AKTouchActionKind) {
     AKTouchActionKindGamepad = 0,
     AKTouchActionKindKeyboard = 1,
+    AKTouchActionKindMouse = 2,
 };
 
 typedef NS_ENUM(NSUInteger, AKTouchActionAnchor) {
@@ -26,6 +27,7 @@ typedef NS_OPTIONS(NSUInteger, AKTouchKeyModifier) {
 @property(nonatomic) NSUInteger modifiers;
 @property(nonatomic, copy) NSString *keyName;
 @property(nonatomic) AKTouchKeyModifier keyModifiers;
+@property(nonatomic) unsigned mouseButton;
 @property(nonatomic, copy) NSString *customLabel;
 @property(nonatomic) CGPoint position;
 @property(nonatomic) CGFloat diameter;
@@ -45,6 +47,7 @@ typedef NS_OPTIONS(NSUInteger, AKTouchKeyModifier) {
 - (instancetype)initWithDefaults:(NSUserDefaults *)defaults;
 @property(nonatomic) BOOL enabled;
 @property(nonatomic) BOOL showLabels;
+@property(nonatomic) BOOL snapToGrid;
 @property(nonatomic) CGFloat scale, borderOpacity, fillOpacity;
 @property(nonatomic) CGPoint center;
 @property(nonatomic) CGPoint leftOffset, rightOffset;
@@ -56,12 +59,16 @@ typedef NS_OPTIONS(NSUInteger, AKTouchKeyModifier) {
 - (CGRect)frameForAction:(AKTouchAction *)action inBounds:(CGRect)bounds;
 - (void)moveGroupBy:(CGPoint)delta inBounds:(CGRect)bounds;
 - (void)moveAction:(AKTouchAction *)action by:(CGPoint)delta inBounds:(CGRect)bounds;
+- (void)setCenter:(CGPoint)point forAction:(AKTouchAction *)action inBounds:(CGRect)bounds snap:(BOOL)snap;
 - (NSArray<AKTouchAction *> *)groupForAction:(AKTouchAction *)action;
 - (void)moveButtonGroupForAction:(AKTouchAction *)action by:(CGPoint)delta inBounds:(CGRect)bounds;
 - (void)resizeButtonGroupForAction:(AKTouchAction *)action diameter:(CGFloat)diameter inBounds:(CGRect)bounds;
 - (AKTouchAction *)addAction;
 - (AKTouchAction *)addActionOnAnchor:(AKTouchActionAnchor)anchor;
+- (AKTouchAction *)addActionAtCenter:(CGPoint)point inBounds:(CGRect)bounds snap:(BOOL)snap;
+- (AKTouchAction *)duplicateAction:(AKTouchAction *)action inBounds:(CGRect)bounds;
 - (void)removeAction:(AKTouchAction *)action;
+- (void)clearActions;
 - (void)reset;
 - (void)resetToSideLayout;
 - (void)resetToClassicLayout;

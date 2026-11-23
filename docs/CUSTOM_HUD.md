@@ -11,13 +11,13 @@ This custom build updates Wolkara's in-game touch UI (based on the `v0.1.0-stikd
   - **Bottom-Left**: Clean circular movement joystick (no bulky outer D-pad sector wheel; double-tap still sends L3).
   - **Bottom-Right**: **`Target`** pill (`Tab`), **`Interact`** pill (`F`), **`Jump`** circle (`Space`), and **`Camera`** drag pad (right-mouse camera/character look by default, or left-mouse orbit in Settings).
   - Expand `⌄` and tap the controller icon to switch between **Photo HUD** and **Full Gamepad** mode anytime, or hold to hide/show controls.
-- **Side Ability Buttons (`+ Left` / `+ Right`)** (`translation/AppKit/TouchActionLayout.h/.m`, `TouchActionOverlay.m`):
-  - Defaults to **8 left-side buttons** (`1`–`8`, above the left joystick) and **8 right-side buttons** (`C-1`–`C-8`, below the minimap and above `Camera`).
-  - Open **⌄ → Settings (gear) → Side Ability Buttons (+ Left / + Right)…** to:
-    - Add more buttons onto the **left** or **right** sides (`+ Left` / `+ Right`).
-    - Bind any circle to a **Keyboard hotkey** (`1`–`0`, `-`, `=`, `F1`–`F12`, `Space`, `Tab`, `Esc`, letters, plus `Shift`/`Ctrl`/`Alt`/`Cmd` modifiers) OR a **Gamepad chord** (`A/B/X/Y/LB/RB/D-pad + LT/RT`).
-    - Set a custom short label, adjust **Fill** and **Border** opacity (down to `0%` to overlay WoW's own circular action bar icons), or toggle labels on/off during play.
-    - Drag circles individually, per side/group, or as a whole layout; dragging across any ability circle still smoothly pans the camera.
+- **Drag-and-Drop Custom Buttons** (`translation/AppKit/TouchActionLayout.h/.m`, `TouchActionOverlay.m`):
+  - Defaults to **8 left-side buttons** (`1`–`8`) and **8 right-side plain buttons** (`9`, `0`, `-`, `=`, `F1`–`F4`) with **no `Ctrl+` chords**.
+  - Open **⌄ → Settings (gear) → Custom Buttons (Drag & Drop)…** (or **Edit Layout → Edit Buttons…**) to:
+    - **Drag `⊕ Drag Button`** directly off the palette and drop a new button anywhere on screen (with toggleable 16pt **Snap** grid, or **Clear** to start from an empty canvas).
+    - Opens in **Drag One** mode by default: drag any individual button, double-tap or tap **Label**, **Copy** to duplicate, **Delete**, or switch between **Drag One**, **Side / Group**, and **Move All**.
+    - Bind any circle to a **Keyboard key** (`1`–`0`, `-`, `=`, `F1`–`F12`, `Space`, `Tab`, `Esc`, letters, optional `Shift`/`Ctrl`/`Alt`/`Cmd`), a **Mouse click** (`LMB`/`RMB`/`MMB`), or a **Gamepad chord**.
+    - Dock (`⇅ Bottom` / `⇅ Top`) or drag the editor bar anywhere, adjust **Fill** and **Border** opacity (down to `0%` over WoW action bars), and toggle labels on/off.
 
 ## Building the `.ipa`
 

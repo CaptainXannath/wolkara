@@ -12,15 +12,18 @@ static void Tap(UIView *host,NSString *identifier) {
 }
 @interface AKAbilityTestPan : UIPanGestureRecognizer
 @property CGPoint movement;
+@property CGPoint dropPoint;
 @property UIGestureRecognizerState phase;
 @end
 @implementation AKAbilityTestPan
 - (CGPoint)translationInView:(UIView *)view { (void)view; return self.movement; }
 - (void)setTranslation:(CGPoint)p inView:(UIView *)view { (void)view; self.movement=p; }
+- (CGPoint)locationInView:(UIView *)view { (void)view; return self.dropPoint; }
 - (UIGestureRecognizerState)state { return self.phase; }
 @end
 @interface AKTouchActionOverlay (Fixture)
 - (void)drag:(UIPanGestureRecognizer *)pan;
+- (void)dragNewButton:(UIPanGestureRecognizer *)pan;
 - (void)resetLayout;
 - (void)rebuildCircles;
 - (void)updateEditor;
@@ -51,16 +54,26 @@ static void CircleTap(UIControl *circle,UIView *host) {
 void TestTouchAbilitiesUI(UIView *host,AKTouchGamepad *manager,GCVirtualController *controller) {
     [NSUserDefaults.standardUserDefaults removeObjectForKey:@"WolkaraTouchAbilitiesV1"];
     [NSUserDefaults.standardUserDefaults removeObjectForKey:@"WolkaraTouchAbilitiesV2"];
+    [NSUserDefaults.standardUserDefaults removeObjectForKey:@"WolkaraTouchAbilitiesV3"];
     [manager toggleSettings]; Tap(host,@"wolkara.controls.abilities");
     assert(manager.configuring && manager.editing);
     UIControl *sideFirst=(id)Find(host,@"wolkara.ability.side.left.0"); assert(sideFirst);
     AKTouchActionOverlay *overlay=(id)sideFirst.superview;
+    UISegmentedControl *mode=(id)Find(host,@"wolkara.abilities.mode"); assert(mode.numberOfSegments==3 && mode.selectedSegmentIndex==0);
     Tap(host,@"wolkara.abilities.addLeft"); assert(overlay.layout.actions.count==17);
     Tap(host,@"wolkara.abilities.addRight"); assert(overlay.layout.actions.count==18);
+    Tap(host,@"wolkara.abilities.duplicate"); assert(overlay.layout.actions.count==19);
+    Tap(host,@"wolkara.abilities.delete"); assert(overlay.layout.actions.count==18);
     Tap(host,@"wolkara.abilities.delete"); assert(overlay.layout.actions.count==17);
+    AKAbilityTestPan *dropPan=[AKAbilityTestPan new];
+    dropPan.dropPoint=CGPointMake(320,260);
+    dropPan.phase=UIGestureRecognizerStateBegan; [overlay dragNewButton:dropPan];
+    dropPan.dropPoint=CGPointMake(352,272);
+    dropPan.phase=UIGestureRecognizerStateChanged; [overlay dragNewButton:dropPan];
+    dropPan.phase=UIGestureRecognizerStateEnded; [overlay dragNewButton:dropPan];
+    assert(overlay.layout.actions.count==18);
     [overlay.layout resetToClassicLayout]; [overlay rebuildCircles];
-    UISegmentedControl *mode=(id)Find(host,@"wolkara.abilities.mode"); assert(mode.numberOfSegments==3);
-    mode.selectedSegmentIndex=0; [mode sendActionsForControlEvents:UIControlEventValueChanged];
+    mode.selectedSegmentIndex=2; [mode sendActionsForControlEvents:UIControlEventValueChanged];
     UIControl *first=(id)Find(host,@"wolkara.ability.0.up"); assert(first);
     [overlay layoutIfNeeded];
     UISwitch *enabled=(id)Find(host,@"wolkara.abilities.enabled"); enabled.on=YES;
@@ -85,7 +98,7 @@ void TestTouchAbilitiesUI(UIView *host,AKTouchGamepad *manager,GCVirtualControll
     assert(fabs(overlay.layout.actions[0].diameter-oldSize*1.2)<.01);
     assert(overlay.layout.actions[4].diameter==42);
     Capture(host,@"abilities-editor.png");
-    mode.selectedSegmentIndex=2; [mode sendActionsForControlEvents:UIControlEventValueChanged];
+    mode.selectedSegmentIndex=0; [mode sendActionsForControlEvents:UIControlEventValueChanged];
     CGPoint other=overlay.layout.actions[1].position,position=overlay.layout.actions[0].position;
     pan.movement=CGPointMake(10,5); [overlay drag:pan];
     assert(!CGPointEqualToPoint(position,overlay.layout.actions[0].position)); assert(CGPointEqualToPoint(other,overlay.layout.actions[1].position));

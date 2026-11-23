@@ -448,7 +448,7 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
         [self addSubview:_editDone];
 
         _editAbilitiesButton = [UIButton buttonWithType:UIButtonTypeSystem];
-        [_editAbilitiesButton setTitle:@"Edit Abilities…" forState:UIControlStateNormal];
+        [_editAbilitiesButton setTitle:@"Edit Buttons…" forState:UIControlStateNormal];
         _editAbilitiesButton.backgroundColor = [UIColor colorWithWhite:0.12 alpha:0.96];
         _editAbilitiesButton.tintColor = [UIColor colorWithRed:0.92 green:0.80 blue:0.50 alpha:1];
         _editAbilitiesButton.layer.cornerRadius = 14;
@@ -833,7 +833,7 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     [sizes addArrangedSubview:hudRow2];
 
     UIButton *abilities = [UIButton buttonWithType:UIButtonTypeSystem];
-    [abilities setTitle:@"Side Ability Buttons (+ Left / + Right)…" forState:UIControlStateNormal];
+    [abilities setTitle:@"Custom Buttons (Drag & Drop)…" forState:UIControlStateNormal];
     abilities.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightBold];
     abilities.tintColor = [UIColor colorWithRed:0.95 green:0.82 blue:0.48 alpha:1];
     abilities.accessibilityIdentifier = @"wolkara.controls.abilities";
@@ -1015,6 +1015,8 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
 @end
 
 @interface AKPendingKeyRelease : NSObject
+@property(nonatomic) BOOL isMouse;
+@property(nonatomic) unsigned mouseButton;
 @property(nonatomic) unsigned short keyCode;
 @property(nonatomic, copy) NSString *characters;
 @property(nonatomic) NSUInteger modifiers;
@@ -1060,6 +1062,11 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
             if (action.kind == AKTouchActionKindKeyboard) {
                 [self->_haptics buttonPressed];
                 [self triggerKeyboardAction:action];
+                return YES;
+            }
+            if (action.kind == AKTouchActionKindMouse) {
+                [self->_haptics buttonPressed];
+                [self triggerMouseAction:action];
                 return YES;
             }
             BOOL accepted = [self->_actionInput beginAction:action.identifier button:action.button modifiers:action.modifiers];
@@ -1268,12 +1275,40 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     [NSRunLoop.mainRunLoop addTimer:pending.timer forMode:NSRunLoopCommonModes];
 }
 
+- (void)sendMouseButton:(unsigned)button pressed:(BOOL)pressed {
+    UIView<AKTouchDragHost> *host = (id)_host;
+    if ([host respondsToSelector:@selector(ak_sendMouseClick:pressed:)]) {
+        [host ak_sendMouseClick:button pressed:pressed];
+    }
+}
+
+- (void)triggerMouseAction:(AKTouchAction *)action {
+    unsigned button = action.mouseButton;
+    [self sendMouseButton:button pressed:YES];
+    AKPendingKeyRelease *pending = [AKPendingKeyRelease new];
+    pending.isMouse = YES;
+    pending.mouseButton = button;
+    __weak AKTouchGamepad *weakSelf = self;
+    __weak AKPendingKeyRelease *weakPending = pending;
+    pending.timer = [NSTimer timerWithTimeInterval:0.04 repeats:NO block:^(NSTimer *timer) {
+        (void)timer;
+        AKTouchGamepad *self = weakSelf;
+        AKPendingKeyRelease *item = weakPending;
+        if (!self || !item) return;
+        [self->_pendingKeyReleases removeObject:item];
+        [self sendMouseButton:item.mouseButton pressed:NO];
+    }];
+    [_pendingKeyReleases addObject:pending];
+    [NSRunLoop.mainRunLoop addTimer:pending.timer forMode:NSRunLoopCommonModes];
+}
+
 - (void)releaseAllPendingKeyboardActions {
     NSArray<AKPendingKeyRelease *> *pending = [_pendingKeyReleases copy];
     [_pendingKeyReleases removeAllObjects];
     for (AKPendingKeyRelease *item in pending) {
         [item.timer invalidate];
-        [self sendKeyCode:item.keyCode characters:item.characters modifiers:item.modifiers pressed:NO];
+        if (item.isMouse) [self sendMouseButton:item.mouseButton pressed:NO];
+        else [self sendKeyCode:item.keyCode characters:item.characters modifiers:item.modifiers pressed:NO];
     }
 }
 
@@ -1292,10 +1327,7 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
         return;
     }
     if ([binding isEqualToString:@"mouse.right"]) {
-        UIView<AKTouchDragHost> *host = (id)_host;
-        if ([host respondsToSelector:@selector(ak_sendMouseClick:pressed:)]) {
-            [host ak_sendMouseClick:1 pressed:pressed];
-        }
+        [self sendMouseButton:1 pressed:pressed];
         return;
     }
     unsigned short keyCode = 0;
