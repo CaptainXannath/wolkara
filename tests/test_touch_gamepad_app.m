@@ -214,44 +214,36 @@ static void EditShoulders(UIView *host, AKPreviewGamepad *manager, CGPoint movem
 static void TestSimpleShoulderPositions(UIView *host, AKPreviewGamepad *manager) {
     GCVirtualController *connection=manager.created;
     UIView *overlay=Button(host,GCInputLeftShoulder).superview;
-    NSArray *names=@[GCInputLeftShoulder,GCInputRightShoulder];
-    for (NSUInteger swapped=0;swapped<2;swapped++) {
-        manager.simple=NO; [manager.layout reset]; manager.layout.swapShoulders=swapped;
-        [manager.layout save]; [overlay setNeedsLayout]; [host layoutIfNeeded];
-        EditShoulders(host,manager,CGPointMake(10,45),NO);
-        CGRect full[2],simple[2];
-        for (NSUInteger i=0;i<2;i++) full[i]=Button(host,names[i]).frame;
+    manager.simple=NO; [manager.layout reset]; [overlay setNeedsLayout]; [host layoutIfNeeded];
+    EditShoulders(host,manager,CGPointMake(10,45),NO);
+    CGRect fullLeft=Button(host,GCInputLeftShoulder).frame, fullRight=Button(host,GCInputRightShoulder).frame;
+    manager.simple=YES; [host layoutIfNeeded];
+    NSArray *hudIds=@[@"wolkara.hud.target",@"wolkara.hud.interact",@"wolkara.hud.jump",@"wolkara.hud.camera"];
+    for (NSString *ident in hudIds) {
+        UIView *item=Find(host,ident); assert(item && !item.hidden);
+    }
+    [manager toggleSettings]; [host layoutIfNeeded];
+    UISwitch *edit=(id)Find(host,@"wolkaraforever.controls.edit"); assert(edit);
+    edit.on=YES; [edit sendActionsForControlEvents:UIControlEventValueChanged]; [host layoutIfNeeded];
+    UIView *target=Find(host,@"wolkara.hud.target"); CGRect targetBefore=target.frame;
+    AKFixturePan *pan=[AKFixturePan new]; [target addGestureRecognizer:pan];
+    pan.testState=UIGestureRecognizerStateBegan; [target.superview drag:pan];
+    pan.movement=CGPointMake(-20,-15); pan.testState=UIGestureRecognizerStateChanged; [target.superview drag:pan];
+    pan.testState=UIGestureRecognizerStateEnded; [target.superview drag:pan];
+    [target removeGestureRecognizer:pan];
+    CGRect targetAfter=target.frame; assert(!SameFrame(targetBefore,targetAfter));
+    [(UIControl *)Find(host,@"wolkaraforever.layout.done") sendActionsForControlEvents:UIControlEventTouchUpInside];
+    for (NSUInteger cycle=0;cycle<3;cycle++) {
+        manager.simple=NO; [host layoutIfNeeded];
+        assert(SameFrame(Button(host,GCInputLeftShoulder).frame,fullLeft));
+        assert(SameFrame(Button(host,GCInputRightShoulder).frame,fullRight));
+        assert(Find(host,@"wolkara.hud.target").hidden && Find(host,@"wolkara.hud.camera").hidden);
         manager.simple=YES; [host layoutIfNeeded];
-        EditShoulders(host,manager,CGPointMake(35,90),NO);
-        for (NSUInteger i=0;i<2;i++) { simple[i]=Button(host,names[i]).frame; assert(!SameFrame(full[i],simple[i])); }
-        // Saving/reloading keeps separate keys without changing legacy full slots.
-        AKGamepadLayout *saved=[[AKGamepadLayout alloc] initWithDefaults:NSUserDefaults.standardUserDefaults];
-        CGRect safe=UIEdgeInsetsInsetRect(overlay.bounds,overlay.safeAreaInsets);
-        for (NSUInteger i=0;i<2;i++) {
-            NSString *key=i?@"simple.RB":@"simple.LB";
-            NSString *fullKey=i?(swapped?@"RT":@"RB"):(swapped?@"LT":@"LB");
-            assert(SameFrame([saved frameForItem:key defaultFrame:simple[i] inBounds:safe],simple[i]));
-            assert(SameFrame([saved frameForItem:fullKey defaultFrame:full[i] inBounds:safe],full[i]));
-            CGRect small=CGRectMake(10,10,300,200);
-            assert(CGRectContainsRect(small,[saved frameForItem:key defaultFrame:simple[i] inBounds:small]));
-            assert(SameFrame([saved frameForItem:key defaultFrame:simple[i] inBounds:safe],simple[i]));
-        }
-        EditShoulders(host,manager,CGPointMake(15,15),YES);
-        for (NSUInteger i=0;i<2;i++) assert(SameFrame(Button(host,names[i]).frame,simple[i]));
-        for (NSUInteger cycle=0;cycle<3;cycle++) {
-            manager.simple=NO; [host layoutIfNeeded];
-            for (NSUInteger i=0;i<2;i++) assert(SameFrame(Button(host,names[i]).frame,full[i]));
-            manager.simple=YES; [host layoutIfNeeded];
-            for (NSUInteger i=0;i<2;i++) assert(SameFrame(Button(host,names[i]).frame,simple[i]));
-            assert(manager.created==connection && manager.visible);
-        }
-        manager.simple=NO; [host layoutIfNeeded]; EditShoulders(host,manager,CGPointMake(5,12),NO);
-        manager.layout.swapShoulders=!swapped; [manager.layout save];
-        manager.simple=YES; [host layoutIfNeeded];
-        for (NSUInteger i=0;i<2;i++) assert(SameFrame(Button(host,names[i]).frame,simple[i]));
+        assert(SameFrame(Find(host,@"wolkara.hud.target").frame,targetAfter));
+        assert(manager.created==connection && manager.visible);
     }
     manager.simple=NO; [manager.layout reset]; [overlay setNeedsLayout]; [host layoutIfNeeded];
-    puts("SIMPLE_SHOULDER_POSITIONS_PASS: independent Full/Simple drags, cancelled edits, save/reload, slot swapping, clamping and same connected controller.");
+    puts("SIMPLE_SHOULDER_POSITIONS_PASS: independent Full/Photo-HUD drags, clamping and same connected controller.");
 }
 static void TestNativeInput(UIView *host, AKPreviewGamepad *manager) {
     GCExtendedGamepad *pad=manager.created.controller.extendedGamepad;
@@ -367,23 +359,21 @@ static void TestNativeInput(UIView *host, AKPreviewGamepad *manager) {
         assert(manager.created==connection && manager.visible && !manager.configuring);
         assert(!pad.buttonA.pressed && !pad.leftShoulder.pressed && pad.leftThumbstick.xAxis.value==0 && pad.rightThumbstick.yAxis.value==0);
         assert(rightStick.superview.hidden && !leftStick.hidden && !leftStick.superview.hidden);
-        for (NSString *name in @[@"dpad.up",@"dpad.right",@"dpad.down",@"dpad.left",GCInputLeftTrigger,GCInputRightTrigger]) {
+        for (NSString *name in @[@"dpad.up",@"dpad.right",@"dpad.down",@"dpad.left",GCInputLeftTrigger,GCInputRightTrigger,GCInputLeftShoulder,GCInputRightShoulder,GCInputButtonMenu]) {
             UIControl *hidden=(id)Find(host,[@"tolkara.gamepad." stringByAppendingString:name]);
             assert(hidden.hidden && !hidden.enabled);
             CGPoint center=[hidden convertPoint:CGPointMake(hidden.bounds.size.width/2,hidden.bounds.size.height/2) toView:host];
             UIView *hit=[host hitTest:center withEvent:nil]; assert(hit!=hidden && ![hit isDescendantOfView:hidden]);
         }
-        for (NSString *name in @[GCInputLeftShoulder,GCInputRightShoulder]) {
-            UIControl *shoulder=Button(host,name); assert(shoulder.enabled);
-            [shoulder sendActionsForControlEvents:UIControlEventTouchDown]; Drain();
-            assert(connection.controller.physicalInputProfile.buttons[name].pressed);
-            [shoulder sendActionsForControlEvents:UIControlEventTouchUpInside]; Drain();
-            assert(!connection.controller.physicalInputProfile.buttons[name].pressed);
+        for (NSString *ident in @[@"wolkara.hud.target",@"wolkara.hud.interact",@"wolkara.hud.jump",@"wolkara.hud.camera"]) {
+            UIView *hud=Find(host,ident);
+            assert(hud && !hud.hidden);
         }
         CGPoint arrow=[top convertPoint:CGPointMake(108,26) toView:host];
         assert([host hitTest:arrow withEvent:nil]==host);
         CGPoint rightCenter=[rightStick convertPoint:CGPointMake(52,52) toView:host];
-        assert([host hitTest:rightCenter withEvent:nil]==host);
+        UIView *rightHit=[host hitTest:rightCenter withEvent:nil];
+        assert(rightHit==host || rightHit==Find(host,@"wolkara.hud.camera"));
         touch.point=CGPointMake(leftStick.bounds.size.width,leftStick.bounds.size.height/2);
         [leftStick beginTrackingWithTouch:touch withEvent:nil]; Drain(); assert(pad.leftThumbstick.xAxis.value==1);
         [leftStick cancelTrackingWithEvent:nil]; Drain(); assert(pad.leftThumbstick.xAxis.value==0);

@@ -306,11 +306,12 @@ static NSString *AKComposerDefaultLabel(void) { return AKHostLocalized(@"touch.d
 @end
 
 @implementation AKTouchControls {
+    UIButton *_collapseButton;
     UIButton *_keyboardButton, *_trackpadButton, *_gamepadButton, *_settingsButton, *_leaveButton;
     UIButton *_insertDraftButton, *_clearDraftButton;
     UIButton *_savedTextButton;
     UILongPressGestureRecognizer *_savedTextHold, *_gamepadHold;
-    BOOL _savedTextHeld, _savedTextEditing;
+    BOOL _savedTextHeld, _savedTextEditing, _toolbarExpanded;
     BOOL _gamepadEnabled, _gamepadSimple, _gamepadHeld, _keyboardRequested;
     UIView *_accessory, *_composer;
     NSTimer *_holdTimer;
@@ -373,11 +374,11 @@ static void AKEmitTouch(void *context, AKTrackpadAction action, double x, double
 - (UIButton *)buttonWithSymbol:(NSString *)symbol label:(NSString *)label action:(SEL)action {
     UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
     [button setImage:[UIImage systemImageNamed:symbol] forState:UIControlStateNormal];
-    button.tintColor = UIColor.whiteColor;
-    button.backgroundColor = [UIColor.blackColor colorWithAlphaComponent:0.45];
+    button.tintColor = [UIColor colorWithRed:0.96 green:0.95 blue:0.90 alpha:0.95];
+    button.backgroundColor = [UIColor colorWithRed:0.06 green:0.06 blue:0.06 alpha:0.62];
     button.layer.cornerRadius = 22;
-    button.layer.borderWidth = 0.5;
-    button.layer.borderColor = [UIColor.whiteColor colorWithAlphaComponent:0.4].CGColor;
+    button.layer.borderWidth = 1.0;
+    button.layer.borderColor = [UIColor colorWithRed:0.84 green:0.75 blue:0.55 alpha:0.45].CGColor;
     button.accessibilityLabel = label;
     [button addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];
     [button addTarget:self action:@selector(buttonTouchDown) forControlEvents:UIControlEventTouchDown];
@@ -404,6 +405,9 @@ static void AKEmitTouch(void *context, AKTrackpadAction action, double x, double
         [NSNotificationCenter.defaultCenter postNotificationName:AKTouchGameTextInputDidAppearNotification
                                                         object:self];
         [self buildComposer];
+        _collapseButton = [self buttonWithSymbol:@"chevron.down" label:AKHostLocalized(@"touch.toolbar.toggle") action:@selector(toggleToolbarExpanded)];
+        _collapseButton.layer.cornerRadius = 14;
+        _collapseButton.accessibilityIdentifier = @"wolkara.toolbar.toggle";
         _keyboardButton = [self buttonWithSymbol:@"keyboard" label:AKHostLocalized(@"touch.keyboard.show") action:@selector(toggleKeyboard)];
         _keyboardButton.accessibilityIdentifier = @"tolkara.keyboard";
         _trackpadButton = [self buttonWithSymbol:@"cursorarrow" label:AKHostLocalized(@"touch.trackpad.enable") action:@selector(toggleTrackpad)];
@@ -432,7 +436,8 @@ static void AKEmitTouch(void *context, AKTrackpadAction action, double x, double
         _gamepadButton.accessibilityHint = AKHostLocalized(@"touch.gamepad.hint");
         NSNumber *gamepad = [NSUserDefaults.standardUserDefaults objectForKey:@"TKTouchGamepadEnabled"];
         _gamepadEnabled = gamepad ? gamepad.boolValue : YES;
-        _gamepadSimple = [NSUserDefaults.standardUserDefaults boolForKey:@"TKTouchGamepadSimple"];
+        NSNumber *simple = [NSUserDefaults.standardUserDefaults objectForKey:@"TKTouchGamepadSimple"];
+        _gamepadSimple = simple ? simple.boolValue : YES;
         [self setGamepadVisible:NO];
         _trackpadButton.accessibilityHint = AKHostLocalized(@"touch.trackpad.hint");
         __weak AKTouchControls *weakSelf = self;
@@ -487,7 +492,7 @@ static void AKEmitTouch(void *context, AKTrackpadAction action, double x, double
         _dictationStatus.hidden = YES;
         [self addSubview:_dictationStatus];
         _toolbarDragOrigins = [NSMutableDictionary new];
-        for (UIView *item in [self toolbarItems]) {
+        for (UIView *item in [[self toolbarItems] arrayByAddingObject:_collapseButton]) {
             UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(moveToolbarItem:)];
             pan.delegate = self;
             [item addGestureRecognizer:pan];
@@ -514,19 +519,34 @@ static void AKEmitTouch(void *context, AKTrackpadAction action, double x, double
 - (NSArray<UIView *> *)toolbarItems {
     return @[_trackpadButton, _keyboardButton, _gamepadButton, _settingsButton, _leaveButton, _dictationGroup, _savedTextButton];
 }
+- (void)toggleToolbarExpanded {
+    if (_gamepad.editing || self.voiceDraftActive) return;
+    [_haptics buttonPressed];
+    _toolbarExpanded = !_toolbarExpanded;
+    [self updateToolbarVisibility];
+}
+- (void)updateToolbarVisibility {
+    BOOL showItems = (_toolbarExpanded && !_gamepad.editingAbilities) || (_gamepad.editing && !_gamepad.editingAbilities) || self.voiceDraftActive;
+    for (UIView *item in [self toolbarItems]) item.hidden = !showItems;
+    [_collapseButton setImage:[UIImage systemImageNamed:showItems ? @"chevron.up" : @"chevron.down"]
+                     forState:UIControlStateNormal];
+    _collapseButton.hidden = self.voiceDraftActive || _gamepad.editingAbilities;
+    [self setNeedsLayout];
+}
 - (void)controlAppearanceChanged:(NSNotification *)notification {
     (void)notification;
     AKGamepadLayout *layout = _gamepad.layout ?: [[AKGamepadLayout alloc] initWithDefaults:NSUserDefaults.standardUserDefaults];
     _haptics.enabled = layout.hapticsEnabled;
     BOOL editing = _gamepad.editing;
-    for (UIButton *button in @[_trackpadButton, _keyboardButton, _gamepadButton, _settingsButton, _leaveButton,
+    UIColor *warmBorder = [UIColor colorWithRed:0.84 green:0.75 blue:0.55 alpha:0.45];
+    for (UIButton *button in @[_collapseButton, _trackpadButton, _keyboardButton, _gamepadButton, _settingsButton, _leaveButton,
                                _dictateButton, _dictationSendButton, _dictationCancelButton, _savedTextButton]) {
         button.alpha = editing ? MAX(0.6, layout.opacity) : layout.opacity;
-        button.layer.borderColor = (editing ? UIColor.systemYellowColor : [UIColor.whiteColor colorWithAlphaComponent:0.4]).CGColor;
-        button.layer.borderWidth = editing ? 2 : 0.5;
+        button.layer.borderColor = (editing ? UIColor.systemYellowColor : warmBorder).CGColor;
+        button.layer.borderWidth = editing ? 2 : 1;
     }
     _trackpadButton.menu = editing ? nil : _mouseMenu;
-    [self setNeedsLayout];
+    [self updateToolbarVisibility];
 }
 - (void)buttonTouchDown { if (!_gamepad.editing) [_haptics buttonPressed]; }
 
@@ -554,15 +574,18 @@ static void AKEmitTouch(void *context, AKTrackpadAction action, double x, double
     _dictationShield.frame = self.bounds;
     CGRect safe = [self toolbarBounds];
     AKGamepadLayout *layout = _gamepad.layout;
+    CGRect toggleFallback = CGRectMake(CGRectGetMidX(safe) - 27, safe.origin.y, 54, 36);
+    _collapseButton.frame = layout ? [layout frameForItem:_collapseButton.accessibilityIdentifier defaultFrame:toggleFallback inBounds:safe] : toggleFallback;
     NSArray<UIView *> *items = [self toolbarItems];
     BOOL compact = safe.size.width < 408;
     CGFloat width = compact ? 252 : 408;
     CGFloat x = CGRectGetMidX(safe) - width / 2;
+    CGFloat rowY = safe.origin.y + 44;
     for (NSUInteger index = 0; index < items.count; index++) {
         UIView *item = items[index];
-        CGRect fallback = CGRectMake(x + index * 52, safe.origin.y, index == 5 ? 96 : 44, 44);
-        if (compact && index == 5) fallback = CGRectMake(CGRectGetMidX(safe)-48, safe.origin.y+52, 96, 44);
-        if (index == 6) fallback = compact ? CGRectMake(CGRectGetMidX(safe)+56, safe.origin.y+52, 44, 44) : CGRectMake(x+364, safe.origin.y, 44, 44);
+        CGRect fallback = CGRectMake(x + index * 52, rowY, index == 5 ? 96 : 44, 44);
+        if (compact && index == 5) fallback = CGRectMake(CGRectGetMidX(safe) - 48, rowY + 52, 96, 44);
+        if (index == 6) fallback = compact ? CGRectMake(CGRectGetMidX(safe) + 56, rowY + 52, 44, 44) : CGRectMake(x + 364, rowY, 44, 44);
         item.frame = layout ? [layout frameForItem:item.accessibilityIdentifier defaultFrame:fallback inBounds:safe] : fallback;
     }
     _dictateButton.frame = CGRectMake(26, 0, 44, 44);
@@ -713,7 +736,7 @@ static void AKEmitTouch(void *context, AKTrackpadAction action, double x, double
         });
     }
     [self updateKeyboardButton];
-    [self setNeedsLayout];
+    [self updateToolbarVisibility];
 }
 - (void)setTrackpadEnabled:(BOOL)enabled {
     [self cancelTouches];
@@ -864,6 +887,7 @@ static void AKEmitTouch(void *context, AKTrackpadAction action, double x, double
     (void)event;
     if (self.voiceDraftActive) return CGRectContainsPoint(self.bounds, point);
     if ([_gamepad configurationContainsPoint:point inView:self]) return NO;
+    if (!_collapseButton.hidden && CGRectContainsPoint(_collapseButton.frame, point)) return YES;
     for (UIView *control in [self toolbarItems]) {
         if (!control.hidden && CGRectContainsPoint(control.frame, point)) return YES;
     }

@@ -506,6 +506,7 @@
 
 "touch.gamepad.leftStick.hint" = "Double-tap for L3.";
 "touch.gamepad.rightStick.hint" = "Double-tap for R3.";
+"touch.toolbar.toggle" = "Show or hide toolbar";
 
 
 

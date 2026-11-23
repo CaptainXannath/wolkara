@@ -16,6 +16,16 @@ FOUNDATION_EXPORT NSNotificationName const AKGamepadLayoutDidChangeNotification;
 // settings page and the launcher's Performance & UI row both write it, so the
 // preference has one home and one meaning.
 @property(nonatomic) BOOL performanceOverlayEnabled;
+// Photo HUD action bindings and camera drag mode.
+@property(nonatomic, copy) NSString *targetBinding;
+@property(nonatomic, copy) NSString *interactBinding;
+@property(nonatomic, copy) NSString *jumpBinding;
+@property(nonatomic) BOOL cameraRightDrag;
+
++ (NSArray<NSString *> *)allowedTargetBindings;
++ (NSArray<NSString *> *)allowedInteractBindings;
++ (NSArray<NSString *> *)allowedJumpBindings;
+
 - (CGRect)frameForItem:(NSString *)item defaultFrame:(CGRect)frame inBounds:(CGRect)bounds;
 - (void)moveItem:(NSString *)item toFrame:(CGRect)frame inBounds:(CGRect)bounds;
 - (void)save;

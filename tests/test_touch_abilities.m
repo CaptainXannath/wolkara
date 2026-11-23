@@ -104,7 +104,24 @@ static void LayoutTests(void) {
     NSString *suite=[@"org.wolkara.tests.abilities." stringByAppendingString:NSUUID.UUID.UUIDString];
     NSUserDefaults *defaults=[[NSUserDefaults alloc] initWithSuiteName:suite];
     AKTouchActionLayout *layout=[[AKTouchActionLayout alloc] initWithDefaults:defaults];
-    assert(layout.actions.count==32 && !layout.enabled);
+    assert(layout.actions.count==16 && layout.enabled && layout.showLabels);
+    assert(layout.actions[0].anchor==AKTouchActionAnchorLeft && layout.actions[0].kind==AKTouchActionKindKeyboard);
+    assert(layout.actions[8].anchor==AKTouchActionAnchorRight && layout.actions[8].keyModifiers==AKTouchKeyModifierControl);
+    assert([layout.actions[0].label isEqualToString:@"1"] && [layout.actions[8].label isEqualToString:@"C-1"]);
+    assert(layout.actions[0].macKeyCode==18 && [layout.actions[0].macCharacters isEqualToString:@"1"]);
+    AKTouchAction *addedLeft=[layout addActionOnAnchor:AKTouchActionAnchorLeft];
+    AKTouchAction *addedRight=[layout addActionOnAnchor:AKTouchActionAnchorRight];
+    assert(addedLeft && addedRight && layout.actions.count==18);
+    assert(addedLeft.anchor==AKTouchActionAnchorLeft && addedRight.anchor==AKTouchActionAnchorRight);
+    addedLeft.customLabel=@"Bolt"; assert([addedLeft.label isEqualToString:@"Bolt"]);
+    [layout save];
+    layout=[[AKTouchActionLayout alloc] initWithDefaults:defaults];
+    assert(layout.actions.count==18 && [layout.actions[16].customLabel isEqualToString:@"Bolt"]);
+    [layout removeAction:layout.actions.lastObject];
+    [layout removeAction:layout.actions.lastObject];
+
+    [layout resetToClassicLayout];
+    assert(layout.actions.count==32 && layout.enabled);
     CGRect reference=CGRectMake(0,0,1280,900);
     // Pixel centers independently taken from the screenshot's four modifier labels.
     const CGPoint expected[]={{565,608},{388,671},{777,671},{582,729}};
@@ -131,7 +148,7 @@ static void LayoutTests(void) {
     assert(layout.enabled && layout.actions[0].diameter==80 && !layout.actions[0].enabled);
     assert([layout.actions[0].button isEqual:@"B"] && layout.actions[0].modifiers==2);
     for (NSString *button in @[@"LB",@"RB"]) {
-        AKTouchAction *shoulder=[layout addAction]; shoulder.button=button; shoulder.modifiers=3;
+        AKTouchAction *shoulder=[layout addAction]; shoulder.kind=AKTouchActionKindGamepad; shoulder.button=button; shoulder.modifiers=3;
         NSString *identifier=shoulder.identifier; [layout save];
         layout=[[AKTouchActionLayout alloc] initWithDefaults:defaults];
         assert([layout.actions.lastObject.identifier isEqual:identifier]);
@@ -148,11 +165,11 @@ static void LayoutTests(void) {
     for (AKTouchAction *a in layout.actions) assert(CGRectContainsRect(CGRectMake(0,0,390,280),[layout frameForAction:a inBounds:CGRectMake(0,0,390,280)]));
     AKTouchAction *added=[layout addAction]; assert(added && layout.actions.count==33); [layout removeAction:added];
     layout.scale=NAN; layout.center=CGPointMake(INFINITY,NAN); assert(isfinite(layout.scale)&&isfinite(layout.center.x)&&isfinite(layout.center.y));
-    [layout reset]; [layout save]; assert(layout.actions.count==32&&!layout.enabled);
-    [defaults setObject:@{@"actions":@[@{},@"bad",@{@"id":@"bad",@"button":@"unknown"}],@"scale":@"bad"} forKey:@"WolkaraTouchAbilitiesV1"];
+    [layout reset]; [layout save]; assert(layout.actions.count==16 && layout.enabled);
+    [defaults setObject:@{@"actions":@[@{},@"bad",@{@"id":@"bad",@"button":@"unknown"}],@"scale":@"bad"} forKey:@"WolkaraTouchAbilitiesV2"];
     layout=[[AKTouchActionLayout alloc] initWithDefaults:defaults]; assert(layout.actions.count==0 && layout.scale==1);
     [defaults removePersistentDomainForName:suite];
-    puts("TOUCH_ABILITIES_LAYOUT_PASS: screenshot mapping, block translation/scaling, individual edits, persistence, phone sizes, clamping and malformed preferences.");
+    puts("TOUCH_ABILITIES_LAYOUT_PASS: photo side layout, add left/right, keyboard/gamepad bindings, classic mapping, clamping and malformed preferences.");
 }
 static BOOL SameFrame(CGRect a,CGRect b) {
     return fabs(a.origin.x-b.origin.x)<.001 && fabs(a.origin.y-b.origin.y)<.001 &&
@@ -165,7 +182,7 @@ static void GroupTests(void) {
     for (NSValue *value in @[[NSValue valueWithCGRect:CGRectMake(0,0,852,393)],
             [NSValue valueWithCGRect:CGRectMake(0,0,932,430)], [NSValue valueWithCGRect:CGRectMake(0,0,951,669)],
             [NSValue valueWithCGRect:CGRectMake(20,10,1194,834)]]) {
-        [layout reset]; layout.scale=1.25; CGRect bounds=value.CGRectValue;
+        [layout resetToClassicLayout]; layout.scale=1.25; CGRect bounds=value.CGRectValue;
         NSMutableArray *frames=[NSMutableArray new];
         for (AKTouchAction *a in layout.actions) [frames addObject:[NSValue valueWithCGRect:[layout frameForAction:a inBounds:bounds]]];
         AKTouchAction *first=layout.actions[0]; assert([layout groupForAction:first].count==4);
@@ -189,11 +206,12 @@ static void GroupTests(void) {
     }
     // Old custom positions/bindings migrate in place; groups follow original
     // identifiers, so changing an arrow's binding cannot move it to another diamond.
+    [layout resetToClassicLayout];
     layout.enabled=YES; layout.actions[0].button=@"B"; [layout save];
-    NSMutableDictionary *stored=[[defaults dictionaryForKey:@"WolkaraTouchAbilitiesV1"] mutableCopy];
+    NSMutableDictionary *stored=[[defaults dictionaryForKey:@"WolkaraTouchAbilitiesV2"] mutableCopy];
     NSMutableArray *legacy=[NSMutableArray new];
     for (NSDictionary *item in stored[@"actions"]) { NSMutableDictionary *a=item.mutableCopy; [a removeObjectForKey:@"group"]; [legacy addObject:a]; }
-    stored[@"actions"]=legacy; [defaults setObject:stored forKey:@"WolkaraTouchAbilitiesV1"];
+    stored[@"actions"]=legacy; [defaults setObject:stored forKey:@"WolkaraTouchAbilitiesV2"];
     CGPoint position=layout.actions[0].position;
     layout=[[AKTouchActionLayout alloc] initWithDefaults:defaults];
     assert(layout.enabled && [layout groupForAction:layout.actions[0]].count==4 && [layout.actions[0].button isEqual:@"B"]);

@@ -492,11 +492,18 @@ static void AKSavedTextSettle(UIViewController *presenter) {
     AKTouchControls *controls = [host valueForKey:@"_touchControls"];
     AKTouchGamepad *gamepad = [controls valueForKey:@"_gamepad"];
     [gamepad.layout reset]; [host layoutIfNeeded]; [controls layoutIfNeeded];
+    UIButton *toggle = (id)FindToolbarView(controls, @"wolkara.toolbar.toggle");
+    assert(toggle && !toggle.hidden);
     NSArray<UIView *> *items = [controls toolbarItems];
     assert(items.count == 7 && CGRectEqualToRect(controls.frame, host.bounds));
-    for (UIView *item in items) assert(CGRectContainsRect([controls toolbarBounds], item.frame));
+    for (UIView *item in items) assert(item.hidden);
     CGPoint clear = CGPointMake(CGRectGetMidX(controls.bounds), CGRectGetMidY(controls.bounds));
     assert(![controls pointInside:clear withEvent:nil]);
+    [toggle sendActionsForControlEvents:UIControlEventTouchUpInside]; [controls layoutIfNeeded];
+    for (UIView *item in items) {
+        assert(!item.hidden);
+        assert(CGRectContainsRect([controls toolbarBounds], item.frame));
+    }
     UIButton *mic = (id)FindToolbarView(controls, @"wolkaraforever.dictate");
     UIButton *send = (id)FindToolbarView(controls, @"wolkaraforever.dictationSend");
     UIButton *cancel = (id)FindToolbarView(controls, @"wolkaraforever.dictationCancel");
@@ -567,7 +574,7 @@ static void AKSavedTextSettle(UIViewController *presenter) {
     }
     host.bounds = original;
     [gamepad.layout reset]; [controls setNeedsLayout]; [controls layoutIfNeeded];
-    for (UIView *item in items) assert(fabs(item.frame.origin.y-[controls toolbarBounds].origin.y)<0.01);
+    for (UIView *item in items) assert(fabs(item.frame.origin.y - ([controls toolbarBounds].origin.y + 44)) < 0.01);
     [NSNotificationCenter.defaultCenter removeObserver:observer];
     NSLog(@"TOUCH_UI_SELF_TEST_PASS: toolbar drag, persistence, resize, reset, edit isolation, Done hit-testing and dictation controls");
     exit(EXIT_SUCCESS);

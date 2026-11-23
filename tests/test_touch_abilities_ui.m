@@ -22,6 +22,8 @@ static void Tap(UIView *host,NSString *identifier) {
 @interface AKTouchActionOverlay (Fixture)
 - (void)drag:(UIPanGestureRecognizer *)pan;
 - (void)resetLayout;
+- (void)rebuildCircles;
+- (void)updateEditor;
 @end
 static void Capture(UIView *host,NSString *name) {
     UIGraphicsImageRendererFormat *format=[UIGraphicsImageRendererFormat defaultFormat]; format.scale=1;
@@ -48,11 +50,17 @@ static void CircleTap(UIControl *circle,UIView *host) {
 }
 void TestTouchAbilitiesUI(UIView *host,AKTouchGamepad *manager,GCVirtualController *controller) {
     [NSUserDefaults.standardUserDefaults removeObjectForKey:@"WolkaraTouchAbilitiesV1"];
+    [NSUserDefaults.standardUserDefaults removeObjectForKey:@"WolkaraTouchAbilitiesV2"];
     [manager toggleSettings]; Tap(host,@"wolkara.controls.abilities");
     assert(manager.configuring && manager.editing);
+    UIControl *sideFirst=(id)Find(host,@"wolkara.ability.side.left.0"); assert(sideFirst);
+    AKTouchActionOverlay *overlay=(id)sideFirst.superview;
+    Tap(host,@"wolkara.abilities.addLeft"); assert(overlay.layout.actions.count==17);
+    Tap(host,@"wolkara.abilities.addRight"); assert(overlay.layout.actions.count==18);
+    Tap(host,@"wolkara.abilities.delete"); assert(overlay.layout.actions.count==17);
+    [overlay.layout resetToClassicLayout]; [overlay rebuildCircles]; [overlay updateEditor];
     UIControl *first=(id)Find(host,@"wolkara.ability.0.up"); assert(first);
-    AKTouchActionOverlay *overlay=(id)first.superview;
-    Tap(host,@"wolkara.abilities.reset"); first=(id)Find(host,@"wolkara.ability.0.up"); [overlay layoutIfNeeded];
+    [overlay layoutIfNeeded];
     UISwitch *enabled=(id)Find(host,@"wolkara.abilities.enabled"); enabled.on=YES;
     [enabled sendActionsForControlEvents:UIControlEventValueChanged];
     GCExtendedGamepad *pad=controller.controller.extendedGamepad;

@@ -3,16 +3,36 @@
 
 static NSString *const LayoutKey = @"WolkaraForeverTouchLayoutV1";
 NSNotificationName const AKGamepadLayoutDidChangeNotification = @"AKGamepadLayoutDidChange";
+
 static CGFloat Clamp(CGFloat value, CGFloat minimum, CGFloat maximum, CGFloat fallback) {
-    return isfinite(value) ? MAX(minimum,MIN(maximum,value)) : fallback;
+    return isfinite(value) ? MAX(minimum, MIN(maximum, value)) : fallback;
 }
+
 static CGFloat Number(id value, CGFloat fallback) {
     return [value isKindOfClass:NSNumber.class] ? [value doubleValue] : fallback;
 }
+
+static NSString *ValidatedChoice(id value, NSArray<NSString *> *allowed, NSString *fallback) {
+    return ([value isKindOfClass:NSString.class] && [allowed containsObject:value]) ? value : fallback;
+}
+
 @implementation AKGamepadLayout {
     NSUserDefaults *_defaults;
     NSMutableDictionary *_positions;
 }
+
++ (NSArray<NSString *> *)allowedTargetBindings {
+    return @[@"Tab", @"F", @"G", @"R", @"gamepad.RB", @"gamepad.Y"];
+}
+
++ (NSArray<NSString *> *)allowedInteractBindings {
+    return @[@"F", @"G", @"E", @"T", @"mouse.right", @"gamepad.A", @"gamepad.X"];
+}
+
++ (NSArray<NSString *> *)allowedJumpBindings {
+    return @[@"Space", @"gamepad.A"];
+}
+
 - (instancetype)initWithDefaults:(NSUserDefaults *)defaults {
     if ((self = [super init])) {
         _defaults = defaults;
@@ -26,53 +46,96 @@ static CGFloat Number(id value, CGFloat fallback) {
             }
         }
         NSDictionary *values = [saved isKindOfClass:NSDictionary.class] ? saved : @{};
-        self.opacity = Number(values[@"opacity"],0.8);
-        self.rearScale = Number(values[@"rearScale"],1);
-        self.frontScale = Number(values[@"frontScale"],1);
-        self.hapticsEnabled = Number(values[@"hapticsEnabled"],1) != 0;
+        self.opacity = Number(values[@"opacity"], 0.8);
+        self.rearScale = Number(values[@"rearScale"], 1);
+        self.frontScale = Number(values[@"frontScale"], 1);
+        self.hapticsEnabled = Number(values[@"hapticsEnabled"], 1) != 0;
         // Keep existing layouts in their original order. New/reset layouts put
         // triggers inside; an explicit stored choice always takes precedence.
-        self.swapShoulders = Number(values[@"swapShoulders"],values.count ? 0 : 1) != 0;
-        self.performanceOverlayEnabled = Number(values[@"performanceOverlayEnabled"],0) != 0;
+        self.swapShoulders = Number(values[@"swapShoulders"], values.count ? 0 : 1) != 0;
+        self.performanceOverlayEnabled = Number(values[@"performanceOverlayEnabled"], 0) != 0;
+        _targetBinding = ValidatedChoice(values[@"targetBinding"], [self.class allowedTargetBindings], @"Tab");
+        _interactBinding = ValidatedChoice(values[@"interactBinding"], [self.class allowedInteractBindings], @"F");
+        _jumpBinding = ValidatedChoice(values[@"jumpBinding"], [self.class allowedJumpBindings], @"Space");
+        self.cameraRightDrag = Number(values[@"cameraRightDrag"], 1) != 0;
+
         _positions = [NSMutableDictionary new];
         id positions = values[@"positions"];
-        if ([positions isKindOfClass:NSDictionary.class]) for (NSString *key in positions) {
-            id point = positions[key];
-            if (![key isKindOfClass:NSString.class] || ![point isKindOfClass:NSArray.class] || [point count] != 2) continue;
-            CGFloat x = Number(point[0],NAN), y = Number(point[1],NAN);
-            if (isfinite(x) && isfinite(y)) _positions[key] = @[@(Clamp(x,0,1,0)),@(Clamp(y,0,1,0))];
+        if ([positions isKindOfClass:NSDictionary.class]) {
+            for (NSString *key in positions) {
+                id point = positions[key];
+                if (![key isKindOfClass:NSString.class] || ![point isKindOfClass:NSArray.class] || [point count] != 2) continue;
+                CGFloat x = Number(point[0], NAN), y = Number(point[1], NAN);
+                if (isfinite(x) && isfinite(y)) _positions[key] = @[@(Clamp(x, 0, 1, 0)), @(Clamp(y, 0, 1, 0))];
+            }
         }
     }
     return self;
 }
-- (void)setOpacity:(CGFloat)value { _opacity = Clamp(value,0.2,1,0.8); }
-- (void)setRearScale:(CGFloat)value { _rearScale = Clamp(value,0.8,1.5,1); }
-- (void)setFrontScale:(CGFloat)value { _frontScale = Clamp(value,0.65,1.4,1); }
+
+- (void)setOpacity:(CGFloat)value { _opacity = Clamp(value, 0.2, 1, 0.8); }
+- (void)setRearScale:(CGFloat)value { _rearScale = Clamp(value, 0.8, 1.5, 1); }
+- (void)setFrontScale:(CGFloat)value { _frontScale = Clamp(value, 0.65, 1.4, 1); }
+
+- (void)setTargetBinding:(NSString *)value {
+    _targetBinding = ValidatedChoice(value, [self.class allowedTargetBindings], @"Tab");
+}
+
+- (void)setInteractBinding:(NSString *)value {
+    _interactBinding = ValidatedChoice(value, [self.class allowedInteractBindings], @"F");
+}
+
+- (void)setJumpBinding:(NSString *)value {
+    _jumpBinding = ValidatedChoice(value, [self.class allowedJumpBindings], @"Space");
+}
+
 - (CGRect)frameForItem:(NSString *)item defaultFrame:(CGRect)frame inBounds:(CGRect)bounds {
-    CGFloat width = MAX(0,MIN(frame.size.width,bounds.size.width));
-    CGFloat height = MAX(0,MIN(frame.size.height,bounds.size.height));
-    CGFloat dx = MAX(0,bounds.size.width-width), dy = MAX(0,bounds.size.height-height);
+    CGFloat width = MAX(0, MIN(frame.size.width, bounds.size.width));
+    CGFloat height = MAX(0, MIN(frame.size.height, bounds.size.height));
+    CGFloat dx = MAX(0, bounds.size.width - width), dy = MAX(0, bounds.size.height - height);
     NSArray *point = _positions[item];
-    CGFloat x = point ? [point[0] doubleValue]*dx : frame.origin.x-bounds.origin.x;
-    CGFloat y = point ? [point[1] doubleValue]*dy : frame.origin.y-bounds.origin.y;
-    return CGRectMake(bounds.origin.x+Clamp(x,0,dx,0),bounds.origin.y+Clamp(y,0,dy,0),width,height);
+    CGFloat x = point ? [point[0] doubleValue] * dx : frame.origin.x - bounds.origin.x;
+    CGFloat y = point ? [point[1] doubleValue] * dy : frame.origin.y - bounds.origin.y;
+    return CGRectMake(bounds.origin.x + Clamp(x, 0, dx, 0), bounds.origin.y + Clamp(y, 0, dy, 0), width, height);
 }
+
 - (void)moveItem:(NSString *)item toFrame:(CGRect)frame inBounds:(CGRect)bounds {
-    CGFloat dx = MAX(0,bounds.size.width-frame.size.width), dy = MAX(0,bounds.size.height-frame.size.height);
-    CGFloat x = dx > 0 ? (frame.origin.x-bounds.origin.x)/dx : 0;
-    CGFloat y = dy > 0 ? (frame.origin.y-bounds.origin.y)/dy : 0;
-    _positions[item] = @[@(Clamp(x,0,1,0)),@(Clamp(y,0,1,0))];
+    CGFloat dx = MAX(0, bounds.size.width - frame.size.width), dy = MAX(0, bounds.size.height - frame.size.height);
+    CGFloat x = dx > 0 ? (frame.origin.x - bounds.origin.x) / dx : 0;
+    CGFloat y = dy > 0 ? (frame.origin.y - bounds.origin.y) / dy : 0;
+    _positions[item] = @[@(Clamp(x, 0, 1, 0)), @(Clamp(y, 0, 1, 0))];
 }
+
 - (void)save {
-    [_defaults setObject:@{@"opacity":@(_opacity),@"rearScale":@(_rearScale),
-        @"frontScale":@(_frontScale),@"hapticsEnabled":@(_hapticsEnabled),@"swapShoulders":@(_swapShoulders),
-        @"performanceOverlayEnabled":@(_performanceOverlayEnabled),@"positions":_positions} forKey:LayoutKey];
+    [_defaults setObject:@{
+        @"opacity": @(_opacity),
+        @"rearScale": @(_rearScale),
+        @"frontScale": @(_frontScale),
+        @"hapticsEnabled": @(_hapticsEnabled),
+        @"swapShoulders": @(_swapShoulders),
+        @"performanceOverlayEnabled": @(_performanceOverlayEnabled),
+        @"targetBinding": _targetBinding ?: @"Tab",
+        @"interactBinding": _interactBinding ?: @"F",
+        @"jumpBinding": _jumpBinding ?: @"Space",
+        @"cameraRightDrag": @(_cameraRightDrag),
+        @"positions": _positions
+    } forKey:LayoutKey];
     [NSNotificationCenter.defaultCenter postNotificationName:AKGamepadLayoutDidChangeNotification object:_defaults];
 }
+
 - (void)reset {
-    self.opacity = 0.8; self.rearScale = 1; self.frontScale = 1;
-    self.hapticsEnabled = YES; self.swapShoulders = YES;
+    self.opacity = 0.8;
+    self.rearScale = 1;
+    self.frontScale = 1;
+    self.hapticsEnabled = YES;
+    self.swapShoulders = YES;
     self.performanceOverlayEnabled = NO;
-    [_positions removeAllObjects]; [self save];
+    _targetBinding = @"Tab";
+    _interactBinding = @"F";
+    _jumpBinding = @"Space";
+    self.cameraRightDrag = YES;
+    [_positions removeAllObjects];
+    [self save];
 }
+
 @end

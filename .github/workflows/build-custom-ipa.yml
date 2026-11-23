@@ -1,0 +1,86 @@
+name: Build Custom HUD Wolkara IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master, feature/photo-hud]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wolkara-custom-hud-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-ipa:
+    name: Test Touch HUD & Build StikDebug IPA
+    runs-on: macos-26
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Ensure script permissions
+        run: chmod +x tools/*.sh tools/*.py
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Run localization checks
+        run: bash tools/test_localization.sh
+
+      - name: Build Custom HUD StikDebug IPA
+        env:
+          TOLKARA_SYSTEM_ROOTS: "NO"
+        run: bash tools/package_external_jit_ipa.sh Wolkara-custom-hud.ipa
+
+      - name: Run Touch HUD & Input Simulator Tests
+        run: |
+          set -euo pipefail
+          SIM_ID=$(xcrun simctl list devices available -j | python3 -c '
+          import json, sys
+          candidates = [
+              d for r, ds in json.load(sys.stdin)["devices"].items()
+              if "iOS" in r
+              for d in ds if "iPhone" in d["name"]
+          ]
+          candidates.sort(key=lambda d: (d["state"] != "Booted", "Pro Max" not in d["name"], d["name"]))
+          print(candidates[0]["udid"] if candidates else "")
+          ')
+          [ -n "$SIM_ID" ] || { echo "No iPhone simulator available"; exit 1; }
+          export SIMULATOR="$SIM_ID"
+          xcrun simctl boot "$SIM_ID" || true
+          xcrun simctl bootstatus "$SIM_ID" -b
+          bash tools/test_touch_abilities.sh
+          bash tools/test_direct_touch_camera.sh
+          bash tools/test_touch_gamepad_ui.sh --self-test
+          bash tools/test_touch_gamepad_ui.sh --self-test-input
+          bash tools/test_touch_controls_ui.sh --self-test
+
+      - name: Verify IPA
+        run: |
+          set -euo pipefail
+          test -s Wolkara-custom-hud.ipa
+          unzip -tq Wolkara-custom-hud.ipa
+          shasum -a 256 Wolkara-custom-hud.ipa > Wolkara-custom-hud.ipa.sha256
+
+      - name: Upload Custom IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Wolkara-custom-hud-IPA
+          path: |
+            Wolkara-custom-hud.ipa
+            Wolkara-custom-hud.ipa.sha256
+          if-no-files-found: error
+          retention-days: 30

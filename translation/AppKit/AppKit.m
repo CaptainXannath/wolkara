@@ -249,9 +249,10 @@ NSEventModifierFlags AKModifiersReconciled(NSEventModifierFlags held, NSEventMod
 @property (nonatomic, weak) NSWindow *nsWindow;
 @end
 
-@implementation AKHostView { CGPoint _last; NSEventModifierFlags _mods; BOOL _pressedRight, _pressedLeft, _pointerInside, _softwareCursor; UIImageView *_cursorView; UIPointerInteraction *_pointer; UIPointerStyle *_gamePointerStyle; unsigned _hoverUpdates, _pointerUpdates, _cursorVisibilityReasons; NSTimeInterval _pointerReportTime;
+@implementation AKHostView { CGPoint _last; NSEventModifierFlags _mods, _hardwareMods; BOOL _pressedRight, _pressedLeft, _pointerInside, _softwareCursor; UIImageView *_cursorView; UIPointerInteraction *_pointer; UIPointerStyle *_gamePointerStyle; unsigned _hoverUpdates, _pointerUpdates, _cursorVisibilityReasons; NSTimeInterval _pointerReportTime;
     AKTouchControls *_touchControls;
     AKPerformanceOverlay *_performanceOverlay;
+    NSMutableDictionary<NSNumber *, NSNumber *> *_virtualHeldKeys;
     BOOL _touchCursorActive, _touchCursorInitialized, _pressedMiddle;
     NSTimeInterval _lastTouchClickTime;
     CGPoint _lastTouchClickPoint;
@@ -267,6 +268,7 @@ NSEventModifierFlags AKModifiersReconciled(NSEventModifierFlags held, NSEventMod
 - (instancetype)initWithFrame:(CGRect)f {
     if ((self = [super initWithFrame:f])) {
         self.multipleTouchEnabled = YES;
+        _virtualHeldKeys = [NSMutableDictionary new];
         _softwareCursor=[NSProcessInfo.processInfo.arguments containsObject:@"--software-cursor"];
         AKLog(@"cursor presentation=%@",_softwareCursor?@"software overlay":@"native iPad pointer");
         _cursorView=[UIImageView new]; _cursorView.userInteractionEnabled=NO;
@@ -574,6 +576,11 @@ static UITouch *AKDirectTouch(NSSet<UITouch *> *touches) {
     return nil;
 }
 - (void)touchInputCancelled {
+    if (_virtualHeldKeys.count) {
+        for (NSNumber *k in _virtualHeldKeys.allKeys) {
+            [self ak_sendKeyCode:k.unsignedShortValue characters:@"" modifiers:0 pressed:NO];
+        }
+    }
     _directCancelled = YES;
     if (!_directPressed) return;
     _directPressed = NO;
@@ -592,11 +599,76 @@ static UITouch *AKDirectTouch(NSSet<UITouch *> *touches) {
                  at:_last button:_directButton clicks:1 delta:CGPointZero];
 }
 - (BOOL)ak_beginTouchDrag:(UITouch *)touch origin:(CGPoint)origin {
+    if (_directTouch && (_directTouch.phase == UITouchPhaseEnded || _directTouch.phase == UITouchPhaseCancelled)) {
+        _directTouch = nil; _directPressed = NO; _directDragging = NO;
+    }
     if (_directTouch || _touchControls.configuring || _pressedLeft || _pressedRight || _pressedMiddle) return NO;
     [_touchControls cancelTouches];
     _directTouch = touch; _directOrigin = _directFingerLast = origin;
     _directCancelled = NO; _directTrackpad = _touchControls.trackpadEnabled; _directButton = 0;
     [self startDirectDrag]; return YES;
+}
+- (BOOL)ak_beginCameraDrag:(UITouch *)touch origin:(CGPoint)origin rightButton:(BOOL)rightButton {
+    if (_directTouch && (_directTouch.phase == UITouchPhaseEnded || _directTouch.phase == UITouchPhaseCancelled)) {
+        _directTouch = nil; _directPressed = NO; _directDragging = NO;
+    }
+    if (_directTouch || _touchControls.configuring || _pressedLeft || _pressedRight || _pressedMiddle) return NO;
+    [_touchControls cancelTouches];
+    _directTouch = touch; _directOrigin = _directFingerLast = origin;
+    _directCancelled = NO; _directTrackpad = NO; _directButton = rightButton ? 1 : 0;
+    [self startDirectDrag]; return YES;
+}
+static NSEventModifierFlags AKTouchKeyModsToEventFlags(NSUInteger touchMods) {
+    NSEventModifierFlags flags = 0;
+    if (touchMods & (1UL << 0)) flags |= NSEventModifierFlagShift;
+    if (touchMods & (1UL << 1)) flags |= NSEventModifierFlagControl;
+    if (touchMods & (1UL << 2)) flags |= NSEventModifierFlagOption;
+    if (touchMods & (1UL << 3)) flags |= NSEventModifierFlagCommand;
+    return flags;
+}
+- (NSEventModifierFlags)activeVirtualModifierFlags {
+    NSEventModifierFlags flags = 0;
+    for (NSNumber *value in _virtualHeldKeys.allValues) flags |= value.unsignedIntegerValue;
+    return flags;
+}
+- (void)postFlagsChanged:(NSEventModifierFlags)flags {
+    NSEvent *e = [NSEvent new];
+    e.window = self.nsWindow; e.type = NSEventTypeFlagsChanged; e.modifierFlags = flags;
+    e.timestamp = NSProcessInfo.processInfo.systemUptime;
+    [NSApp postEvent:e atStart:NO];
+}
+- (void)ak_sendKeyCode:(unsigned short)keyCode characters:(NSString *)characters modifiers:(NSUInteger)modifiers pressed:(BOOL)pressed {
+    NSString *text = characters ?: @"";
+    if (pressed) {
+        NSEventModifierFlags req = AKTouchKeyModsToEventFlags(modifiers);
+        _virtualHeldKeys[@(keyCode)] = @(req);
+        NSEventModifierFlags next = AKModifiersReconciled(_mods, _hardwareMods | [self activeVirtualModifierFlags]);
+        if (next != _mods) {
+            _mods = next;
+            [self postFlagsChanged:_mods];
+        }
+        NSEvent *e = [NSEvent new];
+        e.type = NSEventTypeKeyDown; e.window = self.nsWindow; e.keyCode = keyCode;
+        e.modifierFlags = _mods; e.characters = text; e.charactersIgnoringModifiers = text;
+        e.timestamp = NSProcessInfo.processInfo.systemUptime;
+        [NSApp postEvent:e atStart:NO];
+    } else {
+        if (!_virtualHeldKeys[@(keyCode)]) return;
+        NSEvent *e = [NSEvent new];
+        e.type = NSEventTypeKeyUp; e.window = self.nsWindow; e.keyCode = keyCode;
+        e.modifierFlags = _mods; e.characters = text; e.charactersIgnoringModifiers = text;
+        e.timestamp = NSProcessInfo.processInfo.systemUptime;
+        [NSApp postEvent:e atStart:NO];
+        [_virtualHeldKeys removeObjectForKey:@(keyCode)];
+        NSEventModifierFlags next = AKModifiersReconciled(_mods, _hardwareMods | [self activeVirtualModifierFlags]);
+        if (next != _mods) {
+            _mods = next;
+            [self postFlagsChanged:_mods];
+        }
+    }
+}
+- (void)ak_sendMouseClick:(unsigned)button pressed:(BOOL)pressed {
+    [self touchButton:button pressed:pressed];
 }
 - (void)ak_moveTouchDrag:(UITouch *)touch {
     if (touch != _directTouch || _directCancelled) return;
@@ -702,15 +774,13 @@ static UITouch *AKDirectTouch(NSSet<UITouch *> *touches) {
 // is released, so the guest hears of that even when the key's own release was
 // reported with the modifier still set.
 - (void)reconcileModifiers:(NSEventModifierFlags)reported {
-    NSEventModifierFlags now = AKModifiersReconciled(_mods, reported);
+    _hardwareMods = AKModifiersReconciled(_hardwareMods, reported);
+    NSEventModifierFlags now = AKModifiersReconciled(_mods, _hardwareMods | [self activeVirtualModifierFlags]);
     if (now == _mods) return;
     BOOL released = (_mods & ~now & ~NSEventModifierFlagCapsLock) != 0;
     _mods = now;
     if (!released) return;
-    NSEvent *e = [NSEvent new];
-    e.window = self.nsWindow; e.type = NSEventTypeFlagsChanged; e.modifierFlags = now;
-    e.timestamp = NSProcessInfo.processInfo.systemUptime;
-    [NSApp postEvent:e atStart:NO];
+    [self postFlagsChanged:now];
 }
 - (void)postKeys:(NSSet<UIPress *> *)presses down:(BOOL)down {
     for (UIPress *p in presses) {
@@ -719,8 +789,12 @@ static UITouch *AKDirectTouch(NSSet<UITouch *> *touches) {
         e.window = self.nsWindow; e.keyCode = AKKeyCode(k.keyCode); e.timestamp = p.timestamp;
         BOOL isMod = k.keyCode >= 0xE0 && k.keyCode <= 0xE7;
         // A modifier key's own press and release set and clear it; other keys carry UIKit's state.
-        if (isMod) _mods = AKModifiersAfterKey(_mods, k.keyCode, down);
-        else [self reconcileModifiers:AKMods(k.modifierFlags)];
+        if (isMod) {
+            _hardwareMods = AKModifiersAfterKey(_hardwareMods, k.keyCode, down);
+            _mods = AKModifiersReconciled(_hardwareMods, _hardwareMods | [self activeVirtualModifierFlags]);
+        } else {
+            [self reconcileModifiers:AKMods(k.modifierFlags)];
+        }
         e.modifierFlags = _mods;
         e.type = isMod || k.keyCode == 0x39 ? NSEventTypeFlagsChanged : down ? NSEventTypeKeyDown : NSEventTypeKeyUp;
         e.characters = k.characters; e.charactersIgnoringModifiers = k.charactersIgnoringModifiers;

@@ -505,6 +505,7 @@
 
 "touch.gamepad.leftStick.hint" = "Doppeltippen für L3.";
 "touch.gamepad.rightStick.hint" = "Doppeltippen für R3.";
+"touch.toolbar.toggle" = "Werkzeugleiste ein- oder ausblenden";
 
 
 
