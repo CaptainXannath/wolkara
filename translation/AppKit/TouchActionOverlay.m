@@ -11,6 +11,7 @@
 @interface AKActionCircle : UIButton
 @property(nonatomic, strong) AKTouchAction *action;
 @property(nonatomic) BOOL inputHeld;
+@property(nonatomic) BOOL toggledOn;
 @property(nonatomic, weak) AKTouchActionOverlay *owner;
 - (void)cancelPendingTouch;
 @end
@@ -18,15 +19,20 @@
 @implementation AKActionCircle {
     __weak UITouch *_finger;
     CGPoint _origin;
-    BOOL _dragged, _forwarded;
+    BOOL _dragged, _forwarded, _holdSent;
+}
+
+static CGFloat CornerRadiusForAction(AKTouchAction *action, CGSize size) {
+    CGFloat m = MIN(size.width, size.height);
+    if (action.shape == AKTouchActionShapeSquare) return MIN(10, m * 0.22);
+    return m / 2.0;
 }
 
 - (void)layoutSubviews {
     [super layoutSubviews];
-    CGFloat radius = MIN(self.bounds.size.width, self.bounds.size.height) / 2;
-    self.layer.cornerRadius = radius;
+    self.layer.cornerRadius = CornerRadiusForAction(self.action, self.bounds.size);
     self.clipsToBounds = YES;
-    CGFloat fontSize = MAX(9, MIN(14, self.bounds.size.width * 0.28));
+    CGFloat fontSize = MAX(9, MIN(14, MIN(self.bounds.size.width, self.bounds.size.height) * 0.30));
     if (fabs(self.titleLabel.font.pointSize - fontSize) > 0.5) {
         self.titleLabel.font = [UIFont systemFontOfSize:fontSize weight:UIFontWeightBold];
     }
@@ -34,6 +40,9 @@
 
 - (BOOL)pointInside:(CGPoint)p withEvent:(UIEvent *)event {
     (void)event;
+    if (self.action.shape != AKTouchActionShapeCircle || fabs(self.bounds.size.width - self.bounds.size.height) > 2.0) {
+        return CGRectContainsPoint(self.bounds, p);
+    }
     CGFloat radius = MIN(self.bounds.size.width, self.bounds.size.height) / 2;
     return hypot(p.x - self.bounds.size.width / 2, p.y - self.bounds.size.height / 2) <= radius;
 }
@@ -45,6 +54,14 @@
     _origin = [touch locationInView:self.owner];
     _dragged = NO;
     _forwarded = NO;
+    _holdSent = NO;
+    if (self.action.behavior == AKTouchActionBehaviorHold) {
+        BOOL ok = self.owner.press && self.owner.press(self.action);
+        _holdSent = ok;
+        self.inputHeld = ok;
+        [self.owner updateAppearance];
+        return YES;
+    }
     self.inputHeld = YES;
     [self.owner updateAppearance];
     return YES;
@@ -53,6 +70,7 @@
 - (BOOL)continueTrackingWithTouch:(UITouch *)touch withEvent:(UIEvent *)event {
     (void)event;
     if (touch != _finger) return NO;
+    if (_holdSent) return YES;
     CGPoint point = [touch locationInView:self.owner];
     if (!_dragged && hypot(point.x - _origin.x, point.y - _origin.y) >= AKTouchDragThreshold) {
         _dragged = YES;
@@ -66,6 +84,14 @@
 
 - (void)endTrackingWithTouch:(UITouch *)touch withEvent:(UIEvent *)event {
     if (touch != _finger) return;
+    if (_holdSent) {
+        _finger = nil;
+        _holdSent = NO;
+        self.inputHeld = NO;
+        if (self.owner.released) self.owner.released(self.action);
+        [self.owner updateAppearance];
+        return;
+    }
     CGPoint point = [touch locationInView:self.owner];
     BOOL tap = !_dragged && hypot(point.x - _origin.x, point.y - _origin.y) < AKTouchDragThreshold &&
                [self pointInside:[touch locationInView:self] withEvent:event];
@@ -73,15 +99,39 @@
     _finger = nil;
     _forwarded = NO;
     self.inputHeld = NO;
+    if (tap) {
+        if (self.action.behavior == AKTouchActionBehaviorToggle) {
+            if (self.toggledOn) {
+                self.toggledOn = NO;
+                if (self.owner.released) self.owner.released(self.action);
+            } else {
+                BOOL accepted = self.owner.press && self.owner.press(self.action);
+                self.toggledOn = accepted;
+                if (!accepted) {
+                    [self.owner updateAppearance];
+                    self.layer.borderWidth = 2;
+                    self.layer.borderColor = UIColor.systemOrangeColor.CGColor;
+                    return;
+                }
+            }
+            [self.owner updateAppearance];
+            return;
+        }
+        [self.owner updateAppearance];
+        [self.owner up:self]; // Leave rejection feedback visible after lift.
+        return;
+    }
     [self.owner updateAppearance];
-    if (tap) [self.owner up:self]; // Leave rejection feedback visible after lift.
 }
 
 - (void)cancelPendingTouch {
+    if (_holdSent && self.owner.released) self.owner.released(self.action);
     if (_forwarded && _finger && self.owner.endDrag) self.owner.endDrag(_finger, YES);
     _finger = nil;
     _forwarded = NO;
+    _holdSent = NO;
     self.inputHeld = NO;
+    self.toggledOn = NO;
 }
 
 - (void)cancelTrackingWithEvent:(UIEvent *)event {
@@ -105,10 +155,11 @@
     AKTouchAction *_selected, *_dragCreated;
     UIView *_panel, *_panelHeader, *_inspectorBox;
     UISegmentedControl *_mode;
-    UISlider *_size, *_border, *_fill;
+    UISlider *_size, *_widthSlider, *_border, *_fill;
     UISwitch *_enabled, *_shown, *_labelsSwitch, *_snapSwitch;
-    UILabel *_sizeLabel, *_selectionLabel;
-    UIButton *_kindButton, *_binding, *_modifier, *_labelButton, *_presetButton, *_dragAddChip, *_dockButton;
+    UILabel *_sizeLabel, *_widthLabel, *_selectionLabel;
+    UIButton *_kindButton, *_binding, *_modifier, *_labelButton, *_presetButton, *_profileButton;
+    UIButton *_behaviorButton, *_shapeButton, *_colorButton, *_dragAddChip, *_dockButton;
     CAShapeLayer *_gridLayer, *_axesLayer;
     BOOL _panelAtBottom, _panelCustomMoved;
     CGPoint _panelOffset, _panelDragStart;
@@ -189,28 +240,55 @@
     [self updateAppearance];
 }
 
+static UIColor *AKPresetFillColor(AKTouchActionColor preset, CGFloat alpha) {
+    switch (preset) {
+        case AKTouchActionColorGold:   return [UIColor colorWithRed:0.35 green:0.26 blue:0.06 alpha:alpha];
+        case AKTouchActionColorRed:    return [UIColor colorWithRed:0.36 green:0.08 blue:0.08 alpha:alpha];
+        case AKTouchActionColorBlue:   return [UIColor colorWithRed:0.07 green:0.18 blue:0.38 alpha:alpha];
+        case AKTouchActionColorGreen:  return [UIColor colorWithRed:0.07 green:0.28 blue:0.14 alpha:alpha];
+        case AKTouchActionColorPurple: return [UIColor colorWithRed:0.25 green:0.10 blue:0.36 alpha:alpha];
+        case AKTouchActionColorClear:  return UIColor.clearColor;
+        default:                       return [UIColor colorWithRed:0.06 green:0.06 blue:0.06 alpha:alpha];
+    }
+}
+
+static UIColor *AKPresetBorderColor(AKTouchActionColor preset, CGFloat alpha) {
+    switch (preset) {
+        case AKTouchActionColorGold:   return [UIColor colorWithRed:0.98 green:0.82 blue:0.34 alpha:alpha];
+        case AKTouchActionColorRed:    return [UIColor colorWithRed:0.95 green:0.38 blue:0.36 alpha:alpha];
+        case AKTouchActionColorBlue:   return [UIColor colorWithRed:0.42 green:0.72 blue:0.98 alpha:alpha];
+        case AKTouchActionColorGreen:  return [UIColor colorWithRed:0.36 green:0.88 blue:0.52 alpha:alpha];
+        case AKTouchActionColorPurple: return [UIColor colorWithRed:0.78 green:0.50 blue:0.98 alpha:alpha];
+        case AKTouchActionColorClear:  return UIColor.clearColor;
+        default:                       return [UIColor colorWithRed:0.84 green:0.75 blue:0.55 alpha:alpha];
+    }
+}
+
 - (void)updateAppearance {
     self.hidden = !self.editing && (!self.active || !self.layout.enabled);
     _gridLayer.hidden = _axesLayer.hidden = !self.editing;
-    UIColor *warmBorder = [UIColor colorWithRed:0.84 green:0.75 blue:0.55 alpha:self.layout.borderOpacity];
-    UIColor *warmFill = [UIColor colorWithRed:0.06 green:0.06 blue:0.06 alpha:self.layout.fillOpacity];
-    UIColor *heldFill = [UIColor colorWithRed:0.84 green:0.68 blue:0.32 alpha:0.38];
+    UIColor *heldFill = [UIColor colorWithRed:0.84 green:0.68 blue:0.32 alpha:0.42];
     for (AKActionCircle *circle in _circles) {
-        BOOL selected = circle.action == _selected ||
-            (_mode.selectedSegmentIndex == 1 && [circle.action.groupIdentifier isEqual:_selected.groupIdentifier]);
+        BOOL selected = _selected && (circle.action == _selected ||
+            (_mode.selectedSegmentIndex == 1 && [circle.action.groupIdentifier isEqual:_selected.groupIdentifier]));
+        BOOL activeGlow = circle.inputHeld || circle.toggledOn;
+        BOOL invisible = (circle.action.colorPreset == AKTouchActionColorClear) && !self.editing;
         circle.hidden = !self.editing && !circle.action.enabled;
-        circle.layer.borderWidth = self.editing ? (selected ? 2.5 : 1.5) : (self.layout.borderOpacity > 0 ? 1 : 0);
+        circle.layer.borderWidth = self.editing
+            ? (selected ? 2.5 : 1.5)
+            : (circle.toggledOn ? 2.0 : (!invisible && self.layout.borderOpacity > 0 ? 1.0 : 0));
         circle.layer.borderColor = (self.editing
-            ? (selected ? UIColor.systemYellowColor : [UIColor colorWithRed:0.84 green:0.75 blue:0.55 alpha:0.85])
-            : warmBorder).CGColor;
-        circle.backgroundColor = circle.inputHeld
+            ? (selected ? UIColor.systemYellowColor : AKPresetBorderColor(circle.action.colorPreset == AKTouchActionColorClear ? AKTouchActionColorDefault : circle.action.colorPreset, 0.85))
+            : (circle.toggledOn ? UIColor.systemYellowColor : AKPresetBorderColor(circle.action.colorPreset, self.layout.borderOpacity))).CGColor;
+        CGFloat fillA = self.editing ? MAX(0.45, self.layout.fillOpacity) : self.layout.fillOpacity;
+        circle.backgroundColor = activeGlow
             ? heldFill
-            : (self.editing ? [UIColor colorWithRed:0.06 green:0.06 blue:0.06 alpha:MAX(0.45, self.layout.fillOpacity)] : warmFill);
+            : AKPresetFillColor(self.editing && circle.action.colorPreset == AKTouchActionColorClear ? AKTouchActionColorDefault : circle.action.colorPreset, fillA);
         circle.alpha = self.editing && !circle.action.enabled ? 0.35 : 1;
         BOOL showText = self.editing || self.layout.showLabels;
         [circle setTitle:showText ? circle.action.label : @"" forState:UIControlStateNormal];
         circle.accessibilityLabel = circle.action.label;
-        circle.accessibilityValue = circle.action.enabled ? @"Enabled" : @"Hidden";
+        circle.accessibilityValue = circle.toggledOn ? @"Active" : (circle.action.enabled ? @"Enabled" : @"Hidden");
     }
     [self setNeedsLayout];
 }
@@ -249,12 +327,12 @@
     if (self.editing) [self layoutGridInBounds:bounds];
     for (AKActionCircle *circle in _circles) {
         circle.frame = [self.layout frameForAction:circle.action inBounds:bounds];
-        circle.layer.cornerRadius = MIN(circle.bounds.size.width, circle.bounds.size.height) / 2;
+        circle.layer.cornerRadius = CornerRadiusForAction(circle.action, circle.bounds.size);
     }
     if (_panel) {
         CGRect safe = UIEdgeInsetsInsetRect(self.bounds, self.safeAreaInsets);
         CGFloat width = MIN(520, safe.size.width - 16);
-        CGFloat height = MIN(244, safe.size.height - 20);
+        CGFloat height = MIN(272, safe.size.height - 20);
         if (_panelCustomMoved) {
             CGFloat x = MAX(CGRectGetMinX(safe) + 4, MIN(CGRectGetMaxX(safe) - width - 4, _panelOffset.x));
             CGFloat y = MAX(CGRectGetMinY(safe) + 4, MIN(CGRectGetMaxY(safe) - height - 4, _panelOffset.y));
@@ -468,16 +546,22 @@
     _dockButton = [self button:@"⇅ Bottom" action:@selector(toggleDock) identifier:@"wolkara.abilities.dock"];
     _dockButton.titleLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightSemibold];
 
+    _profileButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    _profileButton.showsMenuAsPrimaryAction = YES;
+    _profileButton.titleLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightSemibold];
+    _profileButton.accessibilityIdentifier = @"wolkara.abilities.profile";
+    [self rebuildProfileMenu];
+
     UIButton *done = [self button:@"Done" action:@selector(finishEditing) identifier:@"wolkara.abilities.done"];
-    UILabel *title = [self label:@"⠿ Buttons"];
-    title.font = [UIFont systemFontOfSize:13 weight:UIFontWeightBold];
+    UILabel *title = [self label:@"⠿"];
+    title.font = [UIFont systemFontOfSize:14 weight:UIFontWeightBold];
     title.numberOfLines = 1;
     [title setContentCompressionResistancePriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
 
     UILabel *snapLbl = [self label:@"Snap"];
     snapLbl.numberOfLines = 1;
 
-    _panelHeader = [self row:@[title, _enabled, snapLbl, _snapSwitch, _dockButton]];
+    _panelHeader = [self row:@[title, _profileButton, _enabled, snapLbl, _snapSwitch, _dockButton]];
     _panelHeader.userInteractionEnabled = YES;
     UIPanGestureRecognizer *panelPan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(panPanel:)];
     panelPan.delegate = self;
@@ -575,6 +659,32 @@
     _shown.accessibilityLabel = @"Circle enabled";
     [_shown addTarget:self action:@selector(shownChanged:) forControlEvents:UIControlEventValueChanged];
 
+    _behaviorButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    _behaviorButton.showsMenuAsPrimaryAction = YES;
+    _behaviorButton.titleLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightSemibold];
+    _behaviorButton.accessibilityIdentifier = @"wolkara.abilities.behavior";
+
+    _shapeButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    _shapeButton.showsMenuAsPrimaryAction = YES;
+    _shapeButton.titleLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightSemibold];
+    _shapeButton.accessibilityIdentifier = @"wolkara.abilities.shape";
+
+    _colorButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    _colorButton.showsMenuAsPrimaryAction = YES;
+    _colorButton.titleLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightSemibold];
+    _colorButton.accessibilityIdentifier = @"wolkara.abilities.color";
+
+    _widthLabel = [self label:@"Width 1.0x"];
+    _widthLabel.numberOfLines = 1;
+    [_widthLabel.widthAnchor constraintEqualToConstant:72].active = YES;
+    _widthSlider = [UISlider new];
+    _widthSlider.minimumValue = 0.8;
+    _widthSlider.maximumValue = 2.8;
+    _widthSlider.value = 1.0;
+    _widthSlider.accessibilityLabel = @"Button width aspect";
+    _widthSlider.accessibilityIdentifier = @"wolkara.abilities.width";
+    [_widthSlider addTarget:self action:@selector(widthChanged:) forControlEvents:UIControlEventValueChanged];
+
     UIButton *dupBtn = [self button:@"Copy" action:@selector(duplicateCircle) identifier:@"wolkara.abilities.duplicate"];
     dupBtn.titleLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightSemibold];
     UIButton *delBtn = [self button:@"Delete" action:@selector(deleteCircle) identifier:@"wolkara.abilities.delete"];
@@ -584,8 +694,9 @@
     UILabel *shownLbl = [self label:@"Shown"];
     shownLbl.numberOfLines = 1;
     UIStackView *inspectTop = [self row:@[_kindButton, _binding, _modifier, _labelButton]];
-    UIStackView *inspectBottom = [self row:@[shownLbl, _shown, dupBtn, delBtn]];
-    UIStackView *inspectorStack = [[UIStackView alloc] initWithArrangedSubviews:@[inspectTop, inspectBottom]];
+    UIStackView *inspectMid = [self row:@[_behaviorButton, _shapeButton, _colorButton]];
+    UIStackView *inspectBottom = [self row:@[_widthLabel, _widthSlider, shownLbl, _shown, dupBtn, delBtn]];
+    UIStackView *inspectorStack = [[UIStackView alloc] initWithArrangedSubviews:@[inspectTop, inspectMid, inspectBottom]];
     inspectorStack.axis = UILayoutConstraintAxisVertical;
     inspectorStack.spacing = 4;
     _inspectorBox = inspectorStack;
@@ -614,6 +725,34 @@
     ]];
     [self updateEditor];
     if (self.configurationChanged) self.configurationChanged();
+}
+
+- (void)rebuildProfileMenu {
+    [_profileButton setTitle:[NSString stringWithFormat:@"P%lu ▾", (unsigned long)self.layout.profileIndex]
+                    forState:UIControlStateNormal];
+    __weak AKTouchActionOverlay *weakSelf = self;
+    NSMutableArray<UIAction *> *items = [NSMutableArray arrayWithCapacity:3];
+    for (NSUInteger p = 1; p <= 3; p++) {
+        UIAction *act = [UIAction actionWithTitle:[NSString stringWithFormat:@"Profile %lu", (unsigned long)p]
+                                            image:nil identifier:nil handler:^(__kindof UIAction *a) {
+            (void)a;
+            AKTouchActionOverlay *self = weakSelf;
+            if (!self) return;
+            [self.layout switchToProfile:p];
+            self->_selected = self.layout.actions.firstObject;
+            self->_enabled.on = self.layout.enabled;
+            self->_border.value = self.layout.borderOpacity;
+            self->_fill.value = self.layout.fillOpacity;
+            self->_labelsSwitch.on = self.layout.showLabels;
+            self->_snapSwitch.on = self.layout.snapToGrid;
+            [self rebuildCircles];
+            [self rebuildProfileMenu];
+            [self updateEditor];
+        }];
+        act.state = (self.layout.profileIndex == p) ? UIMenuElementStateOn : UIMenuElementStateOff;
+        [items addObject:act];
+    }
+    _profileButton.menu = [UIMenu menuWithChildren:items];
 }
 
 - (void)rebuildPresetMenu {
@@ -665,7 +804,9 @@
     __weak AKTouchActionOverlay *weakSelf = self;
     NSArray<NSString *> *bars = @[@"1", @"2", @"3", @"4", @"5", @"6", @"7", @"8", @"9", @"0", @"-", @"="];
     NSArray<NSString *> *fkeys = @[@"F1", @"F2", @"F3", @"F4", @"F5", @"F6", @"F7", @"F8", @"F9", @"F10", @"F11", @"F12"];
-    NSArray<NSString *> *special = @[@"Space", @"Tab", @"Esc", @"Return", @"`", @"[", @"]", @"\\", @";", @"'", @",", @".", @"/"];
+    NSArray<NSString *> *special = @[@"Space", @"Tab", @"Esc", @"Return", @"Bksp", @"Del", @"`", @"[", @"]", @"\\", @";", @"'", @",", @".", @"/"];
+    NSArray<NSString *> *nav = @[@"Up", @"Down", @"Left", @"Right", @"Home", @"End", @"PgUp", @"PgDn"];
+    NSArray<NSString *> *stickyMods = @[@"LShift", @"LCtrl", @"LOpt", @"LCmd"];
     NSArray<NSString *> *letters = @[@"Q", @"E", @"R", @"T", @"F", @"G", @"V", @"C", @"X", @"Z", @"B", @"H", @"J", @"K", @"L", @"N", @"M", @"A", @"S", @"D", @"W", @"I", @"O", @"P", @"U", @"Y"];
 
     UIMenu *(^submenu)(NSString *, NSArray<NSString *> *) = ^UIMenu *(NSString *title, NSArray<NSString *> *keys) {
@@ -691,6 +832,8 @@
         submenu(@"Numbers (1-=)", bars),
         submenu(@"Function (F1-F12)", fkeys),
         submenu(@"Action / Special", special),
+        submenu(@"Arrows & Nav", nav),
+        submenu(@"Modifiers (Use Toggle/Hold)", stickyMods),
         submenu(@"Letters", letters),
     ]];
 }
@@ -861,6 +1004,72 @@
     [_labelButton setTitle:_selected.customLabel.length ? [NSString stringWithFormat:@"\"%@\"", _selected.customLabel] : @"Label"
                   forState:UIControlStateNormal];
     _shown.on = _selected.enabled;
+
+    NSArray<NSString *> *behaviorNames = @[@"Tap", @"Hold", @"Toggle"];
+    NSUInteger bIdx = _selected.behavior < behaviorNames.count ? _selected.behavior : 0;
+    [_behaviorButton setTitle:[NSString stringWithFormat:@"%@ ▾", behaviorNames[bIdx]]
+                     forState:UIControlStateNormal];
+    NSMutableArray<UIAction *> *behaviors = [NSMutableArray arrayWithCapacity:3];
+    NSArray<NSString *> *behaviorTitles = @[@"Tap (Drag-safe)", @"Hold While Pressed", @"Toggle On / Off"];
+    for (NSUInteger i = 0; i < 3; i++) {
+        UIAction *act = [UIAction actionWithTitle:behaviorTitles[i] image:nil identifier:nil handler:^(__kindof UIAction *a) {
+            (void)a;
+            AKTouchActionOverlay *self = weakSelf;
+            if (!self || !self->_selected) return;
+            self->_selected.behavior = (AKTouchActionBehavior)i;
+            [self.layout save];
+            [self updateEditor];
+        }];
+        act.state = _selected.behavior == i ? UIMenuElementStateOn : UIMenuElementStateOff;
+        [behaviors addObject:act];
+    }
+    _behaviorButton.menu = [UIMenu menuWithChildren:behaviors];
+
+    NSArray<NSString *> *shapeNames = @[@"Circle", @"Pill", @"Box"];
+    NSUInteger sIdx = _selected.shape < shapeNames.count ? _selected.shape : 0;
+    [_shapeButton setTitle:[NSString stringWithFormat:@"%@ ▾", shapeNames[sIdx]]
+                  forState:UIControlStateNormal];
+    NSMutableArray<UIAction *> *shapes = [NSMutableArray arrayWithCapacity:3];
+    for (NSUInteger i = 0; i < 3; i++) {
+        UIAction *act = [UIAction actionWithTitle:shapeNames[i] image:nil identifier:nil handler:^(__kindof UIAction *a) {
+            (void)a;
+            AKTouchActionOverlay *self = weakSelf;
+            if (!self || !self->_selected) return;
+            self->_selected.shape = (AKTouchActionShape)i;
+            if (i == AKTouchActionShapePill && self->_selected.widthScale < 1.3) self->_selected.widthScale = 1.6;
+            else if (i == AKTouchActionShapeCircle) self->_selected.widthScale = 1.0;
+            [self.layout save];
+            [self updateEditor];
+        }];
+        act.state = _selected.shape == i ? UIMenuElementStateOn : UIMenuElementStateOff;
+        [shapes addObject:act];
+    }
+    _shapeButton.menu = [UIMenu menuWithChildren:shapes];
+
+    NSArray<NSString *> *colorNames = @[@"Charcoal", @"Gold", @"Red", @"Blue", @"Green", @"Purple", @"Invisible"];
+    NSUInteger cIdx = _selected.colorPreset < colorNames.count ? _selected.colorPreset : 0;
+    [_colorButton setTitle:[NSString stringWithFormat:@"%@ ▾", colorNames[cIdx]]
+                  forState:UIControlStateNormal];
+    NSMutableArray<UIAction *> *colors = [NSMutableArray arrayWithCapacity:colorNames.count];
+    for (NSUInteger i = 0; i < colorNames.count; i++) {
+        UIAction *act = [UIAction actionWithTitle:colorNames[i] image:nil identifier:nil handler:^(__kindof UIAction *a) {
+            (void)a;
+            AKTouchActionOverlay *self = weakSelf;
+            if (!self || !self->_selected) return;
+            self->_selected.colorPreset = (AKTouchActionColor)i;
+            [self.layout save];
+            [self updateEditor];
+        }];
+        act.state = _selected.colorPreset == i ? UIMenuElementStateOn : UIMenuElementStateOff;
+        [colors addObject:act];
+    }
+    _colorButton.menu = [UIMenu menuWithChildren:colors];
+
+    CGFloat w = _selected ? _selected.widthScale : 1.0;
+    _widthSlider.value = w;
+    _widthSlider.enabled = _selected != nil;
+    _widthLabel.text = [NSString stringWithFormat:@"Width %.1fx", w];
+
     [self updateAppearance];
 }
 
@@ -898,6 +1107,13 @@
 - (void)labelsChanged:(UISwitch *)sender { self.layout.showLabels = sender.on; [self updateAppearance]; }
 - (void)snapChanged:(UISwitch *)sender { self.layout.snapToGrid = sender.on; [self.layout save]; }
 - (void)shownChanged:(UISwitch *)sender { _selected.enabled = sender.on; [self updateEditor]; }
+- (void)widthChanged:(UISlider *)sender {
+    _selected.widthScale = sender.value;
+    if (_selected.widthScale > 1.15 && _selected.shape == AKTouchActionShapeCircle) {
+        _selected.shape = AKTouchActionShapePill;
+    }
+    [self updateEditor];
+}
 - (void)borderChanged:(UISlider *)sender { self.layout.borderOpacity = sender.value; [self updateAppearance]; }
 - (void)fillChanged:(UISlider *)sender { self.layout.fillOpacity = sender.value; [self updateAppearance]; }
 
@@ -1009,10 +1225,11 @@
     [_panel removeFromSuperview];
     _panel = _panelHeader = _inspectorBox = nil;
     _mode = nil;
-    _size = _border = _fill = nil;
+    _size = _widthSlider = _border = _fill = nil;
     _enabled = _shown = _labelsSwitch = _snapSwitch = nil;
-    _sizeLabel = _selectionLabel = nil;
-    _kindButton = _binding = _modifier = _labelButton = _presetButton = _dragAddChip = _dockButton = nil;
+    _sizeLabel = _widthLabel = _selectionLabel = nil;
+    _kindButton = _binding = _modifier = _labelButton = _presetButton = _profileButton = nil;
+    _behaviorButton = _shapeButton = _colorButton = _dragAddChip = _dockButton = nil;
     [self updateAppearance];
     if (self.configurationChanged) self.configurationChanged();
 }

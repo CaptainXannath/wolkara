@@ -12,6 +12,28 @@ typedef NS_ENUM(NSUInteger, AKTouchActionAnchor) {
     AKTouchActionAnchorRight = 2,
 };
 
+typedef NS_ENUM(NSUInteger, AKTouchActionBehavior) {
+    AKTouchActionBehaviorTap = 0,
+    AKTouchActionBehaviorHold = 1,
+    AKTouchActionBehaviorToggle = 2,
+};
+
+typedef NS_ENUM(NSUInteger, AKTouchActionShape) {
+    AKTouchActionShapeCircle = 0,
+    AKTouchActionShapePill = 1,
+    AKTouchActionShapeSquare = 2,
+};
+
+typedef NS_ENUM(NSUInteger, AKTouchActionColor) {
+    AKTouchActionColorDefault = 0,
+    AKTouchActionColorGold = 1,
+    AKTouchActionColorRed = 2,
+    AKTouchActionColorBlue = 3,
+    AKTouchActionColorGreen = 4,
+    AKTouchActionColorPurple = 5,
+    AKTouchActionColorClear = 6,
+};
+
 typedef NS_OPTIONS(NSUInteger, AKTouchKeyModifier) {
     AKTouchKeyModifierShift   = 1 << 0,
     AKTouchKeyModifierControl = 1 << 1,
@@ -28,9 +50,13 @@ typedef NS_OPTIONS(NSUInteger, AKTouchKeyModifier) {
 @property(nonatomic, copy) NSString *keyName;
 @property(nonatomic) AKTouchKeyModifier keyModifiers;
 @property(nonatomic) unsigned mouseButton;
+@property(nonatomic) AKTouchActionBehavior behavior;
+@property(nonatomic) AKTouchActionShape shape;
+@property(nonatomic) AKTouchActionColor colorPreset;
 @property(nonatomic, copy) NSString *customLabel;
 @property(nonatomic) CGPoint position;
 @property(nonatomic) CGFloat diameter;
+@property(nonatomic) CGFloat widthScale;
 @property(nonatomic) BOOL enabled;
 @property(nonatomic, readonly) NSString *label;
 @property(nonatomic, readonly) unsigned short macKeyCode;
@@ -45,6 +71,7 @@ typedef NS_OPTIONS(NSUInteger, AKTouchKeyModifier) {
 
 @interface AKTouchActionLayout : NSObject
 - (instancetype)initWithDefaults:(NSUserDefaults *)defaults;
+@property(nonatomic) NSUInteger profileIndex;
 @property(nonatomic) BOOL enabled;
 @property(nonatomic) BOOL showLabels;
 @property(nonatomic) BOOL snapToGrid;
@@ -52,6 +79,7 @@ typedef NS_OPTIONS(NSUInteger, AKTouchKeyModifier) {
 @property(nonatomic) CGPoint center;
 @property(nonatomic) CGPoint leftOffset, rightOffset;
 @property(nonatomic, readonly) NSArray<AKTouchAction *> *actions;
+- (void)switchToProfile:(NSUInteger)profile;
 - (CGFloat)unitScaleInBounds:(CGRect)bounds;
 - (CGFloat)unitScaleForAnchor:(AKTouchActionAnchor)anchor inBounds:(CGRect)bounds;
 // Convert a reference offset from the action's anchor in bounds.

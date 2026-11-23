@@ -626,27 +626,41 @@ static NSEventModifierFlags AKTouchKeyModsToEventFlags(NSUInteger touchMods) {
     if (touchMods & (1UL << 3)) flags |= NSEventModifierFlagCommand;
     return flags;
 }
+static NSEventModifierFlags AKStandaloneModifierFlagForKeyCode(unsigned short keyCode) {
+    switch (keyCode) {
+        case 56: return NSEventModifierFlagShift;
+        case 59: return NSEventModifierFlagControl;
+        case 58: return NSEventModifierFlagOption;
+        case 55: return NSEventModifierFlagCommand;
+        default: return 0;
+    }
+}
 - (NSEventModifierFlags)activeVirtualModifierFlags {
     NSEventModifierFlags flags = 0;
     for (NSNumber *value in _virtualHeldKeys.allValues) flags |= value.unsignedIntegerValue;
     return flags;
 }
-- (void)postFlagsChanged:(NSEventModifierFlags)flags {
+- (void)postFlagsChanged:(NSEventModifierFlags)flags keyCode:(unsigned short)keyCode {
     NSEvent *e = [NSEvent new];
-    e.window = self.nsWindow; e.type = NSEventTypeFlagsChanged; e.modifierFlags = flags;
+    e.window = self.nsWindow; e.type = NSEventTypeFlagsChanged; e.keyCode = keyCode; e.modifierFlags = flags;
     e.timestamp = NSProcessInfo.processInfo.systemUptime;
     [NSApp postEvent:e atStart:NO];
 }
+- (void)postFlagsChanged:(NSEventModifierFlags)flags {
+    [self postFlagsChanged:flags keyCode:0];
+}
 - (void)ak_sendKeyCode:(unsigned short)keyCode characters:(NSString *)characters modifiers:(NSUInteger)modifiers pressed:(BOOL)pressed {
     NSString *text = characters ?: @"";
+    NSEventModifierFlags standalone = AKStandaloneModifierFlagForKeyCode(keyCode);
     if (pressed) {
-        NSEventModifierFlags req = AKTouchKeyModsToEventFlags(modifiers);
+        NSEventModifierFlags req = AKTouchKeyModsToEventFlags(modifiers) | standalone;
         _virtualHeldKeys[@(keyCode)] = @(req);
         NSEventModifierFlags next = AKModifiersReconciled(_mods, _hardwareMods | [self activeVirtualModifierFlags]);
         if (next != _mods) {
             _mods = next;
-            [self postFlagsChanged:_mods];
+            [self postFlagsChanged:_mods keyCode:standalone ? keyCode : 0];
         }
+        if (standalone != 0) return;
         NSEvent *e = [NSEvent new];
         e.type = NSEventTypeKeyDown; e.window = self.nsWindow; e.keyCode = keyCode;
         e.modifierFlags = _mods; e.characters = text; e.charactersIgnoringModifiers = text;
@@ -654,16 +668,18 @@ static NSEventModifierFlags AKTouchKeyModsToEventFlags(NSUInteger touchMods) {
         [NSApp postEvent:e atStart:NO];
     } else {
         if (!_virtualHeldKeys[@(keyCode)]) return;
-        NSEvent *e = [NSEvent new];
-        e.type = NSEventTypeKeyUp; e.window = self.nsWindow; e.keyCode = keyCode;
-        e.modifierFlags = _mods; e.characters = text; e.charactersIgnoringModifiers = text;
-        e.timestamp = NSProcessInfo.processInfo.systemUptime;
-        [NSApp postEvent:e atStart:NO];
+        if (standalone == 0) {
+            NSEvent *e = [NSEvent new];
+            e.type = NSEventTypeKeyUp; e.window = self.nsWindow; e.keyCode = keyCode;
+            e.modifierFlags = _mods; e.characters = text; e.charactersIgnoringModifiers = text;
+            e.timestamp = NSProcessInfo.processInfo.systemUptime;
+            [NSApp postEvent:e atStart:NO];
+        }
         [_virtualHeldKeys removeObjectForKey:@(keyCode)];
         NSEventModifierFlags next = AKModifiersReconciled(_mods, _hardwareMods | [self activeVirtualModifierFlags]);
         if (next != _mods) {
             _mods = next;
-            [self postFlagsChanged:_mods];
+            [self postFlagsChanged:_mods keyCode:standalone ? keyCode : 0];
         }
     }
 }

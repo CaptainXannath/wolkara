@@ -58,6 +58,11 @@ static NSString *ValidatedChoice(id value, NSArray<NSString *> *allowed, NSStrin
         _interactBinding = ValidatedChoice(values[@"interactBinding"], [self.class allowedInteractBindings], @"F");
         _jumpBinding = ValidatedChoice(values[@"jumpBinding"], [self.class allowedJumpBindings], @"Space");
         self.cameraRightDrag = Number(values[@"cameraRightDrag"], 1) != 0;
+        self.leftStickWASD = Number(values[@"leftStickWASD"], 0) != 0;
+        self.showHudTarget = Number(values[@"showHudTarget"], 1) != 0;
+        self.showHudInteract = Number(values[@"showHudInteract"], 1) != 0;
+        self.showHudJump = Number(values[@"showHudJump"], 1) != 0;
+        self.showHudCamera = Number(values[@"showHudCamera"], 1) != 0;
 
         _positions = [NSMutableDictionary new];
         id positions = values[@"positions"];
@@ -118,6 +123,11 @@ static NSString *ValidatedChoice(id value, NSArray<NSString *> *allowed, NSStrin
         @"interactBinding": _interactBinding ?: @"F",
         @"jumpBinding": _jumpBinding ?: @"Space",
         @"cameraRightDrag": @(_cameraRightDrag),
+        @"leftStickWASD": @(_leftStickWASD),
+        @"showHudTarget": @(_showHudTarget),
+        @"showHudInteract": @(_showHudInteract),
+        @"showHudJump": @(_showHudJump),
+        @"showHudCamera": @(_showHudCamera),
         @"positions": _positions
     } forKey:LayoutKey];
     [NSNotificationCenter.defaultCenter postNotificationName:AKGamepadLayoutDidChangeNotification object:_defaults];
@@ -134,6 +144,11 @@ static NSString *ValidatedChoice(id value, NSArray<NSString *> *allowed, NSStrin
     _interactBinding = @"F";
     _jumpBinding = @"Space";
     self.cameraRightDrag = YES;
+    self.leftStickWASD = NO;
+    self.showHudTarget = YES;
+    self.showHudInteract = YES;
+    self.showHudJump = YES;
+    self.showHudCamera = YES;
     [_positions removeAllObjects];
     [self save];
 }

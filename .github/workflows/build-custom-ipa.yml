@@ -14,10 +14,10 @@ concurrency:
 
 jobs:
   build-ipa:
-    name: Test Touch HUD & Build StikDebug IPA
-    # Cross-build the arm64 IPA and run simulator checks on Intel while macOS arm64 capacity is constrained.
+    name: Build Custom HUD StikDebug IPA
+    # Cross-build the arm64 IPA on Intel while macOS arm64 capacity is constrained.
     runs-on: macos-26-intel
-    timeout-minutes: 45
+    timeout-minutes: 25
     defaults:
       run:
         shell: bash
@@ -52,6 +52,46 @@ jobs:
         env:
           TOLKARA_SYSTEM_ROOTS: "NO"
         run: bash tools/package_external_jit_ipa.sh Wolkara-custom-hud.ipa
+
+      - name: Verify IPA
+        run: |
+          set -euo pipefail
+          test -s Wolkara-custom-hud.ipa
+          unzip -tq Wolkara-custom-hud.ipa
+          shasum -a 256 Wolkara-custom-hud.ipa > Wolkara-custom-hud.ipa.sha256
+
+      - name: Upload Custom IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Wolkara-custom-hud-IPA
+          path: |
+            Wolkara-custom-hud.ipa
+            Wolkara-custom-hud.ipa.sha256
+          if-no-files-found: error
+          retention-days: 30
+
+  simulator-tests:
+    name: Touch HUD & Gamepad Simulator Tests
+    runs-on: macos-26-intel
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Select Xcode and check architecture
+        run: |
+          if [ -d /Applications/Xcode_26.6.app/Contents/Developer ]; then
+            echo "DEVELOPER_DIR=/Applications/Xcode_26.6.app/Contents/Developer" >> "$GITHUB_ENV"
+          fi
+          uname -a
+
+      - name: Ensure script permissions
+        run: chmod +x tools/*.sh tools/*.py
 
       - name: Run Touch HUD & Input Simulator Tests
         run: |
@@ -110,20 +150,3 @@ jobs:
           path: logs/
           if-no-files-found: ignore
           retention-days: 14
-
-      - name: Verify IPA
-        run: |
-          set -euo pipefail
-          test -s Wolkara-custom-hud.ipa
-          unzip -tq Wolkara-custom-hud.ipa
-          shasum -a 256 Wolkara-custom-hud.ipa > Wolkara-custom-hud.ipa.sha256
-
-      - name: Upload Custom IPA Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: Wolkara-custom-hud-IPA
-          path: |
-            Wolkara-custom-hud.ipa
-            Wolkara-custom-hud.ipa.sha256
-          if-no-files-found: error
-          retention-days: 30

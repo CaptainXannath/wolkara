@@ -55,10 +55,17 @@ void TestTouchAbilitiesUI(UIView *host,AKTouchGamepad *manager,GCVirtualControll
     [NSUserDefaults.standardUserDefaults removeObjectForKey:@"WolkaraTouchAbilitiesV1"];
     [NSUserDefaults.standardUserDefaults removeObjectForKey:@"WolkaraTouchAbilitiesV2"];
     [NSUserDefaults.standardUserDefaults removeObjectForKey:@"WolkaraTouchAbilitiesV3"];
+    [NSUserDefaults.standardUserDefaults removeObjectForKey:@"WolkaraTouchAbilitiesProfile"];
+    fprintf(stderr,"[TestTouchAbilitiesUI] begin editor check\n");
     [manager toggleSettings]; Tap(host,@"wolkara.controls.abilities");
     assert(manager.configuring && manager.editing);
     UIControl *sideFirst=(id)Find(host,@"wolkara.ability.side.left.0"); assert(sideFirst);
     AKTouchActionOverlay *overlay=(id)sideFirst.superview;
+    assert(Find(host,@"wolkara.abilities.profile"));
+    assert(Find(host,@"wolkara.abilities.behavior"));
+    assert(Find(host,@"wolkara.abilities.shape"));
+    assert(Find(host,@"wolkara.abilities.color"));
+    assert(Find(host,@"wolkara.abilities.width"));
     UISegmentedControl *mode=(id)Find(host,@"wolkara.abilities.mode"); assert(mode.numberOfSegments==3 && mode.selectedSegmentIndex==0);
     Tap(host,@"wolkara.abilities.addLeft"); assert(overlay.layout.actions.count==17);
     Tap(host,@"wolkara.abilities.addRight"); assert(overlay.layout.actions.count==18);
@@ -195,6 +202,19 @@ void TestTouchAbilitiesUI(UIView *host,AKTouchGamepad *manager,GCVirtualControll
     assert(latePresses==1 && pad.rightTrigger.pressed && !pad.leftTrigger.pressed);
     assert(pending.layer.borderWidth==2); // A rejected tap remains visibly marked.
     [rt sendActionsForControlEvents:UIControlEventTouchUpInside]; Drain(); pad.buttonX.pressedChangedHandler=nil;
+    AKTouchAction *holdTarget=nil;
+    for (AKTouchAction *a in overlay.layout.actions) {
+        if ([a.identifier isEqual:@"1.X"]) { holdTarget=a; break; }
+    }
+    assert(holdTarget);
+    holdTarget.behavior=AKTouchActionBehaviorHold;
+    touch=StartCircle(pending,host); Drain(); assert(pad.buttonX.pressed);
+    [pending endTrackingWithTouch:touch withEvent:nil]; Drain(); assert(!pad.buttonX.pressed);
+    holdTarget.behavior=AKTouchActionBehaviorToggle;
+    CircleTap(pending,host); Drain(); assert(pad.buttonX.pressed);
+    CircleTap(pending,host); Drain(); assert(!pad.buttonX.pressed);
+    holdTarget.behavior=AKTouchActionBehaviorTap;
+    fprintf(stderr,"[TestTouchAbilitiesUI] verified Hold and Toggle behaviors\n");
     AKTouchActionOverlay *preview=[[AKTouchActionOverlay alloc] initWithFrame:CGRectMake(0,0,1280,900)];
     [preview resetLayout]; preview.layout.enabled=YES; preview.layout.borderOpacity=.7; preview.active=YES; [preview layoutIfNeeded];
     UIView *canvas=[[UIView alloc] initWithFrame:preview.bounds];

@@ -4,6 +4,11 @@
 static NSString *const ActionsKey = @"WolkaraTouchAbilitiesV3";
 static NSString *const V2ActionsKey = @"WolkaraTouchAbilitiesV2";
 static NSString *const LegacyActionsKey = @"WolkaraTouchAbilitiesV1";
+static NSString *const ProfileIndexKey = @"WolkaraTouchAbilitiesProfile";
+
+static NSString *KeyForProfile(NSUInteger profile) {
+    return profile <= 1 ? ActionsKey : [NSString stringWithFormat:@"%@_P%lu", ActionsKey, (unsigned long)profile];
+}
 
 typedef struct {
     __unsafe_unretained NSString *name;
@@ -31,6 +36,13 @@ static const AKTouchKeyEntry AKTouchKeyTable[] = {
     {@"U", @"U", 32, @"u"}, {@"Y", @"Y", 16, @"y"},
     {@"[", @"[", 33, @"["}, {@"]", @"]", 30, @"]"}, {@"\\", @"\\", 42, @"\\"}, {@";", @";", 41, @";"},
     {@"'", @"'", 39, @"'"}, {@",", @",", 43, @","}, {@".", @".", 47, @"."}, {@"/", @"/", 44, @"/"},
+    {@"Up", @"↑", 126, @"\uF700"}, {@"Down", @"↓", 125, @"\uF701"},
+    {@"Left", @"←", 123, @"\uF702"}, {@"Right", @"→", 124, @"\uF703"},
+    {@"Bksp", @"⌫", 51, @"\x7f"}, {@"Del", @"Del", 117, @"\uF728"},
+    {@"Home", @"Hm", 115, @"\uF729"}, {@"End", @"End", 119, @"\uF72B"},
+    {@"PgUp", @"PU", 116, @"\uF72C"}, {@"PgDn", @"PD", 121, @"\uF72D"},
+    {@"LShift", @"Shift", 56, @""}, {@"LCtrl", @"Ctrl", 59, @""},
+    {@"LOpt", @"Alt", 58, @""}, {@"LCmd", @"Cmd", 55, @""},
 };
 
 static const NSUInteger AKTouchKeyTableCount = sizeof(AKTouchKeyTable) / sizeof(AKTouchKeyTable[0]);
@@ -69,6 +81,7 @@ static NSString *DefaultGroup(NSString *identifier, AKTouchActionAnchor anchor) 
         _button = @"A";
         _keyName = @"1";
         _diameter = 40;
+        _widthScale = 1.0;
         _enabled = YES;
     }
     return self;
@@ -107,6 +120,10 @@ static NSString *DefaultGroup(NSString *identifier, AKTouchActionAnchor anchor) 
     return [prefix stringByAppendingString:base];
 }
 
+- (void)setWidthScale:(CGFloat)widthScale {
+    _widthScale = Bounded(widthScale, 0.8, 2.8, 1.0);
+}
+
 - (unsigned short)macKeyCode {
     unsigned short code = 18;
     [AKTouchAction keyInfoForName:self.keyName keyCode:&code characters:nil];
@@ -142,28 +159,45 @@ static NSString *DefaultGroup(NSString *identifier, AKTouchActionAnchor anchor) 
 - (instancetype)initWithDefaults:(NSUserDefaults *)defaults {
     if ((self = [super init])) {
         _defaults = defaults;
-        [self resetToSideLayout];
-        id stored = [defaults objectForKey:ActionsKey];
-        BOOL migratingFromV2 = NO;
-        if (![stored isKindOfClass:NSDictionary.class]) {
-            id v2 = [defaults objectForKey:V2ActionsKey];
-            if ([v2 isKindOfClass:NSDictionary.class]) {
-                stored = v2;
-                migratingFromV2 = YES;
-            } else {
-                // Preserve explicit legacy V1 ability layouts only if the user enabled them.
-                id legacy = [defaults objectForKey:LegacyActionsKey];
-                if ([legacy isKindOfClass:NSDictionary.class] && Number(legacy[@"enabled"], 0) != 0) {
-                    stored = legacy;
-                } else {
-                    return self;
-                }
-            }
-        }
-        [self loadFromDictionary:stored];
-        if (migratingFromV2) [self stripUnmodifiedCtrlDefaults];
+        NSInteger savedProfile = [defaults integerForKey:ProfileIndexKey];
+        _profileIndex = (savedProfile >= 1 && savedProfile <= 3) ? (NSUInteger)savedProfile : 1;
+        [self loadActiveProfile];
     }
     return self;
+}
+
+- (void)loadActiveProfile {
+    [self resetToSideLayout];
+    NSString *key = KeyForProfile(_profileIndex);
+    id stored = [_defaults objectForKey:key];
+    BOOL migratingFromV2 = NO;
+    if (![stored isKindOfClass:NSDictionary.class] && _profileIndex == 1) {
+        id v2 = [_defaults objectForKey:V2ActionsKey];
+        if ([v2 isKindOfClass:NSDictionary.class]) {
+            stored = v2;
+            migratingFromV2 = YES;
+        } else {
+            // Preserve explicit legacy V1 ability layouts only if the user enabled them.
+            id legacy = [_defaults objectForKey:LegacyActionsKey];
+            if ([legacy isKindOfClass:NSDictionary.class] && Number(legacy[@"enabled"], 0) != 0) {
+                stored = legacy;
+            } else {
+                return;
+            }
+        }
+    }
+    if (![stored isKindOfClass:NSDictionary.class]) return;
+    [self loadFromDictionary:stored];
+    if (migratingFromV2) [self stripUnmodifiedCtrlDefaults];
+}
+
+- (void)switchToProfile:(NSUInteger)profile {
+    NSUInteger next = profile < 1 ? 1 : (profile > 3 ? 3 : profile);
+    if (next == _profileIndex) return;
+    [self save];
+    _profileIndex = next;
+    [_defaults setInteger:(NSInteger)_profileIndex forKey:ProfileIndexKey];
+    [self loadActiveProfile];
 }
 
 - (void)stripUnmodifiedCtrlDefaults {
@@ -227,6 +261,9 @@ static NSString *DefaultGroup(NSString *identifier, AKTouchActionAnchor anchor) 
         a.keyName = FindKeyEntry(keyName) ? keyName : @"1";
         a.keyModifiers = (AKTouchKeyModifier)Bounded(Number(item[@"keyMods"], 0), 0, 15, 0);
         a.mouseButton = (unsigned)Bounded(Number(item[@"mouseBtn"], 0), 0, 2, 0);
+        a.behavior = (AKTouchActionBehavior)Bounded(Number(item[@"behavior"], 0), 0, 2, 0);
+        a.shape = (AKTouchActionShape)Bounded(Number(item[@"shape"], 0), 0, 2, 0);
+        a.colorPreset = (AKTouchActionColor)Bounded(Number(item[@"color"], 0), 0, 6, 0);
         id custom = item[@"label"];
         if ([custom isKindOfClass:NSString.class] && [custom length] > 0 && [custom length] <= 24) a.customLabel = custom;
         id group = item[@"group"];
@@ -236,6 +273,7 @@ static NSString *DefaultGroup(NSString *identifier, AKTouchActionAnchor anchor) 
         a.position = CGPointMake(Bounded(Number(item[@"x"], 0), -1200, 1200, 0),
                                  Bounded(Number(item[@"y"], 0), -900, 900, 0));
         a.diameter = Bounded(Number(item[@"diameter"], 40), 20, 160, 40);
+        a.widthScale = Bounded(Number(item[@"widthScale"], 1.0), 0.8, 2.8, 1.0);
         a.enabled = Number(item[@"enabled"], 1) != 0;
         [loaded addObject:a];
         [ids addObject:identifier];
@@ -393,18 +431,20 @@ static NSString *DefaultGroup(NSString *identifier, AKTouchActionAnchor anchor) 
 - (CGRect)frameForAction:(AKTouchAction *)action inBounds:(CGRect)bounds {
     if (!action || bounds.size.width <= 0 || bounds.size.height <= 0) return CGRectZero;
     CGFloat unit = [self unitScaleForAnchor:action.anchor inBounds:bounds];
-    CGFloat diameter = MIN(action.diameter * unit, MIN(bounds.size.width - 8, bounds.size.height - 8));
-    diameter = MAX(16, diameter);
+    CGFloat height = MIN(action.diameter * unit, MIN(bounds.size.width - 8, bounds.size.height - 8));
+    height = MAX(16, height);
+    CGFloat wScale = Bounded(action.widthScale, 0.8, 2.8, 1.0);
+    CGFloat width = MIN(height * wScale, MAX(height, bounds.size.width - 8));
     CGPoint origin = [self originForAnchor:action.anchor inBounds:bounds unit:unit];
     CGFloat cx = origin.x + action.position.x * unit;
     CGFloat cy = origin.y + action.position.y * unit;
-    CGFloat minCx = CGRectGetMinX(bounds) + 4 + diameter / 2;
-    CGFloat maxCx = CGRectGetMaxX(bounds) - 4 - diameter / 2;
-    CGFloat minCy = CGRectGetMinY(bounds) + 4 + diameter / 2;
-    CGFloat maxCy = CGRectGetMaxY(bounds) - 4 - diameter / 2;
+    CGFloat minCx = CGRectGetMinX(bounds) + 4 + width / 2;
+    CGFloat maxCx = CGRectGetMaxX(bounds) - 4 - width / 2;
+    CGFloat minCy = CGRectGetMinY(bounds) + 4 + height / 2;
+    CGFloat maxCy = CGRectGetMaxY(bounds) - 4 - height / 2;
     cx = Bounded(cx, minCx, MAX(minCx, maxCx), minCx);
     cy = Bounded(cy, minCy, MAX(minCy, maxCy), minCy);
-    return CGRectMake(cx - diameter / 2, cy - diameter / 2, diameter, diameter);
+    return CGRectMake(cx - width / 2, cy - height / 2, width, height);
 }
 
 - (void)moveGroupBy:(CGPoint)delta inBounds:(CGRect)bounds {
@@ -443,12 +483,14 @@ static NSString *DefaultGroup(NSString *identifier, AKTouchActionAnchor anchor) 
         cx = CGRectGetMinX(bounds) + round((cx - CGRectGetMinX(bounds)) / step) * step;
         cy = CGRectGetMinY(bounds) + round((cy - CGRectGetMinY(bounds)) / step) * step;
     }
-    CGFloat diameter = MIN(action.diameter * unit, MIN(bounds.size.width - 8, bounds.size.height - 8));
-    diameter = MAX(16, diameter);
-    CGFloat minCx = CGRectGetMinX(bounds) + 4 + diameter / 2;
-    CGFloat maxCx = MAX(minCx, CGRectGetMaxX(bounds) - 4 - diameter / 2);
-    CGFloat minCy = CGRectGetMinY(bounds) + 4 + diameter / 2;
-    CGFloat maxCy = MAX(minCy, CGRectGetMaxY(bounds) - 4 - diameter / 2);
+    CGFloat height = MIN(action.diameter * unit, MIN(bounds.size.width - 8, bounds.size.height - 8));
+    height = MAX(16, height);
+    CGFloat wScale = Bounded(action.widthScale, 0.8, 2.8, 1.0);
+    CGFloat width = MIN(height * wScale, MAX(height, bounds.size.width - 8));
+    CGFloat minCx = CGRectGetMinX(bounds) + 4 + width / 2;
+    CGFloat maxCx = MAX(minCx, CGRectGetMaxX(bounds) - 4 - width / 2);
+    CGFloat minCy = CGRectGetMinY(bounds) + 4 + height / 2;
+    CGFloat maxCy = MAX(minCy, CGRectGetMaxY(bounds) - 4 - height / 2);
     cx = Bounded(cx, minCx, maxCx, minCx);
     cy = Bounded(cy, minCy, maxCy, minCy);
     CGPoint origin = [self originForAnchor:action.anchor inBounds:bounds unit:unit];
@@ -639,6 +681,10 @@ static NSString *DefaultGroup(NSString *identifier, AKTouchActionAnchor anchor) 
         copy.modifiers = action.modifiers;
     }
     copy.diameter = action.diameter;
+    copy.widthScale = action.widthScale;
+    copy.behavior = action.behavior;
+    copy.shape = action.shape;
+    copy.colorPreset = action.colorPreset;
     copy.enabled = YES;
     [_items addObject:copy];
     if (bounds.size.width > 0 && bounds.size.height > 0) {
@@ -674,14 +720,20 @@ static NSString *DefaultGroup(NSString *identifier, AKTouchActionAnchor anchor) 
             @"key": a.keyName ?: @"1",
             @"keyMods": @(a.keyModifiers),
             @"mouseBtn": @(a.mouseButton),
+            @"behavior": @(a.behavior),
+            @"shape": @(a.shape),
+            @"color": @(a.colorPreset),
             @"x": @(a.position.x),
             @"y": @(a.position.y),
             @"diameter": @(a.diameter),
+            @"widthScale": @(Bounded(a.widthScale, 0.8, 2.8, 1.0)),
             @"enabled": @(a.enabled),
         } mutableCopy];
         if (a.customLabel.length) entry[@"label"] = a.customLabel;
         [actions addObject:entry];
     }
+    NSUInteger p = _profileIndex < 1 ? 1 : (_profileIndex > 3 ? 3 : _profileIndex);
+    [_defaults setInteger:(NSInteger)p forKey:ProfileIndexKey];
     [_defaults setObject:@{
         @"enabled": @(self.enabled),
         @"showLabels": @(self.showLabels),
@@ -696,7 +748,7 @@ static NSString *DefaultGroup(NSString *identifier, AKTouchActionAnchor anchor) 
         @"rx": @(self.rightOffset.x),
         @"ry": @(self.rightOffset.y),
         @"actions": actions,
-    } forKey:ActionsKey];
+    } forKey:KeyForProfile(_profileIndex)];
 }
 
 @end

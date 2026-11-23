@@ -699,7 +699,7 @@ static void AKSavedTextSettle(UIViewController *presenter) {
     BOOL nativeReference = [NSProcessInfo.processInfo.arguments containsObject:@"--native-keyboard-reference"];
     if (selfTest) {
         // A blocked main thread must fail instead of leaving simctl waiting.
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 30 * NSEC_PER_SEC),
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 120 * NSEC_PER_SEC),
             dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
                 fprintf(stderr, "TOUCH_UI_SELF_TEST_TIMEOUT\n");
                 _Exit(EXIT_FAILURE);

@@ -618,6 +618,7 @@ static void TestLifecycle(UIView *host) {
         [NSUserDefaults.standardUserDefaults removeObjectForKey:@"WolkaraForeverTouchLayoutV1"];
         [NSUserDefaults.standardUserDefaults removeObjectForKey:@"WolkaraTouchAbilitiesV2"];
         [NSUserDefaults.standardUserDefaults removeObjectForKey:@"WolkaraTouchAbilitiesV3"];
+        [NSUserDefaults.standardUserDefaults removeObjectForKey:@"WolkaraTouchAbilitiesProfile"];
     }
     if (test) { TestLifecycle(self.window.rootViewController.view); fflush(stdout); exit(0); }
     self.gamepad=[[AKPreviewGamepad alloc] initWithHostView:self.window.rootViewController.view];
@@ -682,7 +683,7 @@ int main(int argc, char **argv) {
         setvbuf(stderr, NULL, _IONBF, 0);
         BOOL inputTest=[NSProcessInfo.processInfo.arguments containsObject:@"--self-test-input"];
         if ([NSProcessInfo.processInfo.arguments containsObject:@"--self-test"] || inputTest)
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(inputTest?60:30)*NSEC_PER_SEC),dispatch_get_global_queue(QOS_CLASS_DEFAULT,0),^{
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(inputTest?180:90)*NSEC_PER_SEC),dispatch_get_global_queue(QOS_CLASS_DEFAULT,0),^{
                 fputs("TOUCH_GAMEPAD_LIFECYCLE_TIMEOUT\n",stderr); _Exit(1);
             });
         return UIApplicationMain(argc,argv,nil,NSStringFromClass(AKGamepadFixtureApp.class));

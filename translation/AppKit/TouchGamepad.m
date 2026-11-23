@@ -313,8 +313,8 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     UIView *_settings;
     UIButton *_editDone, *_editAbilitiesButton;
     UILabel *_hint;
-    UISwitch *_editSwitch, *_hapticsSwitch, *_swapShouldersSwitch, *_performanceSwitch;
-    UIButton *_targetButton, *_interactButton, *_jumpButton, *_cameraDragButton;
+    UISwitch *_editSwitch, *_hapticsSwitch, *_swapShouldersSwitch, *_performanceSwitch, *_leftStickWasdSwitch;
+    UIButton *_targetButton, *_interactButton, *_jumpButton, *_cameraDragButton, *_hudVisibilityButton;
     UIStackView *_settingsColumns;
     NSArray<UISlider *> *_sliders;
     NSArray<UILabel *> *_values;
@@ -494,6 +494,12 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     for (NSString *name in _items) {
         UIView *item = _items[name];
         BOOL omitted = _simple ? [fullOnlyItems containsObject:name] : [simpleOnlyItems containsObject:name];
+        if (_simple && !_editing && [simpleOnlyItems containsObject:name]) {
+            if ([name isEqualToString:@"hud.target"] && !_preferences.showHudTarget) omitted = YES;
+            else if ([name isEqualToString:@"hud.interact"] && !_preferences.showHudInteract) omitted = YES;
+            else if ([name isEqualToString:@"hud.jump"] && !_preferences.showHudJump) omitted = YES;
+            else if ([name isEqualToString:@"hud.camera"] && !_preferences.showHudCamera) omitted = YES;
+        }
         item.hidden = omitted || !showControls;
         item.alpha = _editing ? MAX(0.5, _preferences.opacity) : _preferences.opacity;
         if ([item isKindOfClass:AKGamepadButton.class] || item == _cameraPad) {
@@ -754,6 +760,28 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
             [self rebuildHudBindingMenus];
         }],
     ]];
+    NSUInteger shownCount = (_preferences.showHudTarget ? 1 : 0) + (_preferences.showHudInteract ? 1 : 0) +
+                            (_preferences.showHudJump ? 1 : 0) + (_preferences.showHudCamera ? 1 : 0);
+    [_hudVisibilityButton setTitle:[NSString stringWithFormat:@"Right HUD Controls (%lu/4) ▾", (unsigned long)shownCount] forState:UIControlStateNormal];
+    UIAction *(^visAction)(NSString *, BOOL, void (^)(AKGamepadOverlay *)) = ^UIAction *(NSString *title, BOOL shown, void (^flip)(AKGamepadOverlay *)) {
+        UIAction *act = [UIAction actionWithTitle:title image:nil identifier:nil handler:^(__kindof UIAction *a) {
+            (void)a;
+            AKGamepadOverlay *self = weakSelf;
+            if (!self) return;
+            flip(self);
+            [self->_preferences save];
+            [self rebuildHudBindingMenus];
+            [self updateAppearance];
+        }];
+        act.state = shown ? UIMenuElementStateOn : UIMenuElementStateOff;
+        return act;
+    };
+    _hudVisibilityButton.menu = [UIMenu menuWithChildren:@[
+        visAction(@"Target", _preferences.showHudTarget, ^(AKGamepadOverlay *s) { s->_preferences.showHudTarget = !s->_preferences.showHudTarget; }),
+        visAction(@"Interact", _preferences.showHudInteract, ^(AKGamepadOverlay *s) { s->_preferences.showHudInteract = !s->_preferences.showHudInteract; }),
+        visAction(@"Jump", _preferences.showHudJump, ^(AKGamepadOverlay *s) { s->_preferences.showHudJump = !s->_preferences.showHudJump; }),
+        visAction(@"Camera", _preferences.showHudCamera, ^(AKGamepadOverlay *s) { s->_preferences.showHudCamera = !s->_preferences.showHudCamera; }),
+    ]];
 }
 
 - (void)toggleSettings {
@@ -818,6 +846,7 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     _interactButton = [self menuButtonWithIdentifier:@"wolkara.controls.interactBinding"];
     _jumpButton = [self menuButtonWithIdentifier:@"wolkara.controls.jumpBinding"];
     _cameraDragButton = [self menuButtonWithIdentifier:@"wolkara.controls.cameraDrag"];
+    _hudVisibilityButton = [self menuButtonWithIdentifier:@"wolkara.controls.hudVisibility"];
     [self rebuildHudBindingMenus];
 
     UIStackView *hudRow1 = [[UIStackView alloc] initWithArrangedSubviews:@[_targetButton, _interactButton]];
@@ -831,6 +860,7 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     hudRow2.distribution = UIStackViewDistributionFillEqually;
     hudRow2.spacing = 6;
     [sizes addArrangedSubview:hudRow2];
+    [sizes addArrangedSubview:_hudVisibilityButton];
 
     UIButton *abilities = [UIButton buttonWithType:UIButtonTypeSystem];
     [abilities setTitle:@"Custom Buttons (Drag & Drop)…" forState:UIControlStateNormal];
@@ -878,6 +908,16 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     shouldersRow.axis = UILayoutConstraintAxisHorizontal;
     shouldersRow.alignment = UIStackViewAlignmentCenter;
     [options addArrangedSubview:shouldersRow];
+
+    _leftStickWasdSwitch = [UISwitch new];
+    _leftStickWasdSwitch.on = _preferences.leftStickWASD;
+    _leftStickWasdSwitch.accessibilityLabel = @"Left Stick WASD";
+    _leftStickWasdSwitch.accessibilityIdentifier = @"wolkara.controls.leftStickWASD";
+    [_leftStickWasdSwitch addTarget:self action:@selector(leftStickWasdChanged:) forControlEvents:UIControlEventValueChanged];
+    UIStackView *wasdRow = [[UIStackView alloc] initWithArrangedSubviews:@[[self label:@"Left Stick: WASD Keys"], _leftStickWasdSwitch]];
+    wasdRow.axis = UILayoutConstraintAxisHorizontal;
+    wasdRow.alignment = UIStackViewAlignmentCenter;
+    [options addArrangedSubview:wasdRow];
 
     UIButton *reset = [UIButton buttonWithType:UIButtonTypeSystem];
     [reset setTitle:AKHostLocalized(@"touch.settings.reset") forState:UIControlStateNormal];
@@ -948,6 +988,12 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     [_preferences save];
 }
 
+- (void)leftStickWasdChanged:(UISwitch *)sender {
+    _preferences.leftStickWASD = sender.on;
+    [_preferences save];
+    if (self.configurationChanged) self.configurationChanged();
+}
+
 - (void)clearSettingsViews {
     [_settings removeFromSuperview];
     _settings = nil;
@@ -957,11 +1003,13 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     _hapticsSwitch = nil;
     _swapShouldersSwitch = nil;
     _performanceSwitch = nil;
+    _leftStickWasdSwitch = nil;
     _settingsColumns = nil;
     _targetButton = nil;
     _interactButton = nil;
     _jumpButton = nil;
     _cameraDragButton = nil;
+    _hudVisibilityButton = nil;
 }
 
 - (void)beginEditing:(UISwitch *)sender {
@@ -988,6 +1036,7 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     _hapticsSwitch.on = _preferences.hapticsEnabled;
     _swapShouldersSwitch.on = !_preferences.swapShoulders;
     _performanceSwitch.on = _preferences.performanceOverlayEnabled;
+    _leftStickWasdSwitch.on = _preferences.leftStickWASD;
     [self rebuildHudBindingMenus];
     [self updateValues];
     [self updateAppearance];
@@ -1036,6 +1085,8 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     AKTouchActionInput *_actionInput;
     NSMutableDictionary<NSString *, NSString *> *_activeHudBindings;
     NSMutableArray<AKPendingKeyRelease *> *_pendingKeyReleases;
+    NSMutableDictionary<NSString *, AKTouchAction *> *_heldCustomActions;
+    NSMutableSet<NSNumber *> *_heldWasdKeys;
     UITapGestureRecognizer *_leftDoubleTap, *_rightDoubleTap, *_areaDoubleTap;
     NSTimer *_leftClickTimer, *_rightClickTimer;
     BOOL _active, _connecting, _cancelConnect, _failed, _invalidated;
@@ -1047,6 +1098,8 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
         _enabled = YES;
         _activeHudBindings = [NSMutableDictionary new];
         _pendingKeyReleases = [NSMutableArray new];
+        _heldCustomActions = [NSMutableDictionary new];
+        _heldWasdKeys = [NSMutableSet new];
         _haptics = [self makeHaptics];
         _overlay = [[AKGamepadOverlay alloc] initWithFrame:host.bounds];
         _overlay.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
@@ -1061,12 +1114,22 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
             if (!self || !self->_visible || self->_overlay.configuring) return NO;
             if (action.kind == AKTouchActionKindKeyboard) {
                 [self->_haptics buttonPressed];
-                [self triggerKeyboardAction:action];
+                if (action.behavior == AKTouchActionBehaviorTap) {
+                    [self triggerKeyboardAction:action];
+                } else {
+                    self->_heldCustomActions[action.identifier] = action;
+                    [self sendKeyCode:action.keyCode characters:action.keyCharacters modifiers:action.keyModifiers pressed:YES];
+                }
                 return YES;
             }
             if (action.kind == AKTouchActionKindMouse) {
                 [self->_haptics buttonPressed];
-                [self triggerMouseAction:action];
+                if (action.behavior == AKTouchActionBehaviorTap) {
+                    [self triggerMouseAction:action];
+                } else {
+                    self->_heldCustomActions[action.identifier] = action;
+                    [self sendMouseButton:action.mouseButton pressed:YES];
+                }
                 return YES;
             }
             BOOL accepted = [self->_actionInput beginAction:action.identifier button:action.button modifiers:action.modifiers];
@@ -1075,7 +1138,21 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
         };
         _overlay.actions.released = ^(AKTouchAction *action) {
             AKTouchGamepad *self = weakSelf;
-            if (self && action.kind == AKTouchActionKindGamepad) [self->_actionInput endAction:action.identifier];
+            if (!self) return;
+            if (action.kind == AKTouchActionKindGamepad) {
+                [self->_actionInput endAction:action.identifier];
+                return;
+            }
+            if (action.behavior != AKTouchActionBehaviorTap) {
+                AKTouchAction *held = self->_heldCustomActions[action.identifier];
+                if (!held) return;
+                [self->_heldCustomActions removeObjectForKey:action.identifier];
+                if (held.kind == AKTouchActionKindKeyboard) {
+                    [self sendKeyCode:held.keyCode characters:held.keyCharacters modifiers:held.keyModifiers pressed:NO];
+                } else if (held.kind == AKTouchActionKindMouse) {
+                    [self sendMouseButton:held.mouseButton pressed:NO];
+                }
+            }
         };
         _overlay.actions.cancelledAll = ^{
             AKTouchGamepad *self = weakSelf;
@@ -1302,6 +1379,16 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     [NSRunLoop.mainRunLoop addTimer:pending.timer forMode:NSRunLoopCommonModes];
 }
 
+- (void)releaseAllHeldWasdKeys {
+    if (!_heldWasdKeys.count) return;
+    NSDictionary<NSNumber *, NSString *> *chars = @{@13: @"w", @0: @"a", @1: @"s", @2: @"d"};
+    NSArray<NSNumber *> *keys = [_heldWasdKeys allObjects];
+    [_heldWasdKeys removeAllObjects];
+    for (NSNumber *k in keys) {
+        [self sendKeyCode:k.unsignedShortValue characters:chars[k] ?: @"" modifiers:0 pressed:NO];
+    }
+}
+
 - (void)releaseAllPendingKeyboardActions {
     NSArray<AKPendingKeyRelease *> *pending = [_pendingKeyReleases copy];
     [_pendingKeyReleases removeAllObjects];
@@ -1310,6 +1397,13 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
         if (item.isMouse) [self sendMouseButton:item.mouseButton pressed:NO];
         else [self sendKeyCode:item.keyCode characters:item.characters modifiers:item.modifiers pressed:NO];
     }
+    NSArray<AKTouchAction *> *heldCustom = [_heldCustomActions.allValues copy];
+    [_heldCustomActions removeAllObjects];
+    for (AKTouchAction *action in heldCustom) {
+        if (action.kind == AKTouchActionKindMouse) [self sendMouseButton:action.mouseButton pressed:NO];
+        else if (action.kind == AKTouchActionKindKeyboard) [self sendKeyCode:action.keyCode characters:action.keyCharacters modifiers:action.keyModifiers pressed:NO];
+    }
+    [self releaseAllHeldWasdKeys];
 }
 
 - (NSString *)bindingForHudElement:(NSString *)element {
@@ -1431,9 +1525,38 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     }
 }
 
+- (void)updateWasdForStickPosition:(CGPoint)position {
+    static const CGFloat kDeadzone = 0.30;
+    static const unsigned short kCodes[4] = {13, 0, 1, 2};
+    NSArray<NSString *> *chars = @[@"w", @"a", @"s", @"d"];
+    const BOOL down[4] = {
+        position.y > kDeadzone,
+        position.x < -kDeadzone,
+        position.y < -kDeadzone,
+        position.x > kDeadzone,
+    };
+    for (NSUInteger i = 0; i < 4; i++) {
+        NSNumber *num = @(kCodes[i]);
+        BOOL wasDown = [_heldWasdKeys containsObject:num];
+        if (down[i] && !wasDown) {
+            [_heldWasdKeys addObject:num];
+            [self sendKeyCode:kCodes[i] characters:chars[i] modifiers:0 pressed:YES];
+        } else if (!down[i] && wasDown) {
+            [_heldWasdKeys removeObject:num];
+            [self sendKeyCode:kCodes[i] characters:chars[i] modifiers:0 pressed:NO];
+        }
+    }
+}
+
 - (void)stickChanged:(AKGamepadStick *)stick {
     if (_visible && !_overlay.configuring && (!_simple || stick == _overlay.leftStick)) {
         [_haptics stickMoved:stick.position left:stick == _overlay.leftStick];
+        if (stick == _overlay.leftStick && _overlay.preferences.leftStickWASD) {
+            [self updateWasdForStickPosition:stick.position];
+            [_virtualController setPosition:CGPointZero forDirectionPadElement:GCInputLeftThumbstick];
+            return;
+        }
+        if (stick == _overlay.leftStick) [self releaseAllHeldWasdKeys];
         [_virtualController setPosition:stick.position forDirectionPadElement:stick.element];
     }
 }

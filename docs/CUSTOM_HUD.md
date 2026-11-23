@@ -9,14 +9,15 @@ This custom build updates Wolkara's in-game touch UI (based on the `v0.1.0-stikd
   - Tap it to expand or collapse the Wolkara utility bar (mouse/trackpad, keyboard, HUD/gamepad mode toggle, settings, dictation, saved-text key, and leave game).
 - **Photo HUD Mode (Default)** (`translation/AppKit/TouchGamepad.m`, `TouchGamepadLayout.h/.m`):
   - **Bottom-Left**: Clean circular movement joystick (no bulky outer D-pad sector wheel; double-tap still sends L3).
-  - **Bottom-Right**: **`Target`** pill (`Tab`), **`Interact`** pill (`F`), **`Jump`** circle (`Space`), and **`Camera`** drag pad (right-mouse camera/character look by default, or left-mouse orbit in Settings).
+  - **Bottom-Right**: **`Target`** pill (`Tab`), **`Interact`** pill (`F`), **`Jump`** circle (`Space`), and **`Camera`** drag pad (right-mouse camera/character look by default, or left-mouse orbit in Settings), plus per-button visibility toggles (**Right HUD Controls**) and a **Left Stick: WASD Keys** option in Settings.
   - Expand `⌄` and tap the controller icon to switch between **Photo HUD** and **Full Gamepad** mode anytime, or hold to hide/show controls.
-- **Drag-and-Drop Custom Buttons** (`translation/AppKit/TouchActionLayout.h/.m`, `TouchActionOverlay.m`):
+- **PlayPort-Style Drag-and-Drop Custom Buttons** (`translation/AppKit/TouchActionLayout.h/.m`, `TouchActionOverlay.m`):
   - Defaults to **8 left-side buttons** (`1`–`8`) and **8 right-side plain buttons** (`9`, `0`, `-`, `=`, `F1`–`F4`) with **no `Ctrl+` chords**.
   - Open **⌄ → Settings (gear) → Custom Buttons (Drag & Drop)…** (or **Edit Layout → Edit Buttons…**) to:
-    - **Drag `⊕ Drag Button`** directly off the palette and drop a new button anywhere on screen (with toggleable 16pt **Snap** grid, or **Clear** to start from an empty canvas).
+    - **Drag `⊕ Drag Button`** directly off the palette and drop a new button anywhere on screen (with toggleable 16pt **Snap** grid, or **Clear** to start from an empty canvas), and switch between **3 independent Profiles (1–3)**.
     - Opens in **Drag One** mode by default: drag any individual button, double-tap or tap **Label**, **Copy** to duplicate, **Delete**, or switch between **Drag One**, **Side / Group**, and **Move All**.
-    - Bind any circle to a **Keyboard key** (`1`–`0`, `-`, `=`, `F1`–`F12`, `Space`, `Tab`, `Esc`, letters, optional `Shift`/`Ctrl`/`Alt`/`Cmd`), a **Mouse click** (`LMB`/`RMB`/`MMB`), or a **Gamepad chord**.
+    - Customize each button's **Behavior** (**Tap**, **Hold**, or **Toggle**), **Shape** (**Circle**, **Pill**, or **Box** + **Stretch** width slider), and **Color** (`Default`, `Gold`, `Red`, `Blue`, `Green`, `Purple`, `Clear`).
+    - Bind any button to a **Keyboard key** (`1`–`0`, `-`, `=`, `F1`–`F12`, **Arrows & Nav**, sticky standalone **`Shift`/`Ctrl`/`Alt`/`Cmd`**, `Space`, `Tab`, `Esc`, letters, optional modifiers), a **Mouse click** (`LMB`/`RMB`/`MMB`), or a **Gamepad chord**.
     - Dock (`⇅ Bottom` / `⇅ Top`) or drag the editor bar anywhere, adjust **Fill** and **Border** opacity (down to `0%` over WoW action bars), and toggle labels on/off.
 
 ## Building the `.ipa`
