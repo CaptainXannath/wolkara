@@ -1103,7 +1103,12 @@ static UIColor *AKPresetBorderColor(AKTouchActionColor preset, CGFloat alpha) {
 }
 
 - (void)modeChanged { [self releaseTouches]; [self updateEditor]; }
-- (void)enabledChanged:(UISwitch *)sender { [self releaseTouches]; self.layout.enabled = sender.on; [self updateAppearance]; }
+- (void)enabledChanged:(UISwitch *)sender {
+    [self releaseTouches];
+    self.layout.enabled = sender.on;
+    [NSUserDefaults.standardUserDefaults setBool:sender.on forKey:@"WolkaraTouchAbilitiesExplicit"];
+    [self updateAppearance];
+}
 - (void)labelsChanged:(UISwitch *)sender { self.layout.showLabels = sender.on; [self updateAppearance]; }
 - (void)snapChanged:(UISwitch *)sender { self.layout.snapToGrid = sender.on; [self.layout save]; }
 - (void)shownChanged:(UISwitch *)sender { _selected.enabled = sender.on; [self updateEditor]; }

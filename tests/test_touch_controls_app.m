@@ -506,13 +506,48 @@ static void AKSavedTextSettle(UIViewController *presenter) {
     AKTouchGamepad *gamepad = [controls valueForKey:@"_gamepad"];
     [gamepad.layout reset]; [host layoutIfNeeded]; [controls layoutIfNeeded];
     UIButton *toggle = (id)FindToolbarView(controls, @"wolkara.toolbar.toggle");
-    assert(toggle && !toggle.hidden);
+    UIView *menuBar = FindToolbarView(controls, @"wolkara.toolbar.menuBar");
+    UIButton *collapse = (id)FindToolbarView(controls, @"wolkara.toolbar.collapse");
+    UIButton *more = (id)FindToolbarView(controls, @"wolkara.toolbar.more");
+    assert(toggle && !toggle.hidden && menuBar && menuBar.hidden && collapse && more);
     NSArray<UIView *> *items = [controls toolbarItems];
     assert(items.count == 7 && CGRectEqualToRect(controls.frame, host.bounds));
     for (UIView *item in items) assert(item.hidden);
     CGPoint clear = CGPointMake(CGRectGetMidX(controls.bounds), CGRectGetMidY(controls.bounds));
     assert(![controls pointInside:clear withEvent:nil]);
     [toggle sendActionsForControlEvents:UIControlEventTouchUpInside]; [controls layoutIfNeeded];
+    assert(toggle.hidden && !menuBar.hidden);
+    assert(CGRectContainsRect([controls toolbarBounds], menuBar.frame));
+    assert([controls pointInside:CGPointMake(CGRectGetMidX(menuBar.frame), CGRectGetMidY(menuBar.frame)) withEvent:nil]);
+    for (UIView *item in items) assert(item.hidden);
+    NSArray<NSDictionary<NSString *, id> *> *wowChecks = @[
+        @{@"id": @"wolkara.toolbar.wow.bags", @"code": @11},
+        @{@"id": @"wolkara.toolbar.wow.map", @"code": @46},
+        @{@"id": @"wolkara.toolbar.wow.character", @"code": @8},
+        @{@"id": @"wolkara.toolbar.wow.talents", @"code": @45},
+        @{@"id": @"wolkara.toolbar.wow.quests", @"code": @37},
+        @{@"id": @"wolkara.toolbar.wow.spellbook", @"code": @35},
+    ];
+    for (NSDictionary<NSString *, id> *entry in wowChecks) {
+        UIButton *button = (id)FindToolbarView(controls, entry[@"id"]);
+        assert(button && !button.hidden);
+        [button sendActionsForControlEvents:UIControlEventTouchUpInside];
+        AKDrainFixtureEvents();
+        assert(self.guest.lastKeyEvent.keyCode == [entry[@"code"] unsignedShortValue]);
+    }
+    UIButton *chat = (id)FindToolbarView(controls, @"wolkara.toolbar.wow.chat");
+    assert(chat && !chat.hidden);
+    BOOL keyboardWas = controls.keyboardVisible;
+    [chat sendActionsForControlEvents:UIControlEventTouchUpInside]; AKDrainFixtureEvents();
+    assert(controls.keyboardVisible == !keyboardWas);
+    [chat sendActionsForControlEvents:UIControlEventTouchUpInside]; AKDrainFixtureEvents();
+    assert(controls.keyboardVisible == keyboardWas);
+    [collapse sendActionsForControlEvents:UIControlEventTouchUpInside]; [controls layoutIfNeeded];
+    assert(!toggle.hidden && menuBar.hidden);
+    for (UIView *item in items) assert(item.hidden);
+    [toggle sendActionsForControlEvents:UIControlEventTouchUpInside]; [controls layoutIfNeeded];
+    [more sendActionsForControlEvents:UIControlEventTouchUpInside]; [controls layoutIfNeeded];
+    assert(!menuBar.hidden);
     for (UIView *item in items) {
         assert(!item.hidden);
         assert(CGRectContainsRect([controls toolbarBounds], item.frame));

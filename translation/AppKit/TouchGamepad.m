@@ -1,5 +1,6 @@
 #import "TouchGamepad.h"
 #import "TouchGamepadLayout.h"
+#import "AKMobileInterface.h"
 #import "AKHostLocalization.h"
 #import "TouchHaptics.h"
 #import "TouchStickButtons.h"
@@ -300,7 +301,9 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
 @property(nonatomic) BOOL simple;
 @property(nonatomic, readonly) BOOL configuring;
 @property(nonatomic, readonly) BOOL editing;
+@property(nonatomic, readonly) BOOL mobileEditing;
 @property(nonatomic, copy) void (^configurationChanged)(void);
+@property(nonatomic, copy) void (^mobileCommand)(AKMobileCommand);
 - (void)reset;
 - (void)toggleSettings;
 - (void)finishConfiguration;
@@ -311,10 +314,11 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     NSDictionary<NSString *, UIView *> *_items;
     NSMutableDictionary<NSString *, NSValue *> *_dragOrigins;
     UIView *_settings;
-    UIButton *_editDone, *_editAbilitiesButton;
+    UIButton *_editDone, *_editAbilitiesButton, *_mobileDone;
     UILabel *_hint;
-    UISwitch *_editSwitch, *_hapticsSwitch, *_swapShouldersSwitch, *_performanceSwitch, *_leftStickWasdSwitch;
-    UIButton *_targetButton, *_interactButton, *_jumpButton, *_cameraDragButton, *_hudVisibilityButton;
+    UISwitch *_editSwitch, *_hapticsSwitch, *_swapShouldersSwitch, *_performanceSwitch, *_leftStickWasdSwitch, *_mobileSwitch;
+    UIButton *_targetButton, *_interactButton, *_jumpButton, *_cameraDragButton, *_hudVisibilityButton, *_arrangeMobileButton;
+    BOOL _mobileEditing;
     UIStackView *_settingsColumns;
     NSArray<UISlider *> *_sliders;
     NSArray<UILabel *> *_values;
@@ -456,6 +460,16 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
         [_editAbilitiesButton addTarget:self action:@selector(editAbilities) forControlEvents:UIControlEventTouchUpInside];
         [self addSubview:_editAbilitiesButton];
 
+        _mobileDone = [UIButton buttonWithType:UIButtonTypeSystem];
+        [_mobileDone setTitle:@"Done & save" forState:UIControlStateNormal];
+        _mobileDone.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightBold];
+        _mobileDone.backgroundColor = [UIColor colorWithWhite:0.12 alpha:0.96];
+        _mobileDone.tintColor = UIColor.systemYellowColor;
+        _mobileDone.layer.cornerRadius = 14;
+        _mobileDone.accessibilityIdentifier = @"wolkara.mobile.done";
+        [_mobileDone addTarget:self action:@selector(finishConfiguration) forControlEvents:UIControlEventTouchUpInside];
+        [self addSubview:_mobileDone];
+
         _hint = [UILabel new];
         _hint.text = AKHostLocalized(@"touch.gamepad.dragHint");
         _hint.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
@@ -469,10 +483,13 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     return self;
 }
 
-- (BOOL)configuring { return _settings != nil || _editing || _actions.editing; }
+- (BOOL)configuring { return _settings != nil || _editing || _actions.editing || _mobileEditing; }
 
 - (BOOL)configurationContainsPoint:(CGPoint)point inView:(UIView *)view {
     if ([_actions editorContainsPoint:point inView:view]) return YES;
+    if (_mobileEditing && _mobileDone && !_mobileDone.hidden) {
+        return CGRectContainsPoint(_mobileDone.bounds, [_mobileDone convertPoint:point fromView:view]);
+    }
     if (_editing) {
         for (UIView *v in @[_editDone, _editAbilitiesButton]) {
             if (!v.hidden && CGRectContainsPoint(v.bounds, [v convertPoint:point fromView:view])) return YES;
@@ -487,8 +504,8 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
 
 - (void)updateAppearance {
     self.hidden = !_controlsVisible && !self.configuring;
-    _actions.active = _controlsVisible && !self.configuring;
-    BOOL showControls = _controlsVisible || self.configuring;
+    _actions.active = _controlsVisible && !self.configuring && (!AKMobileInterfaceEnabled() || [NSUserDefaults.standardUserDefaults boolForKey:@"WolkaraTouchAbilitiesExplicit"]);
+    BOOL showControls = (_controlsVisible || self.configuring) && !_mobileEditing;
     NSArray<NSString *> *fullOnlyItems = @[@"right", @"LB", @"LT", @"RT", @"RB", @"menu"];
     NSArray<NSString *> *simpleOnlyItems = @[@"hud.target", @"hud.interact", @"hud.jump", @"hud.camera"];
     for (NSString *name in _items) {
@@ -525,12 +542,14 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     _leftStick.enabled = !self.configuring;
     _rightStick.enabled = !self.configuring && !_simple;
     _editDone.hidden = _editAbilitiesButton.hidden = _hint.hidden = !_editing;
+    _mobileDone.hidden = !_mobileEditing;
     _editGrid.hidden = _editAxes.hidden = !_editing;
     [self setNeedsLayout];
 }
 
 - (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
     UIView *hit = [super hitTest:point withEvent:event];
+    if (_mobileEditing) return (hit == _mobileDone || [hit isDescendantOfView:_mobileDone]) ? hit : nil;
     if (self.configuring) return hit; // Editing/settings must never click the game.
     if (hit == self || hit == _items[@"left"] || hit == _items[@"right"]) return nil;
     return hit;
@@ -610,6 +629,8 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
 
     _editDone.frame = CGRectMake(CGRectGetMidX(safe) - 144, CGRectGetMinY(safe) + 96, 136, 40);
     _editAbilitiesButton.frame = CGRectMake(CGRectGetMidX(safe) + 8, CGRectGetMinY(safe) + 96, 136, 40);
+    _mobileDone.frame = CGRectMake(CGRectGetMidX(safe) - 70, CGRectGetMinY(safe) + 60, 140, 40);
+    [self bringSubviewToFront:_mobileDone];
     _hint.frame = CGRectMake(CGRectGetMidX(safe) - 160, CGRectGetMinY(safe) + 140, 320, 22);
 
     if (_settings) {
@@ -862,6 +883,27 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     [sizes addArrangedSubview:hudRow2];
     [sizes addArrangedSubview:_hudVisibilityButton];
 
+    if ([NSUserDefaults.standardUserDefaults boolForKey:AKMobileAvailableKey]) {
+        _mobileSwitch = [UISwitch new];
+        _mobileSwitch.on = [NSUserDefaults.standardUserDefaults boolForKey:AKMobileEnabledKey];
+        _mobileSwitch.accessibilityLabel = @"Round Spell Icons (WoW)";
+        _mobileSwitch.accessibilityIdentifier = @"wolkara.controls.mobileInterface";
+        [_mobileSwitch addTarget:self action:@selector(mobileChanged:) forControlEvents:UIControlEventValueChanged];
+        UIStackView *mobileRow = [[UIStackView alloc] initWithArrangedSubviews:@[[self label:@"Round Spell Icons (WoW)"], _mobileSwitch]];
+        mobileRow.axis = UILayoutConstraintAxisHorizontal;
+        mobileRow.alignment = UIStackViewAlignmentCenter;
+        [options addArrangedSubview:mobileRow];
+
+        _arrangeMobileButton = [UIButton buttonWithType:UIButtonTypeSystem];
+        [_arrangeMobileButton setTitle:@"Arrange Spell Icons…" forState:UIControlStateNormal];
+        _arrangeMobileButton.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
+        _arrangeMobileButton.tintColor = [UIColor colorWithRed:0.95 green:0.82 blue:0.48 alpha:1];
+        _arrangeMobileButton.accessibilityIdentifier = @"wolkara.controls.mobileEdit";
+        _arrangeMobileButton.enabled = _mobileSwitch.on;
+        [_arrangeMobileButton addTarget:self action:@selector(beginMobileEditing) forControlEvents:UIControlEventTouchUpInside];
+        [options addArrangedSubview:_arrangeMobileButton];
+    }
+
     UIButton *abilities = [UIButton buttonWithType:UIButtonTypeSystem];
     [abilities setTitle:@"Custom Buttons (Drag & Drop)…" forState:UIControlStateNormal];
     abilities.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightBold];
@@ -1010,6 +1052,8 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     _jumpButton = nil;
     _cameraDragButton = nil;
     _hudVisibilityButton = nil;
+    _mobileSwitch = nil;
+    _arrangeMobileButton = nil;
 }
 
 - (void)beginEditing:(UISwitch *)sender {
@@ -1042,13 +1086,35 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     [self updateAppearance];
 }
 
+- (void)mobileChanged:(UISwitch *)sender {
+    [NSUserDefaults.standardUserDefaults setBool:sender.on forKey:AKMobileEnabledKey];
+    _arrangeMobileButton.enabled = sender.on;
+    if (self.mobileCommand) self.mobileCommand(sender.on ? AKMobileEnable : AKMobileDisable);
+    [self updateAppearance];
+    if (self.configurationChanged) self.configurationChanged();
+}
+
+- (void)beginMobileEditing {
+    if (![NSUserDefaults.standardUserDefaults boolForKey:AKMobileEnabledKey]) return;
+    [self reset];
+    _editing = NO;
+    _mobileEditing = YES;
+    [self clearSettingsViews];
+    if (self.mobileCommand) self.mobileCommand(AKMobileEdit);
+    [self updateAppearance];
+    if (self.configurationChanged) self.configurationChanged();
+}
+
 - (void)finishConfiguration {
     [_actions finishEditing];
     [self reset];
     [_preferences save];
+    BOOL wasMobileEditing = _mobileEditing;
     _editing = NO;
+    _mobileEditing = NO;
     [_dragOrigins removeAllObjects];
     [self clearSettingsViews];
+    if (wasMobileEditing && self.mobileCommand) self.mobileCommand(AKMobileDone);
     [self updateAppearance];
     if (self.configurationChanged) self.configurationChanged();
 }
@@ -1209,6 +1275,12 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
             [self updateHaptics];
             if (self.visibilityChanged) self.visibilityChanged(self.visible);
         };
+        _overlay.mobileCommand = ^(AKMobileCommand command) {
+            AKTouchGamepad *self = weakSelf;
+            if (!self) return;
+            id<AKMobileInterfaceHost> host = (id)self->_host;
+            if ([host conformsToProtocol:@protocol(AKMobileInterfaceHost)]) [host ak_mobileCommand:command];
+        };
         for (AKGamepadButton *button in _overlay.buttons.allValues) {
             [button addTarget:self action:@selector(buttonChanged:) forControlEvents:UIControlEventValueChanged];
         }
@@ -1231,6 +1303,7 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
 
 - (BOOL)editing { return _overlay.editing || _overlay.actions.editing; }
 - (BOOL)editingAbilities { return _overlay.actions.editing; }
+- (BOOL)mobileEditing { return _overlay.mobileEditing; }
 
 - (BOOL)configurationContainsPoint:(CGPoint)point inView:(UIView *)view {
     return [_overlay configurationContainsPoint:point inView:view];

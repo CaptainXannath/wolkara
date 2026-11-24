@@ -56,6 +56,7 @@ void TestTouchAbilitiesUI(UIView *host,AKTouchGamepad *manager,GCVirtualControll
     [NSUserDefaults.standardUserDefaults removeObjectForKey:@"WolkaraTouchAbilitiesV2"];
     [NSUserDefaults.standardUserDefaults removeObjectForKey:@"WolkaraTouchAbilitiesV3"];
     [NSUserDefaults.standardUserDefaults removeObjectForKey:@"WolkaraTouchAbilitiesProfile"];
+    [NSUserDefaults.standardUserDefaults removeObjectForKey:@"WolkaraTouchAbilitiesExplicit"];
     fprintf(stderr,"[TestTouchAbilitiesUI] begin editor check\n");
     [manager toggleSettings]; Tap(host,@"wolkara.controls.abilities");
     assert(manager.configuring && manager.editing);

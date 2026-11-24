@@ -288,12 +288,14 @@ static void TestAddonBrowserPolicy(void) {
     [largeTOC appendString:[@"x" stringByPaddingToLength:1024*1024 withString:@"x" startingAtIndex:0]];
     assert([largeTOC writeToFile:[database stringByAppendingPathComponent:@"Database_Forever.toc"] atomically:YES encoding:NSUTF8StringEncoding error:NULL]);
     NSArray<TKWoWAddon *> *listed=TKWoWAddonsAtDirectory(database.stringByDeletingLastPathComponent);
-    assert(listed.count==2 && [listed.firstObject.title isEqual:@"Database fixture"]);
+    assert(listed.count==3 && [listed.firstObject.title isEqual:@"Database fixture"]);
+    assert([NSUserDefaults.standardUserDefaults boolForKey:@"WolkaraMobileAvailable"]);
+    assert([NSFileManager.defaultManager fileExistsAtPath:[fixture.directory stringByAppendingPathComponent:@"Interface/AddOns/WolkaraMobile/Bridge.lua"]]);
     [self.controller manageAddons];
     TKWoWAddonManagerViewController *manager=(id)self.controller.navigationController.topViewController;
     assert([manager isKindOfClass:TKWoWAddonManagerViewController.class]);
     assert([[[manager valueForKey:@"store"] valueForKey:@"product"] isEqual:@"wowf"]);
-    assert([[manager valueForKey:@"store"] records].count==2);
+    assert([[manager valueForKey:@"store"] records].count==3);
     [manager loadViewIfNeeded];
     [self performSelector:@selector(captureAddonManager) withObject:nil afterDelay:0.4];
 }

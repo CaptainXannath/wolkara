@@ -4,16 +4,23 @@ This custom build updates Wolkara's in-game touch UI (based on the `v0.1.0-stikd
 
 ## What Changed
 
-- **Collapsible Top-Center Pill (`⌄`)** (`translation/AppKit/TouchControls.m`):
-  - Gameplay starts with a single compact dark/warm-gold chevron pill at top-center (`⌄`).
-  - Tap it to expand or collapse the Wolkara utility bar (mouse/trackpad, keyboard, HUD/gamepad mode toggle, settings, dictation, saved-text key, and leave game).
+- **Top-Center Quick Menu Bar & Collapsible Pill (`⌄`)** (`translation/AppKit/TouchControls.m`):
+  - Gameplay (and Login) starts with a single compact dark/warm-gold chevron pill at top-center (`⌄`).
+  - Tap `⌄` to expand the top WoW bar: **`Chat | Bags | Map | Character | Talents | Quests | Spellbook | ^ | ...`**.
+  - Tap **`Chat`** to toggle the keyboard, **`Bags`–`Spellbook`** (`B`, `M`, `C`, `N`, `L`, `P`) to open game windows, **`...`** to show Wolkara's utility buttons (mouse/trackpad, keyboard, HUD/gamepad mode toggle, settings, dictation, saved-text key, and leave game), or **`^`** to collapse everything back to `⌄`.
+- **Round Blizzard Spell/Item Drag-and-Drop Side Buttons (`WolkaraMobile`)** (`addons/WolkaraMobile/`, `launcher/WoW/MobileInterface.*`, `translation/AppKit/AKMobileInterface.h`):
+  - Automatically stages the upgraded `WolkaraMobile` companion addon into `_forever_/Interface/AddOns/WolkaraMobile` (enabled by default for Forever; toggle anytime via **Settings → Round Spell Icons (WoW)** and **Arrange Spell Icons…**, or `/wm` in chat).
+  - Pre-seeds **20 circular masked Blizzard icon slots** (12 on the left side + 8 on the right side).
+  - Open **Spellbook** or **Bags** and **touch-hold-and-drag** any spell, item, or macro directly onto any round button, or tap an empty circle for the **Spells / Items / Macros / Actions Picker** (with an **Edit Layout** shortcut).
+  - In **Arrange Spell Icons…** or `/wm edit`, drag round buttons freely, adjust size, toggle **Hide empty**, **Move/size all**, **Reset sides**, and tap **Done & save**.
 - **Photo HUD Mode (Default)** (`translation/AppKit/TouchGamepad.m`, `TouchGamepadLayout.h/.m`):
   - **Bottom-Left**: Clean circular movement joystick (no bulky outer D-pad sector wheel; double-tap still sends L3).
   - **Bottom-Right**: **`Target`** pill (`Tab`), **`Interact`** pill (`F`), **`Jump`** circle (`Space`), and **`Camera`** drag pad (right-mouse camera/character look by default, or left-mouse orbit in Settings), plus per-button visibility toggles (**Right HUD Controls**) and a **Left Stick: WASD Keys** option in Settings.
-  - Expand `⌄` and tap the controller icon to switch between **Photo HUD** and **Full Gamepad** mode anytime, or hold to hide/show controls.
-- **PlayPort-Style Drag-and-Drop Custom Buttons** (`translation/AppKit/TouchActionLayout.h/.m`, `TouchActionOverlay.m`):
+  - Expand `⌄ → ...` and tap the controller icon to switch between **Photo HUD** and **Full Gamepad** mode anytime, or hold to hide/show controls.
+- **PlayPort-Style Custom Buttons (Optional Overlay)** (`translation/AppKit/TouchActionLayout.h/.m`, `TouchActionOverlay.m`):
+  - Auto-hidden whenever **Round Spell Icons (WoW)** is active so Blizzard spell circles aren't covered; turn **Touch abilities** on inside **Settings → Custom Buttons (Drag & Drop)…** to use both or run custom iOS overlay buttons independently.
   - Defaults to **8 left-side buttons** (`1`–`8`) and **8 right-side plain buttons** (`9`, `0`, `-`, `=`, `F1`–`F4`) with **no `Ctrl+` chords**.
-  - Open **⌄ → Settings (gear) → Custom Buttons (Drag & Drop)…** (or **Edit Layout → Edit Buttons…**) to:
+  - Open **⌄ → ... → Settings (gear) → Custom Buttons (Drag & Drop)…** (or **Edit Layout → Edit Buttons…**) to:
     - **Drag `⊕ Drag Button`** directly off the palette and drop a new button anywhere on screen (with toggleable 16pt **Snap** grid, or **Clear** to start from an empty canvas), and switch between **3 independent Profiles (1–3)**.
     - Opens in **Drag One** mode by default: drag any individual button, double-tap or tap **Label**, **Copy** to duplicate, **Delete**, or switch between **Drag One**, **Side / Group**, and **Move All**.
     - Customize each button's **Behavior** (**Tap**, **Hold**, or **Toggle**), **Shape** (**Circle**, **Pill**, or **Box** + **Stretch** width slider), and **Color** (`Default`, `Gold`, `Red`, `Blue`, `Green`, `Purple`, `Clear`).

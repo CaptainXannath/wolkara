@@ -1,0 +1,16 @@
+## Interface: 16001
+## Title: Wolkara Mobile
+## Notes: Round drag-and-drop side ability buttons, spell picker, bag gestures and window fitting.
+## Author: Wolkara contributors; based on pookee/WolkaraRoue
+## Version: 1.1.0
+## SavedVariablesPerCharacter: WolkaraMobileDB
+
+Config.lua
+Core.lua
+Actions.lua
+Picker.lua
+Abilities.lua
+Menu.lua
+Windows.lua
+Bags.lua
+Bridge.lua

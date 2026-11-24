@@ -91,6 +91,7 @@ jobs:
           BUNDLE_ID=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$PLIST_TMP")
           echo "Verified IPA metadata: display=$DISPLAY_NAME id=$BUNDLE_ID"
           [ "$DISPLAY_NAME" = "Wolkara" ]
+          unzip -l Wolkara.ipa | grep -q "Payload/WolkaraExternalJIT.app/WolkaraMobile/WolkaraMobile.toc"
           shasum -a 256 Wolkara.ipa > Wolkara.ipa.sha256
 
       - name: Upload Wolkara IPA Artifact
@@ -126,6 +127,9 @@ jobs:
       - name: Ensure script permissions
         run: chmod +x tools/*.sh tools/*.py
 
+      - name: Ensure Lua runtime for companion addon tests
+        run: command -v lua >/dev/null 2>&1 || brew install lua
+
       - name: Run Touch HUD & Input Simulator Tests
         run: |
           set -euo pipefail
@@ -156,6 +160,8 @@ jobs:
           }
           run_log "test_touch_abilities" logs/test-touch-abilities.log bash tools/test_touch_abilities.sh
           run_log "test_direct_touch_camera" logs/test-direct-touch-camera.log bash tools/test_direct_touch_camera.sh
+          run_log "test_mobile_interface" logs/test-mobile-interface.log bash tools/test_mobile_interface.sh
+          run_log "test_mobile_bridge" logs/test-mobile-bridge.log bash tools/test_mobile_bridge.sh
           run_log "test_touch_gamepad_ui --self-test" logs/test-gamepad-lifecycle.log bash tools/test_touch_gamepad_ui.sh --self-test
           run_log "test_touch_gamepad_ui --self-test-input" logs/test-gamepad-input.log bash tools/test_touch_gamepad_ui.sh --self-test-input
           run_log "test_touch_controls_ui --self-test" logs/test-controls.log bash tools/test_touch_controls_ui.sh --self-test
@@ -235,8 +241,9 @@ jobs:
             echo
             echo "### Highlights"
             echo "- **Renamed to Wolkara** (retains bundle ID \`local.tolkara.app.externaljit\` so updating over an existing install preserves your Documents/WoW data)."
-            echo "- **Collapsible Photo HUD**: Minimal dark/gold top-center \`⌄\` pill, clean bottom-left thumbstick (with optional **Left Stick: WASD** toggle), configurable right HUD controls (**Target**, **Interact**, **Jump**, **Camera**), and individual HUD visibility toggles."
-            echo "- **PlayPort-Style Custom Buttons**: Drag \`⊕ Drag Button\` onto the canvas, customize per-button **Tap / Hold / Toggle** behavior, **Circle / Pill / Box** shapes, width stretch, 7 color presets, 3 switchable profiles, keyboard/mouse/gamepad bindings, and standalone sticky modifiers (\`Shift\`/\`Ctrl\`/\`Alt\`/\`Cmd\`)."
+            echo "- **Round Blizzard Spell & Item Drag-and-Drop Buttons (\`WolkaraMobile\`)**: Automatically stages our upgraded companion addon for \`_forever_\` with 20 circular masked action slots (12 left + 8 right). Drag spells, items, or macros directly off Spellbook/Bags onto any round slot, or tap an empty slot for the Spell/Item/Macro Picker, **Hide empty**, **Reset sides**, and **Arrange Spell Icons…**."
+            echo "- **Top WoW Quick-Access Menu Bar**: Tap top-center \`⌄\` anytime (even at login) to open \`Chat | Bags | Map | Character | Talents | Quests | Spellbook | ^ | ...\`, or tap \`...\` for Wolkara utilities and **Settings**."
+            echo "- **Collapsible Photo HUD & PlayPort Custom Buttons**: Clean bottom-left thumbstick (with optional **Left Stick: WASD** toggle), configurable right HUD controls (**Target**, **Interact**, **Jump**, **Camera**), plus optional PlayPort-style drag-and-drop custom buttons."
             echo
             echo "### Installation"
             echo "This IPA is ad-hoc signed without embedded credentials or provisioning profiles (\`TOLKARA_SYSTEM_ROOTS=NO\`). Re-sign it with development signing that preserves \`get-task-allow\`, then launch with StikDebug + LocalDevVPN."

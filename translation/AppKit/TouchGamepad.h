@@ -28,6 +28,7 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size);
 @property(nonatomic, readonly) BOOL configuring;
 @property(nonatomic, readonly) BOOL editing;
 @property(nonatomic, readonly) BOOL editingAbilities;
+@property(nonatomic, readonly) BOOL mobileEditing;
 /// Shared with the toolbar so a settings save cannot overwrite moved buttons.
 @property(nonatomic, readonly) AKGamepadLayout *layout;
 @property(nonatomic, copy, nullable) void (^visibilityChanged)(BOOL visible);

@@ -307,11 +307,15 @@ static NSString *AKComposerDefaultLabel(void) { return AKHostLocalized(@"touch.d
 
 @implementation AKTouchControls {
     UIButton *_collapseButton;
+    UIView *_wowMenuBar;
+    UIScrollView *_wowMenuScroll;
+    UIButton *_wowMenuCollapseButton, *_wowMenuMoreButton;
+    NSArray<UIButton *> *_wowMenuButtons;
     UIButton *_keyboardButton, *_trackpadButton, *_gamepadButton, *_settingsButton, *_leaveButton;
     UIButton *_insertDraftButton, *_clearDraftButton;
     UIButton *_savedTextButton;
     UILongPressGestureRecognizer *_savedTextHold, *_gamepadHold;
-    BOOL _savedTextHeld, _savedTextEditing, _toolbarExpanded;
+    BOOL _savedTextHeld, _savedTextEditing, _toolbarExpanded, _toolsExpanded;
     BOOL _gamepadEnabled, _gamepadSimple, _gamepadHeld, _keyboardRequested;
     UIView *_accessory, *_composer;
     NSTimer *_holdTimer;
@@ -507,13 +511,92 @@ static void AKEmitTouch(void *context, AKTrackpadAction action, double x, double
         [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(backgroundInput:) name:UIApplicationDidEnterBackgroundNotification object:nil];
         [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(windowResigned:) name:UIWindowDidResignKeyNotification object:nil];
         [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(controlAppearanceChanged:)
-            name:AKGamepadLayoutDidChangeNotification object:NSUserDefaults.standardUserDefaults];    // Whether the system keyboard (and so its dictation button) exists at all on
+            name:AKGamepadLayoutDidChangeNotification object:NSUserDefaults.standardUserDefaults];
+    // Whether the system keyboard (and so its dictation button) exists at all on
     // this device, and whether UIKit is talking to our draft editor when it does.
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(systemKeyboardShown:) name:UIKeyboardDidShowNotification object:nil];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(systemKeyboardHidden:) name:UIKeyboardDidHideNotification object:nil];
-    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(keyboardRequestedByGuest:) name:AKTouchKeyboardRequestNotification object:nil];        [self controlAppearanceChanged:nil];
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(keyboardRequestedByGuest:) name:AKTouchKeyboardRequestNotification object:nil];
+    [self buildWowMenuBar];
+    [self controlAppearanceChanged:nil];
     }
     return self;
+}
+
+static NSArray<NSDictionary<NSString *, id> *> *AKWowMenuItems(void) {
+    return @[
+        @{@"title": @"Chat", @"id": @"wolkara.toolbar.wow.chat", @"chat": @YES},
+        @{@"title": @"Bags", @"id": @"wolkara.toolbar.wow.bags", @"code": @11, @"char": @"b"},
+        @{@"title": @"Map", @"id": @"wolkara.toolbar.wow.map", @"code": @46, @"char": @"m"},
+        @{@"title": @"Character", @"id": @"wolkara.toolbar.wow.character", @"code": @8, @"char": @"c"},
+        @{@"title": @"Talents", @"id": @"wolkara.toolbar.wow.talents", @"code": @45, @"char": @"n"},
+        @{@"title": @"Quests", @"id": @"wolkara.toolbar.wow.quests", @"code": @37, @"char": @"l"},
+        @{@"title": @"Spellbook", @"id": @"wolkara.toolbar.wow.spellbook", @"code": @35, @"char": @"p"},
+    ];
+}
+
+- (void)buildWowMenuBar {
+    _wowMenuBar = [UIView new];
+    _wowMenuBar.backgroundColor = [UIColor colorWithRed:0.06 green:0.06 blue:0.06 alpha:0.78];
+    _wowMenuBar.layer.cornerRadius = 19;
+    _wowMenuBar.layer.borderWidth = 1;
+    _wowMenuBar.clipsToBounds = YES;
+    _wowMenuBar.accessibilityIdentifier = @"wolkara.toolbar.menuBar";
+    [self addSubview:_wowMenuBar];
+
+    _wowMenuScroll = [UIScrollView new];
+    _wowMenuScroll.showsHorizontalScrollIndicator = NO;
+    _wowMenuScroll.alwaysBounceHorizontal = NO;
+    [_wowMenuBar addSubview:_wowMenuScroll];
+
+    NSMutableArray<UIButton *> *buttons = [NSMutableArray array];
+    NSArray<NSDictionary<NSString *, id> *> *items = AKWowMenuItems();
+    for (NSUInteger i = 0; i < items.count; i++) {
+        NSDictionary<NSString *, id> *entry = items[i];
+        UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
+        button.tag = (NSInteger)i;
+        [button setTitle:entry[@"title"] forState:UIControlStateNormal];
+        [button setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+        button.tintColor = UIColor.whiteColor;
+        button.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
+        button.accessibilityIdentifier = entry[@"id"];
+        button.accessibilityLabel = entry[@"title"];
+        [button addTarget:self action:@selector(buttonTouchDown) forControlEvents:UIControlEventTouchDown];
+        [button addTarget:self action:@selector(wowMenuItemTapped:) forControlEvents:UIControlEventTouchUpInside];
+        [_wowMenuScroll addSubview:button];
+        [buttons addObject:button];
+    }
+    _wowMenuButtons = buttons;
+
+    _wowMenuCollapseButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    [_wowMenuCollapseButton setImage:[UIImage systemImageNamed:@"chevron.up"] forState:UIControlStateNormal];
+    _wowMenuCollapseButton.tintColor = UIColor.whiteColor;
+    _wowMenuCollapseButton.accessibilityIdentifier = @"wolkara.toolbar.collapse";
+    _wowMenuCollapseButton.accessibilityLabel = AKHostLocalized(@"touch.toolbar.toggle");
+    [_wowMenuCollapseButton addTarget:self action:@selector(buttonTouchDown) forControlEvents:UIControlEventTouchDown];
+    [_wowMenuCollapseButton addTarget:self action:@selector(collapseMenuBar) forControlEvents:UIControlEventTouchUpInside];
+    [_wowMenuBar addSubview:_wowMenuCollapseButton];
+
+    _wowMenuMoreButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    [_wowMenuMoreButton setImage:[UIImage systemImageNamed:@"ellipsis"] forState:UIControlStateNormal];
+    _wowMenuMoreButton.tintColor = UIColor.whiteColor;
+    _wowMenuMoreButton.accessibilityIdentifier = @"wolkara.toolbar.more";
+    _wowMenuMoreButton.accessibilityLabel = @"More tools";
+    [_wowMenuMoreButton addTarget:self action:@selector(buttonTouchDown) forControlEvents:UIControlEventTouchDown];
+    [_wowMenuMoreButton addTarget:self action:@selector(toggleToolbarTools) forControlEvents:UIControlEventTouchUpInside];
+    [_wowMenuBar addSubview:_wowMenuMoreButton];
+}
+
+- (void)wowMenuItemTapped:(UIButton *)sender {
+    if (_gamepad.editing || self.voiceDraftActive) return;
+    NSArray<NSDictionary<NSString *, id> *> *items = AKWowMenuItems();
+    if (sender.tag < 0 || (NSUInteger)sender.tag >= items.count) return;
+    NSDictionary<NSString *, id> *entry = items[(NSUInteger)sender.tag];
+    if ([entry[@"chat"] boolValue]) {
+        [self toggleKeyboard];
+        return;
+    }
+    [self touchSpecialKey:(unsigned short)[entry[@"code"] unsignedShortValue] characters:entry[@"char"]];
 }
 
 - (NSArray<UIView *> *)toolbarItems {
@@ -523,14 +606,34 @@ static void AKEmitTouch(void *context, AKTrackpadAction action, double x, double
     if (_gamepad.editing || self.voiceDraftActive) return;
     [_haptics buttonPressed];
     _toolbarExpanded = !_toolbarExpanded;
+    if (!_toolbarExpanded) _toolsExpanded = NO;
+    [self updateToolbarVisibility];
+}
+- (void)collapseMenuBar {
+    if (_gamepad.editing || self.voiceDraftActive) return;
+    [_haptics buttonPressed];
+    _toolbarExpanded = NO;
+    _toolsExpanded = NO;
+    [self updateToolbarVisibility];
+}
+- (void)toggleToolbarTools {
+    if (_gamepad.editing || self.voiceDraftActive) return;
+    [_haptics buttonPressed];
+    _toolbarExpanded = YES;
+    _toolsExpanded = !_toolsExpanded;
     [self updateToolbarVisibility];
 }
 - (void)updateToolbarVisibility {
-    BOOL showItems = (_toolbarExpanded && !_gamepad.editingAbilities) || (_gamepad.editing && !_gamepad.editingAbilities) || self.voiceDraftActive;
+    BOOL hideChrome = self.voiceDraftActive || _gamepad.editingAbilities || _gamepad.mobileEditing;
+    BOOL showBar = _toolbarExpanded && !_gamepad.editing && !hideChrome;
+    BOOL showItems = (_toolbarExpanded && _toolsExpanded && !hideChrome) ||
+                     (_gamepad.editing && !hideChrome) ||
+                     self.voiceDraftActive;
     for (UIView *item in [self toolbarItems]) item.hidden = !showItems;
-    [_collapseButton setImage:[UIImage systemImageNamed:showItems ? @"chevron.up" : @"chevron.down"]
-                     forState:UIControlStateNormal];
-    _collapseButton.hidden = self.voiceDraftActive || _gamepad.editingAbilities;
+    _wowMenuBar.hidden = !showBar;
+    _wowMenuMoreButton.tintColor = _toolsExpanded ? [UIColor colorWithRed:0.95 green:0.82 blue:0.48 alpha:1] : UIColor.whiteColor;
+    [_collapseButton setImage:[UIImage systemImageNamed:@"chevron.down"] forState:UIControlStateNormal];
+    _collapseButton.hidden = hideChrome || showBar;
     [self setNeedsLayout];
 }
 - (void)controlAppearanceChanged:(NSNotification *)notification {
@@ -545,6 +648,8 @@ static void AKEmitTouch(void *context, AKTrackpadAction action, double x, double
         button.layer.borderColor = (editing ? UIColor.systemYellowColor : warmBorder).CGColor;
         button.layer.borderWidth = editing ? 2 : 1;
     }
+    _wowMenuBar.alpha = layout.opacity;
+    _wowMenuBar.layer.borderColor = warmBorder.CGColor;
     _trackpadButton.menu = editing ? nil : _mouseMenu;
     [self updateToolbarVisibility];
 }
@@ -576,6 +681,31 @@ static void AKEmitTouch(void *context, AKTrackpadAction action, double x, double
     AKGamepadLayout *layout = _gamepad.layout;
     CGRect toggleFallback = CGRectMake(CGRectGetMidX(safe) - 27, safe.origin.y, 54, 36);
     _collapseButton.frame = layout ? [layout frameForItem:_collapseButton.accessibilityIdentifier defaultFrame:toggleFallback inBounds:safe] : toggleFallback;
+    CGFloat barWidth = MAX(220, MIN(safe.size.width - 8, 560));
+    if (barWidth > safe.size.width) barWidth = safe.size.width;
+    _wowMenuBar.frame = CGRectMake(CGRectGetMidX(safe) - barWidth / 2, safe.origin.y, barWidth, 38);
+    CGFloat trailingWidth = 72;
+    _wowMenuCollapseButton.frame = CGRectMake(barWidth - trailingWidth, 4, 30, 30);
+    _wowMenuMoreButton.frame = CGRectMake(barWidth - 38, 4, 30, 30);
+    CGFloat scrollWidth = MAX(0, barWidth - trailingWidth - 10);
+    _wowMenuScroll.frame = CGRectMake(6, 0, scrollWidth, 38);
+    CGFloat contentWidth = 0;
+    for (UIButton *button in _wowMenuButtons) {
+        CGSize fit = [button sizeThatFits:CGSizeMake(200, 38)];
+        contentWidth += ceil(fit.width) + 10;
+    }
+    CGFloat spacing = _wowMenuButtons.count > 1 ? 8 : 0;
+    if (_wowMenuButtons.count > 1 && scrollWidth > contentWidth + 16) {
+        spacing = MIN(16, (scrollWidth - contentWidth - 16) / (CGFloat)(_wowMenuButtons.count - 1));
+    }
+    CGFloat bx = 8;
+    for (UIButton *button in _wowMenuButtons) {
+        CGSize fit = [button sizeThatFits:CGSizeMake(200, 38)];
+        CGFloat bw = ceil(fit.width) + 10;
+        button.frame = CGRectMake(bx, 0, bw, 38);
+        bx += bw + spacing;
+    }
+    _wowMenuScroll.contentSize = CGSizeMake(MAX(scrollWidth, bx + 4), 38);
     NSArray<UIView *> *items = [self toolbarItems];
     BOOL compact = safe.size.width < 408;
     CGFloat width = compact ? 252 : 408;
@@ -888,6 +1018,7 @@ static void AKEmitTouch(void *context, AKTrackpadAction action, double x, double
     if (self.voiceDraftActive) return CGRectContainsPoint(self.bounds, point);
     if ([_gamepad configurationContainsPoint:point inView:self]) return NO;
     if (!_collapseButton.hidden && CGRectContainsPoint(_collapseButton.frame, point)) return YES;
+    if (!_wowMenuBar.hidden && CGRectContainsPoint(_wowMenuBar.frame, point)) return YES;
     for (UIView *control in [self toolbarItems]) {
         if (!control.hidden && CGRectContainsPoint(control.frame, point)) return YES;
     }

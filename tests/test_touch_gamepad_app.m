@@ -1,6 +1,7 @@
 // Original fixture: tests our lifecycle with fake transports, then permits
 // manual testing of Apple's real virtual controller. No game or network.
 #import <UIKit/UIKit.h>
+#import "../translation/AppKit/AKMobileInterface.h"
 #import "../translation/AppKit/TouchGamepad.h"
 #import "../translation/AppKit/TouchGamepadLayout.h"
 #import "../translation/AppKit/TouchHaptics.h"
@@ -479,6 +480,26 @@ static void TestNativeInput(UIView *host, AKPreviewGamepad *manager) {
     assert(CGRectGetMidX(Button(host,GCInputLeftTrigger).frame)>CGRectGetMidX(Button(host,GCInputLeftShoulder).frame));
     assert(CGRectGetMidX(Button(host,GCInputRightTrigger).frame)<CGRectGetMidX(Button(host,GCInputRightShoulder).frame));
     TestSimpleShoulderPositions(host,manager);
+    [NSUserDefaults.standardUserDefaults removeObjectForKey:@"WolkaraTouchAbilitiesExplicit"];
+    [NSUserDefaults.standardUserDefaults setBool:YES forKey:AKMobileAvailableKey];
+    [NSUserDefaults.standardUserDefaults setBool:NO forKey:AKMobileEnabledKey];
+    [manager toggleSettings]; [host layoutIfNeeded];
+    UISwitch *mobile=(id)Find(host,@"wolkara.controls.mobileInterface"); assert(mobile && !mobile.on);
+    UIButton *arrange=(id)Find(host,@"wolkara.controls.mobileEdit"); assert(arrange && !arrange.enabled);
+    mobile.on=YES; [mobile sendActionsForControlEvents:UIControlEventValueChanged];
+    assert(AKMobileInterfaceEnabled() && arrange.enabled);
+    [arrange sendActionsForControlEvents:UIControlEventTouchUpInside];
+    [host layoutIfNeeded]; assert(manager.configuring && manager.mobileEditing && manager.visible);
+    UIButton *save=(id)Find(host,@"wolkara.mobile.done"); assert(save && !save.hidden);
+    assert([host hitTest:[save convertPoint:CGPointMake(30,20) toView:host] withEvent:nil]==save);
+    UIView *passHit=[host hitTest:CGPointMake(120,260) withEvent:nil];
+    assert(passHit==nil || passHit==host);
+    [save sendActionsForControlEvents:UIControlEventTouchUpInside]; assert(save.hidden && !manager.mobileEditing);
+    [manager toggleSettings]; mobile=(id)Find(host,@"wolkara.controls.mobileInterface"); assert(mobile.on);
+    mobile.on=NO; [mobile sendActionsForControlEvents:UIControlEventValueChanged]; assert(!AKMobileInterfaceEnabled());
+    [manager toggleSettings];
+    [NSUserDefaults.standardUserDefaults setBool:NO forKey:AKMobileAvailableKey];
+    puts("MOBILE_SETTINGS_PASS: opt-in, edit hit testing, unobstructed arrange mode and persisted toggle.");
     TestPreferences();
     manager.keyboardVisible=YES; Drain();
     assert(!manager.visible && !pad.leftShoulder.pressed && !pad.buttonA.pressed);
@@ -619,6 +640,9 @@ static void TestLifecycle(UIView *host) {
         [NSUserDefaults.standardUserDefaults removeObjectForKey:@"WolkaraTouchAbilitiesV2"];
         [NSUserDefaults.standardUserDefaults removeObjectForKey:@"WolkaraTouchAbilitiesV3"];
         [NSUserDefaults.standardUserDefaults removeObjectForKey:@"WolkaraTouchAbilitiesProfile"];
+        [NSUserDefaults.standardUserDefaults removeObjectForKey:@"WolkaraTouchAbilitiesExplicit"];
+        [NSUserDefaults.standardUserDefaults removeObjectForKey:AKMobileAvailableKey];
+        [NSUserDefaults.standardUserDefaults removeObjectForKey:AKMobileEnabledKey];
     }
     if (test) { TestLifecycle(self.window.rootViewController.view); fflush(stdout); exit(0); }
     self.gamepad=[[AKPreviewGamepad alloc] initWithHostView:self.window.rootViewController.view];
