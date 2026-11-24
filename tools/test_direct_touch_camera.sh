@@ -15,4 +15,7 @@ xcrun --sdk iphonesimulator clang -target "$(uname -m)-apple-ios17.0-simulator" 
     -Itranslation/AKSupport -Itranslation/AppKit translation/AKSupport/AKSupport.m \
     translation/AppKit/*.m translation/AppKit/*.c translation/CoreGraphics/Displays.m tests/test_direct_touch_camera.m \
     $(cat translation/AppKit/ldflags) -framework Metal -o build/direct-touch-camera/test
+if [ -n "${WOLKARA_MOBILE_EVENT_TRACE:-}" ]; then
+    export SIMCTL_CHILD_WOLKARA_MOBILE_EVENT_TRACE="$WOLKARA_MOBILE_EVENT_TRACE"
+fi
 xcrun simctl spawn "$SIM_ID" "$PWD/build/direct-touch-camera/test"

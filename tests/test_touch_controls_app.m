@@ -504,6 +504,7 @@ static void AKSavedTextSettle(UIViewController *presenter) {
     UIView *host = [self.guest valueForKey:@"_host"];
     AKTouchControls *controls = [host valueForKey:@"_touchControls"];
     AKTouchGamepad *gamepad = [controls valueForKey:@"_gamepad"];
+    AKInputFixtureView *guest = (id)self.guest.contentView;
     [gamepad.layout reset]; [host layoutIfNeeded]; [controls layoutIfNeeded];
     UIButton *toggle = (id)FindToolbarView(controls, @"wolkara.toolbar.toggle");
     UIView *menuBar = FindToolbarView(controls, @"wolkara.toolbar.menuBar");
@@ -533,8 +534,9 @@ static void AKSavedTextSettle(UIViewController *presenter) {
         assert(button && !button.hidden);
         [button sendActionsForControlEvents:UIControlEventTouchUpInside];
         AKDrainFixtureEvents();
-        assert(self.guest.lastKeyEvent.keyCode == [entry[@"code"] unsignedShortValue]);
+        assert(guest.lastKeyEvent.keyCode == [entry[@"code"] unsignedShortValue]);
     }
+    [guest.text setString:@""]; guest.selection = NSMakeRange(0, 0); guest.lastKeyEvent = nil;
     UIButton *chat = (id)FindToolbarView(controls, @"wolkara.toolbar.wow.chat");
     assert(chat && !chat.hidden);
     BOOL keyboardWas = controls.keyboardVisible;

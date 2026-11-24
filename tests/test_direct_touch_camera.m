@@ -228,7 +228,7 @@ static void Command(AKMobileCommand command, NSEventModifierFlags baseline) {
     const unsigned short codes[] = {97, 98, 97, 98, 97, 98, 97, 98}; // F6/F7 only; never a bag function key.
     NSEventModifierFlags state = baseline;
     const char *path = getenv("WOLKARA_MOBILE_EVENT_TRACE");
-    FILE *trace = (path && !baseline) ? fopen(path, "a") : NULL;
+    FILE *trace = (path && *path && !baseline) ? fopen(path, "a") : NULL;
     BOOL down = NO, up = NO;
     do {
         NSEvent *event = Next(__LINE__);
@@ -274,7 +274,7 @@ static void CheckMobile(void) {
     CGPoint origin = CGPointMake(90, 180), target = CGPointMake(120, 190), anchor = CGPointMake(500, 300);
     Warp(anchor); Empty();
     const char *tracePath = getenv("WOLKARA_MOBILE_EVENT_TRACE");
-    if (tracePath) { FILE *trace = fopen(tracePath, "w"); assert(trace); fclose(trace); }
+    if (tracePath && *tracePath) { FILE *trace = fopen(tracePath, "w"); assert(trace); fclose(trace); }
     const NSEventModifierFlags baselines[] = {
         0,
         NSEventModifierFlagShift | 4,
