@@ -20,15 +20,17 @@ This custom build updates Wolkara's in-game touch UI (based on the `v0.1.0-stikd
     - Bind any button to a **Keyboard key** (`1`–`0`, `-`, `=`, `F1`–`F12`, **Arrows & Nav**, sticky standalone **`Shift`/`Ctrl`/`Alt`/`Cmd`**, `Space`, `Tab`, `Esc`, letters, optional modifiers), a **Mouse click** (`LMB`/`RMB`/`MMB`), or a **Gamepad chord**.
     - Dock (`⇅ Bottom` / `⇅ Top`) or drag the editor bar anywhere, adjust **Fill** and **Border** opacity (down to `0%` over WoW action bars), and toggle labels on/off.
 
-## Building the `.ipa`
+## Building & Publishing a Release
 
-Compiling iOS Objective-C/Swift into an `.ipa` requires **Xcode + XcodeGen on macOS**. You have two ways to produce the `.ipa` from this project:
+Compiling iOS Objective-C/Swift into an `.ipa` requires **Xcode + XcodeGen on macOS**:
 
-1. **GitHub Actions (no Mac required):**
-   - Push this folder (`C:\Users\hydro\.gemini\antigravity\scratch\wolkara-custom-ui`) to a GitHub repository (`main` branch), or trigger **Actions → Build Custom HUD Wolkara IPA → Run workflow**.
-   - Download `Wolkara-custom-hud-IPA` from the completed workflow run's **Artifacts** and sideload with development signing (`get-task-allow`) for StikDebug.
+1. **GitHub Actions & Releases (no Mac required):**
+   - Push to `feature/photo-hud` (or `main`) to build `Wolkara-IPA` (`Wolkara.ipa` + `Wolkara.ipa.sha256`) and run simulator tests.
+   - To publish a GitHub Release automatically after all tests pass:
+     - Either push a version tag (for example `v0.2.0`), or run **Actions → Build & Release Wolkara IPA → Run workflow** and enter a `release_tag` (such as `v0.2.0`).
+   - Download `Wolkara.ipa` from the Release (or workflow artifact) and sideload with development signing (`get-task-allow`) for StikDebug.
 2. **On a Mac:**
    ```bash
    chmod +x tools/*.sh tools/*.py
-   TOLKARA_SYSTEM_ROOTS=NO bash tools/package_external_jit_ipa.sh Wolkara-custom-hud.ipa
+   TOLKARA_SYSTEM_ROOTS=NO bash tools/package_external_jit_ipa.sh Wolkara.ipa
    ```

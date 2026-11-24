@@ -19,7 +19,7 @@
         [self fail:@"This installation lacks development permission. Select a Personal Team in Xcode and rebuild the WolkaraExternalJIT scheme."]; return nil;
     }
     if (attached) {
-        [self fail:@"A debugger is already attached. Stop the Xcode run and open Wolkara JIT from the Home Screen. Debug executable must be off."]; return nil;
+        [self fail:@"A debugger is already attached. Stop the Xcode run and open Wolkara from the Home Screen. Debug executable must be off."]; return nil;
     }
     if (!installed) {
         [self fail:@"Install StikDebug and complete its pairing setup. Connect LocalDevVPN, then try again. See the External JIT setup guide."]; return nil;
@@ -48,7 +48,7 @@
 - (BOOL)pollAtTime:(NSTimeInterval)now attached:(BOOL)attached prepared:(BOOL)prepared {
     if (_state!=TKExternalJITOpening && _state!=TKExternalJITWaiting && _state!=TKExternalJITPreparing) return NO;
     if (!isfinite(now) || now>=_deadline) {
-        [self fail:@"JIT preparation timed out. Check StikDebug and LocalDevVPN, then close and reopen Wolkara JIT to retry."]; return NO;
+        [self fail:@"JIT preparation timed out. Check StikDebug and LocalDevVPN, then close and reopen Wolkara to retry."]; return NO;
     }
     if (_state!=TKExternalJITWaiting) return NO;
     if (prepared && !attached) { _state=TKExternalJITReady; _message=@"Execution memory is ready."; return NO; }
@@ -59,14 +59,14 @@
 - (void)prepared:(BOOL)success detached:(BOOL)detached {
     if (_state!=TKExternalJITPreparing) return;
     if (!success || !detached) {
-        [self fail:detached?@"StikDebug could not prepare executable memory. Close and reopen Wolkara JIT; see Diagnostics and logs.":
-            @"Preparation did not detach the debugger. Game startup is blocked. Close and reopen Wolkara JIT."]; return;
+        [self fail:detached?@"StikDebug could not prepare executable memory. Close and reopen Wolkara; see Diagnostics and logs.":
+            @"Preparation did not detach the debugger. Game startup is blocked. Close and reopen Wolkara."]; return;
     }
     _state=TKExternalJITReady; _message=@"Execution memory is ready.";
 }
 - (void)cancel {
     if (_state==TKExternalJITFailed || _state==TKExternalJITReady) return;
     if (_state==TKExternalJITOpening) _restartRequired=YES;
-    [self fail:@"Preparation cancelled. Close and reopen Wolkara JIT before trying again."];
+    [self fail:@"Preparation cancelled. Close and reopen Wolkara before trying again."];
 }
 @end

@@ -1,20 +1,35 @@
-name: Build Custom HUD Wolkara IPA
+name: Build & Release Wolkara IPA
 
 on:
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Optional Git tag to create/publish a GitHub Release (e.g. v0.2.0)"
+        required: false
+        default: ""
+      release_name:
+        description: "Optional GitHub Release title (defaults to Wolkara <tag>)"
+        required: false
+        default: ""
+      prerelease:
+        description: "Mark GitHub Release as prerelease"
+        type: boolean
+        required: false
+        default: false
   push:
     branches: [main, master, feature/photo-hud]
+    tags: ['v*']
 
 permissions:
   contents: read
 
 concurrency:
-  group: wolkara-custom-hud-${{ github.ref }}
-  cancel-in-progress: true
+  group: wolkara-ipa-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
 jobs:
   build-ipa:
-    name: Build Custom HUD StikDebug IPA
+    name: Build Wolkara StikDebug IPA
     # Cross-build the arm64 IPA on Intel while macOS arm64 capacity is constrained.
     runs-on: macos-26-intel
     timeout-minutes: 25
@@ -45,13 +60,15 @@ jobs:
       - name: Install XcodeGen
         run: brew install xcodegen
 
-      - name: Run localization checks
-        run: bash tools/test_localization.sh
+      - name: Run localization and External JIT unit checks
+        run: |
+          bash tools/test_localization.sh
+          bash tools/test_external_jit.sh
 
-      - name: Build Custom HUD StikDebug IPA
+      - name: Build Wolkara StikDebug IPA
         env:
           TOLKARA_SYSTEM_ROOTS: "NO"
-        run: bash tools/package_external_jit_ipa.sh Wolkara-custom-hud.ipa
+        run: bash tools/package_external_jit_ipa.sh Wolkara.ipa
 
       - name: Keep IPA build logs on failure
         if: failure()
@@ -65,17 +82,24 @@ jobs:
       - name: Verify IPA
         run: |
           set -euo pipefail
-          test -s Wolkara-custom-hud.ipa
-          unzip -tq Wolkara-custom-hud.ipa
-          shasum -a 256 Wolkara-custom-hud.ipa > Wolkara-custom-hud.ipa.sha256
+          test -s Wolkara.ipa
+          unzip -tq Wolkara.ipa
+          PLIST_TMP=$(mktemp)
+          trap 'rm -f "$PLIST_TMP"' EXIT
+          unzip -p Wolkara.ipa "Payload/WolkaraExternalJIT.app/Info.plist" > "$PLIST_TMP"
+          DISPLAY_NAME=$(/usr/libexec/PlistBuddy -c "Print :CFBundleDisplayName" "$PLIST_TMP")
+          BUNDLE_ID=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$PLIST_TMP")
+          echo "Verified IPA metadata: display=$DISPLAY_NAME id=$BUNDLE_ID"
+          [ "$DISPLAY_NAME" = "Wolkara" ]
+          shasum -a 256 Wolkara.ipa > Wolkara.ipa.sha256
 
-      - name: Upload Custom IPA Artifact
+      - name: Upload Wolkara IPA Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Wolkara-custom-hud-IPA
+          name: Wolkara-IPA
           path: |
-            Wolkara-custom-hud.ipa
-            Wolkara-custom-hud.ipa.sha256
+            Wolkara.ipa
+            Wolkara.ipa.sha256
           if-no-files-found: error
           retention-days: 30
 
@@ -159,3 +183,83 @@ jobs:
           path: logs/
           if-no-files-found: ignore
           retention-days: 14
+
+  publish-release:
+    name: Publish GitHub Release
+    needs: [build-ipa, simulator-tests]
+    if: ${{ (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'workflow_dispatch' && inputs.release_tag != '') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Check out history for release notes
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Download verified IPA artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: Wolkara-IPA
+          path: release-assets
+
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "push" ]; then
+            TAG="${GITHUB_REF_NAME}"
+            TITLE="Wolkara ${TAG}"
+            IS_PRE="false"
+            case "$TAG" in *-*) IS_PRE="true" ;; esac
+          else
+            TAG="${{ inputs.release_tag }}"
+            TITLE="${{ inputs.release_name }}"
+            if [ -z "$TITLE" ]; then TITLE="Wolkara ${TAG}"; fi
+            IS_PRE="${{ inputs.prerelease }}"
+          fi
+
+          SHA256=$(awk '{print $1}' release-assets/Wolkara.ipa.sha256)
+          PREV=$(git describe --tags --abbrev=0 --match 'v*' "HEAD^" 2>/dev/null || true)
+          URL="${{ github.server_url }}/${{ github.repository }}"
+
+          {
+            echo "## Wolkara (${TAG})"
+            echo
+            echo "Built from commit \`${GITHUB_SHA}\` (Actions run [${GITHUB_RUN_ID}](${URL}/actions/runs/${GITHUB_RUN_ID})) with \`CFBundleDisplayName=Wolkara\` and bundle ID \`local.tolkara.app.externaljit\`."
+            echo
+            echo "- **Asset:** \`Wolkara.ipa\`"
+            echo "- **SHA-256:** \`${SHA256}\`"
+            echo
+            echo "### Highlights"
+            echo "- **Renamed to Wolkara** (retains bundle ID \`local.tolkara.app.externaljit\` so updating over an existing install preserves your Documents/WoW data)."
+            echo "- **Collapsible Photo HUD**: Minimal dark/gold top-center \`⌄\` pill, clean bottom-left thumbstick (with optional **Left Stick: WASD** toggle), configurable right HUD controls (**Target**, **Interact**, **Jump**, **Camera**), and individual HUD visibility toggles."
+            echo "- **PlayPort-Style Custom Buttons**: Drag \`⊕ Drag Button\` onto the canvas, customize per-button **Tap / Hold / Toggle** behavior, **Circle / Pill / Box** shapes, width stretch, 7 color presets, 3 switchable profiles, keyboard/mouse/gamepad bindings, and standalone sticky modifiers (\`Shift\`/\`Ctrl\`/\`Alt\`/\`Cmd\`)."
+            echo
+            echo "### Installation"
+            echo "This IPA is ad-hoc signed without embedded credentials or provisioning profiles (\`TOLKARA_SYSTEM_ROOTS=NO\`). Re-sign it with development signing that preserves \`get-task-allow\`, then launch with StikDebug + LocalDevVPN."
+            echo
+            echo "- SideStore: \`sidestore://install?url=${URL}/releases/download/${TAG}/Wolkara.ipa\`"
+            echo "- LiveContainer: \`livecontainer://install?url=${URL}/releases/download/${TAG}/Wolkara.ipa\`"
+            if [ -n "$PREV" ]; then
+              echo
+              echo "### Commits since ${PREV}"
+              git log --no-merges --format="- [\`%h\`](${URL}/commit/%H) %s" "${PREV}..HEAD" | head -n 100
+            fi
+          } > release-notes.md
+
+          PRE_FLAG=""
+          if [ "$IS_PRE" = "true" ]; then
+            PRE_FLAG="--prerelease"
+          fi
+
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            # shellcheck disable=SC2086
+            gh release edit "$TAG" --title "$TITLE" --notes-file release-notes.md $PRE_FLAG
+          else
+            # shellcheck disable=SC2086
+            gh release create "$TAG" --target "${GITHUB_SHA}" --title "$TITLE" --notes-file release-notes.md $PRE_FLAG
+          fi
+          gh release upload "$TAG" release-assets/Wolkara.ipa release-assets/Wolkara.ipa.sha256 --clobber

@@ -38,7 +38,7 @@ static BOOL DevelopmentPermission(void) {
        completion:(void (^)(BOOL,BOOL,NSString *))completion {
     NSAssert(NSThread.isMainThread,@"Start on the UI thread");
     if (_request && (_request.state!=TKExternalJITFailed || _request.restartRequired)) {
-        completion(NO,YES,@"A JIT request already used this session. Close and reopen Wolkara JIT."); return;
+        completion(NO,YES,@"A JIT request already used this session. Close and reopen Wolkara."); return;
     }
     _probe=probe; _path=[path copy]; _status=[status copy]; _completion=[completion copy];
     _request=[TKExternalJITRequest new]; _workerStarted=NO;
@@ -97,7 +97,7 @@ static BOOL DevelopmentPermission(void) {
     _completion=nil; _status=nil;
     if (!completion) return;
     BOOL ready=_request.state==TKExternalJITReady;
-    NSString *message=ready && _probe ? @"JIT test passed: our sample ran and was rewritten after debugger detachment. No game was loaded. Close and reopen Wolkara JIT before playing." : _request.message;
+    NSString *message=ready && _probe ? @"JIT test passed: our sample ran and was rewritten after debugger detachment. No game was loaded. Close and reopen Wolkara before playing." : _request.message;
     // The worker owns the log until it finishes; use a separate small status file.
     [message writeToFile:[_path stringByAppendingString:@".status.txt"] atomically:YES encoding:NSUTF8StringEncoding error:NULL];
     completion(ready,_request.restartRequired,message);

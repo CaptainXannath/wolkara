@@ -2,7 +2,7 @@
 
 Branch: `feature/external-jit-setup`, based on the working controller build
 `e4d2b64`. This prototype adds the **WolkaraExternalJIT** Xcode scheme and
-**Wolkara JIT** app. It leaves the normal Wolkara target and its game container
+**Wolkara** app. It leaves the normal Wolkara target and its game container
 alone. Requires a physical arm64 device running iOS 26 or later.
 
 ## What is implemented
@@ -52,11 +52,11 @@ per process, not a persistent disk cache or a guarantee of faster startup.
    entering Apple credentials into iloader. Accept device consent if requested.
    Do not export or publish the pairing file. Do not run Wolkara's integrated
    `tools/enroll.sh` for this target; the recipient is StikDebug.
-6. Open StikDebug and finish its setup. Keep LocalDevVPN connected. In Wolkara
-   JIT, open **Settings → Diagnostics and logs → Test External JIT setup**.
-   Approve StikDebug's request if shown and return to Wolkara JIT. A successful
+6. Open StikDebug and finish its setup. Keep LocalDevVPN connected. In Wolkara,
+   open **Settings → Diagnostics and logs → Test External JIT setup**.
+   Approve StikDebug's request if shown and return to Wolkara. A successful
    report must explicitly say the sample executed **after detachment**.
-7. Close Wolkara JIT from the app switcher after the test. Its separate library
+7. Close Wolkara from the app switcher after the test. Its separate library
    can then download a selected edition. Before copying a large existing game,
    first validate the capability and memory gates below. This prototype does
    not duplicate, import or remove the existing Wolkara installation's files.

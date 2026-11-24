@@ -705,7 +705,7 @@ static BOOL PreparedFromOutside(void) { return hd_may_run_unsigned_code() || ng_
 - (void)startExternalJITGame {
 #if TOLKARA_EXTERNAL_JIT_PROTOTYPE
     if (!ng_external_arena_ready()) {
-        self.status.text=@"Execution memory is not ready or a debugger is attached. Close and reopen Wolkara JIT.";
+        self.status.text=@"Execution memory is not ready or a debugger is attached. Close and reopen Wolkara.";
         [self showStartStopped]; return;
     }
 #endif
@@ -714,7 +714,7 @@ static BOOL PreparedFromOutside(void) { return hd_may_run_unsigned_code() || ng_
 }
 #if TOLKARA_EXTERNAL_JIT_PROTOTYPE
 - (void)startExternalJITProbe {
-    [self endSession:@"A JIT test used this session. Close and reopen Wolkara JIT before playing."];
+    [self endSession:@"A JIT test used this session. Close and reopen Wolkara before playing."];
     self.externalJIT=[TKExternalJITCoordinator new];
     __weak AKHostSceneDelegate *weakSelf=self;
     [self.externalJIT startProbe:YES logPath:TKDocumentsPath(@"external-jit.log")
