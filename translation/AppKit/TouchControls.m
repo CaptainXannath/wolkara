@@ -6,6 +6,7 @@
 #import "TouchGamepad.h"
 #import "TouchHaptics.h"
 #import <objc/runtime.h>
+#include <math.h>
 
 static char AKPrivateInputEventKey;
 void AKMarkPrivateInputEvent(id event) {
@@ -666,18 +667,23 @@ static NSArray<NSDictionary<NSString *, id> *> *AKWowMenuItems(void) {
         NSMutableArray<NSLayoutConstraint *> *theirs = [NSMutableArray array];
         for (NSLayoutConstraint *constraint in host.constraints)
             if (constraint.firstItem == self || constraint.secondItem == self) [theirs addObject:constraint];
+        for (NSLayoutConstraint *constraint in self.constraints)
+            if (constraint.firstItem == self && constraint.secondItem == nil) [theirs addObject:constraint];
         [NSLayoutConstraint deactivateConstraints:theirs];
         self.translatesAutoresizingMaskIntoConstraints = YES;
         self.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     }
     // A pass-through surface allows each button to be moved anywhere in the safe area.
-    self.frame = host.bounds;
+    if (!CGRectEqualToRect(self.frame, host.bounds)) self.frame = host.bounds;
 }
 - (void)layoutSubviews {
     [super layoutSubviews];
     if (self.superview) [self placeToolbarInHost:self.superview];
     _dictationShield.frame = self.bounds;
     CGRect safe = [self toolbarBounds];
+    if (CGRectIsEmpty(safe) || CGRectIsNull(safe) ||
+        !isfinite(safe.origin.x) || !isfinite(safe.origin.y) ||
+        !isfinite(safe.size.width) || !isfinite(safe.size.height)) return;
     AKGamepadLayout *layout = _gamepad.layout;
     CGRect toggleFallback = CGRectMake(CGRectGetMidX(safe) - 27, safe.origin.y, 54, 36);
     _collapseButton.frame = layout ? [layout frameForItem:_collapseButton.accessibilityIdentifier defaultFrame:toggleFallback inBounds:safe] : toggleFallback;

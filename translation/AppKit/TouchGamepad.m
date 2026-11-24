@@ -460,6 +460,14 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
         [_editAbilitiesButton addTarget:self action:@selector(editAbilities) forControlEvents:UIControlEventTouchUpInside];
         [self addSubview:_editAbilitiesButton];
 
+        _hint = [UILabel new];
+        _hint.text = AKHostLocalized(@"touch.gamepad.dragHint");
+        _hint.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
+        _hint.textColor = UIColor.whiteColor;
+        _hint.textAlignment = NSTextAlignmentCenter;
+        _hint.userInteractionEnabled = NO;
+        [self addSubview:_hint];
+
         _mobileDone = [UIButton buttonWithType:UIButtonTypeSystem];
         [_mobileDone setTitle:@"Done & save" forState:UIControlStateNormal];
         _mobileDone.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightBold];
@@ -469,14 +477,6 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
         _mobileDone.accessibilityIdentifier = @"wolkara.mobile.done";
         [_mobileDone addTarget:self action:@selector(finishConfiguration) forControlEvents:UIControlEventTouchUpInside];
         [self addSubview:_mobileDone];
-
-        _hint = [UILabel new];
-        _hint.text = AKHostLocalized(@"touch.gamepad.dragHint");
-        _hint.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
-        _hint.textColor = UIColor.whiteColor;
-        _hint.textAlignment = NSTextAlignmentCenter;
-        _hint.userInteractionEnabled = NO;
-        [self addSubview:_hint];
 
         [self updateAppearance];
     }
@@ -580,6 +580,9 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
 - (void)layoutSubviews {
     [super layoutSubviews];
     CGRect safe = [self usableBounds];
+    if (CGRectIsEmpty(safe) || CGRectIsNull(safe) ||
+        !isfinite(safe.origin.x) || !isfinite(safe.origin.y) ||
+        !isfinite(safe.size.width) || !isfinite(safe.size.height)) return;
     if (_editing) [self layoutEditGridInBounds:safe];
 
     CGFloat left = CGRectGetMinX(safe) + 8, right = CGRectGetMaxX(safe) - 8;
@@ -630,7 +633,6 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     _editDone.frame = CGRectMake(CGRectGetMidX(safe) - 144, CGRectGetMinY(safe) + 96, 136, 40);
     _editAbilitiesButton.frame = CGRectMake(CGRectGetMidX(safe) + 8, CGRectGetMinY(safe) + 96, 136, 40);
     _mobileDone.frame = CGRectMake(CGRectGetMidX(safe) - 70, CGRectGetMinY(safe) + 60, 140, 40);
-    [self bringSubviewToFront:_mobileDone];
     _hint.frame = CGRectMake(CGRectGetMidX(safe) - 160, CGRectGetMinY(safe) + 140, 320, 22);
 
     if (_settings) {
@@ -1100,6 +1102,7 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     _editing = NO;
     _mobileEditing = YES;
     [self clearSettingsViews];
+    [self bringSubviewToFront:_mobileDone];
     if (self.mobileCommand) self.mobileCommand(AKMobileEdit);
     [self updateAppearance];
     if (self.configurationChanged) self.configurationChanged();

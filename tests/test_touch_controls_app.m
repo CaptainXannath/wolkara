@@ -7,6 +7,7 @@
 #import "SavedTextController.h"
 #include <assert.h>
 #include <dlfcn.h>
+#include <math.h>
 
 @interface AKTouchControls (DictationLanguageFixture)
 - (void)selectDictationLocale:(NSString *)identifier;
@@ -621,6 +622,12 @@ static void AKSavedTextSettle(UIViewController *presenter) {
         host.bounds = (CGRect){CGPointZero, size.CGSizeValue};
         [controls setNeedsLayout]; [controls layoutIfNeeded];
         for (UIView *item in items) assert(CGRectContainsRect([controls toolbarBounds], item.frame));
+    }
+    for (NSValue *size in @[[NSValue valueWithCGSize:CGSizeZero], [NSValue valueWithCGSize:CGSizeMake(12, 12)]]) {
+        host.bounds = (CGRect){CGPointZero, size.CGSizeValue};
+        [controls setNeedsLayout]; [controls layoutIfNeeded];
+        assert(isfinite(menuBar.frame.origin.x) && isfinite(menuBar.frame.origin.y));
+        assert(isfinite(menuBar.frame.size.width) && isfinite(menuBar.frame.size.height));
     }
     host.bounds = original;
     [gamepad.layout reset]; [controls setNeedsLayout]; [controls layoutIfNeeded];
