@@ -184,6 +184,7 @@ Event("ADDON_LOADED", "WolkaraMobile"); Clean()
 assert(#ns.db.buttons == 20 and ns.db.seeded)
 assert(ns.db.buttons[1].x <= 0.25 and ns.db.buttons[13].x >= 0.75)
 assert(masksAdded >= 20 and maskTextures[ns.CIRCLE])
+assert(not WolkaraMobileAbility21)
 
 Event("PLAYER_LOGIN"); assert(not ns.enabled and original:GetScale() == .8)
 assert(bindings["ALT-CTRL-SHIFT-F6"] == "WolkaraMobileCommand1")
@@ -307,6 +308,10 @@ ns.hostSession = "next-launch"; ns.hostEnabled = true; Event("PLAYER_LOGIN"); as
 ns.SetEditing(true)
 for _ = 21, 70 do Button(WolkaraMobileEditor, "Add"):Click() end
 assert(#ns.db.buttons == 64)
+ns.AssignEntry(WolkaraMobileAbility64, { kind = "spell", id = 999 })
+ns.SetEditing(false)
+Mark("drag"); WolkaraMobileAbility64:Click(); assert(not WolkaraMobileAbility64.casts)
+Mark("tap"); WolkaraMobileAbility64:Click(); assert(WolkaraMobileAbility64.casts == 1)
 ns.SetEnabled(false); Clean()
 assert(not ns.errors)
 print("MOBILE_ADDON_PASS: seeded side round buttons, drag/drop assignment, hide-empty, /wm menu & reset, combat queue and limits")

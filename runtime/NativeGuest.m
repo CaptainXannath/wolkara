@@ -140,8 +140,15 @@ bool ng_reserve_arena(FILE *log) {
     if (reserved_arena.published) return true;
     if (atomic_load(&initialization_attempted) || !da_debugger_present()) return false;
     // A script may refuse the largest; take what it gives, down to 64 MiB.
-    size_t page=(size_t)getpagesize(), smallest=64u*1024u*1024u;
-    for (size_t size=nc_arena_limit(); size; ) {
+    size_t page=(size_t)getpagesize(), smallest=64u*1024u*1024u, size=nc_arena_limit();
+#if TOLKARA_EXTERNAL_JIT_PROTOTYPE
+    // StikDebug writes a marker byte into every granted page, dirtying the
+    // whole reservation in a process without increased-memory-limit. 256 MiB
+    // fits WoW binaries (~95-150 MiB) without burning 768 MiB+ of Jetsam budget.
+    const size_t external_cap=256u*1024u*1024u;
+    if (size>external_cap) size=external_cap;
+#endif
+    for (; size; ) {
         if (da_request_arena(&reserved_arena,size,log) || size<=smallest) break;
         size=size/2<smallest?smallest:size/2; size-=size%page;
     }
@@ -1727,6 +1734,11 @@ bool ng_initialize(const char *path, const char *frameworks, const char *library
             goto done;
         }
         LOG("[native] enabler arena cleared for %zu bytes\n",total);
+#ifdef MADV_FREE
+        size_t keep=((total+page_size-1)/page_size)*page_size;
+        if (guest.arena.writable && keep<guest.arena.size)
+            (void)madvise((char *)guest.arena.writable+keep,guest.arena.size-keep,MADV_FREE);
+#endif
     }
     // A protection change can be reported and not granted.
     LOG("[native] arena protection %#x\n",hd_protection(guest.arena.executable));

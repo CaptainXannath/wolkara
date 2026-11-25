@@ -3,6 +3,15 @@ local _,ns=...
 local Bridge=ns.Register("Host controls",{})
 local keys={"ALT-CTRL-SHIFT-F6","ALT-CTRL-SHIFT-F7","ALT-CTRL-F6","ALT-CTRL-F7",
     "CTRL-SHIFT-F6","CTRL-SHIFT-F7","ALT-SHIFT-F6","ALT-SHIFT-F7"}
+function ns.WrapAbilityButton(action)
+    if not action or action.bridgeWrapped or not ns.bridge or InCombatLockdown() then return end
+    action.bridgeWrapped=true
+    SecureHandlerWrapScript(action,"OnClick",ns.bridge,[=[
+        local gesture=control:GetAttribute("gesture")
+        if not down then control:SetAttribute("gesture",nil) end
+        if control:GetAttribute("enabled") and (gesture=="drag" or gesture=="hold") then return false end
+    ]=])
+end
 function Bridge:Init()
     local bridge=CreateFrame("Frame","WolkaraMobileBridge",UIParent,"SecureHandlerBaseTemplate")
     ns.bridge=bridge
@@ -32,12 +41,7 @@ function Bridge:Init()
         SetOverrideBindingClick(bridge,false,keys[index],b:GetName())
     end
     for i=1,ns.MAX_BUTTONS do
-        local action=_G["WolkaraMobileAbility"..i]
-        if action then SecureHandlerWrapScript(action,"OnClick",bridge,[=[
-            local gesture=control:GetAttribute("gesture")
-            if not down then control:SetAttribute("gesture",nil) end
-            if control:GetAttribute("enabled") and (gesture=="drag" or gesture=="hold") then return false end
-        ]=]) end
+        ns.WrapAbilityButton(_G["WolkaraMobileAbility"..i])
     end
     if ns.Bags then ns.Bags:Watch() end
     SLASH_WOLKARAMOBILE1="/wolkaramobile"

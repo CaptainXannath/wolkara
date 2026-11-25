@@ -4,6 +4,10 @@ This custom build updates Wolkara's in-game touch UI (based on the `v0.1.0-stikd
 
 ## What Changed
 
+- **External JIT Memory & Performance Tuning** (`runtime/NativeGuest.m`, `launcher/WoW/WoWViewController.m`, `addons/WolkaraMobile/`):
+  - Caps External JIT arena reservation to 256 MiB (with `MADV_FREE` on unused arena pages past the loaded image) so StikDebug page-marking does not exhaust iOS Jetsam limits on devices without `increased-memory-limit`.
+  - Defaults iPhone External JIT builds to **Settings → Rendering quality → Performance (1×)** (with active checkmark in Settings; **Balanced (2×)** remains selectable).
+  - Lazily constructs `WolkaraMobile` ability buttons as needed instead of eagerly creating all 64 secure frames on load.
 - **Top-Center Quick Menu Bar & Collapsible Pill (`⌄`)** (`translation/AppKit/TouchControls.m`):
   - Gameplay (and Login) starts with a single compact dark/warm-gold chevron pill at top-center (`⌄`).
   - Tap `⌄` to expand the top WoW bar: **`Chat | Bags | Map | Character | Talents | Quests | Spellbook | ^ | ...`**.

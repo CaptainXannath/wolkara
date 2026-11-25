@@ -4,6 +4,7 @@ local Abilities=ns.Register("Abilities",{})
 ns.Abilities=Abilities
 local buttons, panel, selected, all, summary, hideEmptyBtn = {}, nil, nil, false, nil, nil
 local function Item(i) return ns.db.buttons[i] end
+local EnsureButton
 local function SeedSideButtons()
     if InCombatLockdown() then return end
     local existing={}
@@ -23,6 +24,7 @@ local function SeedSideButtons()
         end
     end
     ns.db.seeded=true
+    if EnsureButton then for i=1,#ns.db.buttons do EnsureButton(i) end end
 end
 function ns.ResetSideLayout()
     if InCombatLockdown() then ns.Print("Reset sides outside combat."); return end
@@ -49,6 +51,7 @@ local function Add()
     if InCombatLockdown() or #ns.db.buttons>=ns.MAX_BUTTONS then return end
     local i=#ns.db.buttons+1
     ns.db.buttons[i]={x=.32+((i-1)%6)*.07,y=.44+math.floor(((i-1)%18)/6)*.09,size=44}
+    if EnsureButton then EnsureButton(i) end
     selected=i; ns.MarkChanged(); ns.Layout()
 end
 local function Resize(delta)
@@ -79,23 +82,28 @@ local function DragEnd(b)
     else s.x=x/W; s.y=y/H end
     ns.MarkChanged(); ns.Layout()
 end
+EnsureButton=function(i)
+    local b=buttons[i]
+    if b then return b end
+    b=ns.CreateActionButton("WolkaraMobileAbility"..i,UIParent,44,
+        function() return Item(i) and Item(i).entry end,
+        function(e) if Item(i) then Item(i).entry=e end end)
+    b.index=i; b:SetFrameStrata("LOW"); b:SetMovable(true); b:SetClampedToScreen(true)
+    b:RegisterForDrag("LeftButton")
+    b:SetScript("OnDragStart",function(self)
+        if ns.editing and not InCombatLockdown() then
+            selected=i; self.moving=true; self:StartMoving(); Status()
+        end
+    end)
+    b:SetScript("OnDragStop",DragEnd); b:Hide(); buttons[i]=b
+    if ns.WrapAbilityButton then ns.WrapAbilityButton(b) end
+    return b
+end
 function Abilities:Init()
     for i=#ns.db.buttons,ns.MAX_BUTTONS+1,-1 do ns.db.buttons[i]=nil end
     for i,s in ipairs(ns.db.buttons) do if type(s)~="table" then ns.db.buttons[i]={} end end
     if not ns.db.seeded and #ns.db.buttons==0 then SeedSideButtons() end
-    for i=1,ns.MAX_BUTTONS do
-        local b=ns.CreateActionButton("WolkaraMobileAbility"..i,UIParent,44,
-            function() return Item(i) and Item(i).entry end,
-            function(e) if Item(i) then Item(i).entry=e end end)
-        b.index=i; b:SetFrameStrata("LOW"); b:SetMovable(true); b:SetClampedToScreen(true)
-        b:RegisterForDrag("LeftButton")
-        b:SetScript("OnDragStart",function(self)
-            if ns.editing and not InCombatLockdown() then
-                selected=i; self.moving=true; self:StartMoving(); Status()
-            end
-        end)
-        b:SetScript("OnDragStop",DragEnd); b:Hide(); buttons[i]=b
-    end
+    for i=1,#ns.db.buttons do EnsureButton(i) end
     panel=CreateFrame("Frame","WolkaraMobileEditor",UIParent,"UIPanelDialogTemplate")
     panel:SetSize(620,148); panel:SetPoint("TOP",0,-70); panel:SetFrameStrata("DIALOG"); panel:EnableMouse(true); panel:Hide()
     summary=ns.Label(panel,"GameFontNormal",""); summary:SetPoint("TOP",0,-14)
@@ -126,15 +134,19 @@ function Abilities:Init()
     tick:SetScript("OnUpdate",function(_,dt)
         if not ns.enabled then return end
         elapsed=elapsed+dt; if elapsed<.25 then return end; elapsed=0
-        for i=1,#ns.db.buttons do ns.UpdateState(buttons[i]) end
+        for i=1,#ns.db.buttons do if buttons[i] then ns.UpdateState(buttons[i]) end end
     end)
 end
 function Abilities:Layout()
-    for i,b in ipairs(buttons) do Place(b,i) end
+    for i=1,#ns.db.buttons do
+        local b=buttons[i] or (not InCombatLockdown() and EnsureButton(i))
+        if b then Place(b,i) end
+    end
+    for i=#ns.db.buttons+1,#buttons do Place(buttons[i],i) end
     panel:SetShown(ns.editing); if ns.editing then ns.FitPanel(panel) end; Status()
 end
 function Abilities:Refresh()
-    for i=1,#ns.db.buttons do ns.RefreshButton(buttons[i]) end
+    for i=1,#ns.db.buttons do if buttons[i] then ns.RefreshButton(buttons[i]) end end
 end
 function Abilities:SetEditing() self:Layout() end
 function Abilities:Disable()
@@ -144,7 +156,7 @@ end
 function Abilities:CombatStarts() panel:Hide() end
 function Abilities:AfterCombat() ns.Layout() end
 ns.On("SPELL_UPDATE_COOLDOWN",function()
-    if ns.enabled then for i=1,#ns.db.buttons do ns.UpdateCooldown(buttons[i]) end end
+    if ns.enabled then for i=1,#ns.db.buttons do if buttons[i] then ns.UpdateCooldown(buttons[i]) end end end
 end)
 ns.On("BAG_UPDATE",function() ns.Refresh() end)
 ns.On("SPELLS_CHANGED",function() ns.Layout(); ns.Refresh() end)

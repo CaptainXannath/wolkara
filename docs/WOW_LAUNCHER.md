@@ -426,10 +426,11 @@ being cleared solely because a USB import's executable and metadata look current
 The renderer uses the active window scene at its first attachment and follows resizing
 and rotation, including iPhone Pro, Pro Max and Duo windows. AppKit and CoreGraphics
 share a backing scale and immutable display-mode snapshots. Phones default to Balanced
-(2 pixels per point); Settings → Rendering quality also offers Performance (1 pixel per
-point), effective on the next game launch. The game still owns its drawable allocation
-and graphics settings. iPads keep their usual 2× scale. A larger surface costs graphics
-memory and GPU time; the setting is not a frame-rate guarantee.
+(2 pixels per point) in integrated-entitlement builds, and Performance (1 pixel per point)
+in External JIT builds without `increased-memory-limit` unless overridden in Settings →
+Rendering quality (effective on the next game launch). The game still owns its drawable
+allocation and graphics settings. iPads keep their usual 2× scale. A larger surface costs
+graphics memory and GPU time; the setting is not a frame-rate guarantee.
 
 Native control tracking receives a complete UIKit turn while settings or the native
 editor is open. Existing saved trigger arrangements are preserved, while new/reset

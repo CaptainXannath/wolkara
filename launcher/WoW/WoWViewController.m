@@ -52,6 +52,12 @@ static UIStackView *Stack(NSArray<UIView *> *views, CGFloat spacing) {
     if (!(self=[super initWithNibName:nil bundle:nil])) return nil;
     _library=library; self.title=@"";
     NSUserDefaults *defaults=NSUserDefaults.standardUserDefaults;
+#if TOLKARA_EXTERNAL_JIT_PROTOTYPE
+    if (UIDevice.currentDevice.userInterfaceIdiom==UIUserInterfaceIdiomPhone &&
+        [defaults objectForKey:@"WolkaraBackingScale"]==nil) {
+        [defaults setObject:@1 forKey:@"WolkaraBackingScale"];
+    }
+#endif
     _product=TKWoWProducts()[0];
     for (NSDictionary *p in TKWoWProducts()) if ([p[@"id"] isEqual:[defaults stringForKey:@"WoWProduct"]]) _product=p;
     _region=[defaults stringForKey:@"WoWRegion"]?:@"eu";
@@ -493,11 +499,14 @@ static UIStackView *Stack(NSArray<UIView *> *views, CGFloat spacing) {
     [self presentSheet:sheet anchor:_preferencesButton];
 }
 - (void)chooseRenderScale {
+    NSNumber *stored=[NSUserDefaults.standardUserDefaults objectForKey:@"WolkaraBackingScale"];
+    int current=(stored && [stored isKindOfClass:NSNumber.class] && [stored intValue]==1)?1:2;
     UIAlertController *sheet=[UIAlertController alertControllerWithTitle:@"Rendering quality"
         message:@"Balanced draws two pixels per point. Performance draws one and uses less graphics memory. Takes effect the next time you start the game."
         preferredStyle:UIAlertControllerStyleActionSheet];
     for (NSNumber *scale in @[@2,@1]) {
-        NSString *title=scale.intValue==2?@"Balanced (2×)":@"Performance (1×)";
+        NSString *name=scale.intValue==2?@"Balanced (2×)":@"Performance (1×)";
+        NSString *title=scale.intValue==current?[name stringByAppendingString:@" ✓"]:name;
         [sheet addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
             (void)action; [NSUserDefaults.standardUserDefaults setObject:scale forKey:@"WolkaraBackingScale"];
         }]];
