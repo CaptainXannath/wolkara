@@ -383,7 +383,7 @@ local function SyncLiveButtons()
                 local b = EnsureLiveButton(pageIdx, side, slotIdx)
                 ns.ApplyButton(b, ns.desktopRecords)
                 ns.RefreshButton(b)
-                b:Show()
+                b:SetShown(ns.enabled and not ns.editing and pageIdx == active)
             end
             for slotIdx = #list + 1, #group.buttons do
                 local b = group.buttons[slotIdx]
@@ -700,7 +700,12 @@ function Abilities:SetEditing(on)
             }
             selectedPreview, dragPreview, movingGroup = nil, nil, nil
         end
-        for _, p in ipairs(actionPages) do p.frame:Hide() end
+        for _, p in ipairs(actionPages) do
+            for _, side in ipairs(SIDES) do
+                for _, btn in ipairs(p.groups[side].buttons) do btn:Hide() end
+            end
+            p.frame:Hide()
+        end
         if switcher then switcher:Hide() end
         editShield:Show()
         UpdateEditorUI()
@@ -746,7 +751,13 @@ function Abilities:Disable()
     if editShield then editShield:Hide() end
     ns.Picker:Close()
     draft, selectedPreview, dragPreview, movingGroup = nil, nil, nil, nil
-    for _, p in ipairs(actionPages) do p.frame:Hide() end
+    for _, p in ipairs(actionPages) do
+        for _, side in ipairs(SIDES) do
+            for _, btn in ipairs(p.groups[side].buttons) do btn:Hide() end
+            p.groups[side].panel:Hide()
+        end
+        p.frame:Hide()
+    end
     if switcher then switcher:Hide() end
     RestoreDesktopBars()
 end

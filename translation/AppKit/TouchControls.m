@@ -599,19 +599,19 @@ static NSArray<NSDictionary<NSString *, id> *> *AKWowMenuItems(void) {
     if ([action isEqualToString:@"editArcs"]) {
         _toolbarExpanded = NO;
         _toolsExpanded = NO;
-        [self updateToolbarVisibility];
         if ([NSUserDefaults.standardUserDefaults boolForKey:@"WolkaraMobileAvailable"]) {
             [_gamepad beginMobileEditing];
         } else {
             [_gamepad toggleSettings];
         }
+        [self updateToolbarVisibility];
         return;
     }
     if ([action isEqualToString:@"editHud"]) {
         _toolbarExpanded = NO;
         _toolsExpanded = NO;
-        [self updateToolbarVisibility];
         [_gamepad beginLayoutEditing];
+        [self updateToolbarVisibility];
         return;
     }
     if ([entry[@"chat"] boolValue]) {

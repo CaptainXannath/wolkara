@@ -400,18 +400,9 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
         _editDone.accessibilityIdentifier = @"wolkaraforever.layout.done";
         [_editDone addTarget:self action:@selector(finishConfiguration) forControlEvents:UIControlEventTouchUpInside];
 
-        UIStackView *pillRow = [[UIStackView alloc] initWithArrangedSubviews:@[_editDefault, _editCancel, _editDone]];
-        pillRow.axis = UILayoutConstraintAxisHorizontal;
-        pillRow.distribution = UIStackViewDistributionFillEqually;
-        pillRow.spacing = 6;
-        pillRow.translatesAutoresizingMaskIntoConstraints = NO;
-        [_editPill addSubview:pillRow];
-        [NSLayoutConstraint activateConstraints:@[
-            [pillRow.leadingAnchor constraintEqualToAnchor:_editPill.leadingAnchor constant:10],
-            [pillRow.trailingAnchor constraintEqualToAnchor:_editPill.trailingAnchor constant:-10],
-            [pillRow.topAnchor constraintEqualToAnchor:_editPill.topAnchor],
-            [pillRow.bottomAnchor constraintEqualToAnchor:_editPill.bottomAnchor],
-        ]];
+        [_editPill addSubview:_editDefault];
+        [_editPill addSubview:_editCancel];
+        [_editPill addSubview:_editDone];
 
         _editAbilitiesButton = [UIButton buttonWithType:UIButtonTypeSystem];
         [_editAbilitiesButton setTitle:@"Custom Key Buttons…" forState:UIControlStateNormal];
@@ -474,11 +465,11 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
         }
         item.hidden = omitted || !showControls;
         item.alpha = _editing ? MAX(0.5, _preferences.opacity) : _preferences.opacity;
-        if ([item isKindOfClass:AKGamepadButton.class]) {
+        if ([item isKindOfClass:AKGamepadButton.class] || item == _hudRightStick) {
             item.layer.borderWidth = 1;
             item.layer.borderColor = (_editing ? UIColor.systemYellowColor : AKPhotoBorder(0.45)).CGColor;
         } else {
-            item.layer.borderWidth = _editing && item != _hudRightStick ? 1 : 0;
+            item.layer.borderWidth = _editing ? 1 : 0;
             item.layer.borderColor = (_editing ? UIColor.systemYellowColor : AKPhotoBorder(0.45)).CGColor;
         }
     }
@@ -496,6 +487,7 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     _hudRightStick.enabled = !self.configuring && _simple;
     _rightStick.enabled = !self.configuring && !_simple;
     _editPill.hidden = !(_editing || _mobileEditing);
+    _editDefault.hidden = _editCancel.hidden = _editDone.hidden = _editPill.hidden;
     _editDone.accessibilityIdentifier = _mobileEditing ? @"wolkara.mobile.done" : @"wolkaraforever.layout.done";
     _editAbilitiesButton.hidden = !_editing || _mobileEditing;
     _hint.hidden = !_editing;
@@ -589,6 +581,10 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
 
     CGFloat pillWidth = MIN(264, MAX(180, safe.size.width - 24));
     _editPill.frame = CGRectMake(CGRectGetMidX(safe) - pillWidth / 2, CGRectGetMaxY(safe) - 50, pillWidth, 44);
+    CGFloat buttonWidth = (pillWidth - 32) / 3.0;
+    _editDefault.frame = CGRectMake(10, 0, buttonWidth, 44);
+    _editCancel.frame = CGRectMake(16 + buttonWidth, 0, buttonWidth, 44);
+    _editDone.frame = CGRectMake(22 + buttonWidth * 2, 0, buttonWidth, 44);
     _editAbilitiesButton.frame = CGRectMake(CGRectGetMidX(safe) - 86, CGRectGetMinY(_editPill.frame) - 42, 172, 34);
     _hint.frame = CGRectMake(CGRectGetMidX(safe) - 160, CGRectGetMinY(safe) + 8, 320, 22);
 
