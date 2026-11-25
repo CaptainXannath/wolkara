@@ -58,7 +58,9 @@ static NSString *ValidatedChoice(id value, NSArray<NSString *> *allowed, NSStrin
         _interactBinding = ValidatedChoice(values[@"interactBinding"], [self.class allowedInteractBindings], @"F");
         _jumpBinding = ValidatedChoice(values[@"jumpBinding"], [self.class allowedJumpBindings], @"Space");
         self.cameraRightDrag = Number(values[@"cameraRightDrag"], 1) != 0;
+        self.cameraSensitivity = Number(values[@"cameraSensitivity"], 1.0);
         self.leftStickWASD = Number(values[@"leftStickWASD"], 0) != 0;
+        self.autoHideExternalInput = Number(values[@"autoHideExternalInput"], 1) != 0;
         self.showHudTarget = Number(values[@"showHudTarget"], 1) != 0;
         self.showHudInteract = Number(values[@"showHudInteract"], 1) != 0;
         self.showHudJump = Number(values[@"showHudJump"], 1) != 0;
@@ -81,6 +83,7 @@ static NSString *ValidatedChoice(id value, NSArray<NSString *> *allowed, NSStrin
 - (void)setOpacity:(CGFloat)value { _opacity = Clamp(value, 0.2, 1, 0.8); }
 - (void)setRearScale:(CGFloat)value { _rearScale = Clamp(value, 0.8, 1.5, 1); }
 - (void)setFrontScale:(CGFloat)value { _frontScale = Clamp(value, 0.65, 1.4, 1); }
+- (void)setCameraSensitivity:(CGFloat)value { _cameraSensitivity = Clamp(value, 0.25, 3.0, 1.0); }
 
 - (void)setTargetBinding:(NSString *)value {
     _targetBinding = ValidatedChoice(value, [self.class allowedTargetBindings], @"Tab");
@@ -111,6 +114,29 @@ static NSString *ValidatedChoice(id value, NSArray<NSString *> *allowed, NSStrin
     _positions[item] = @[@(Clamp(x, 0, 1, 0)), @(Clamp(y, 0, 1, 0))];
 }
 
+- (NSDictionary *)positionsSnapshot {
+    NSMutableDictionary *copy = [NSMutableDictionary dictionaryWithCapacity:_positions.count];
+    for (NSString *key in _positions) copy[key] = [_positions[key] copy];
+    return copy;
+}
+
+- (void)restorePositions:(NSDictionary *)snapshot {
+    [_positions removeAllObjects];
+    if (![snapshot isKindOfClass:NSDictionary.class]) return;
+    for (NSString *key in snapshot) {
+        id point = snapshot[key];
+        if ([key isKindOfClass:NSString.class] && [point isKindOfClass:NSArray.class] && [point count] == 2) {
+            CGFloat x = Number(point[0], NAN), y = Number(point[1], NAN);
+            if (isfinite(x) && isfinite(y)) _positions[key] = @[@(Clamp(x, 0, 1, 0)), @(Clamp(y, 0, 1, 0))];
+        }
+    }
+}
+
+- (void)resetPositions {
+    [_positions removeAllObjects];
+    [self save];
+}
+
 - (void)save {
     [_defaults setObject:@{
         @"opacity": @(_opacity),
@@ -123,7 +149,9 @@ static NSString *ValidatedChoice(id value, NSArray<NSString *> *allowed, NSStrin
         @"interactBinding": _interactBinding ?: @"F",
         @"jumpBinding": _jumpBinding ?: @"Space",
         @"cameraRightDrag": @(_cameraRightDrag),
+        @"cameraSensitivity": @(_cameraSensitivity),
         @"leftStickWASD": @(_leftStickWASD),
+        @"autoHideExternalInput": @(_autoHideExternalInput),
         @"showHudTarget": @(_showHudTarget),
         @"showHudInteract": @(_showHudInteract),
         @"showHudJump": @(_showHudJump),
@@ -144,7 +172,9 @@ static NSString *ValidatedChoice(id value, NSArray<NSString *> *allowed, NSStrin
     _interactBinding = @"F";
     _jumpBinding = @"Space";
     self.cameraRightDrag = YES;
+    self.cameraSensitivity = 1.0;
     self.leftStickWASD = NO;
+    self.autoHideExternalInput = YES;
     self.showHudTarget = YES;
     self.showHudInteract = YES;
     self.showHudJump = YES;

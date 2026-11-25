@@ -6,6 +6,7 @@
 #import "TouchStickButtons.h"
 #import "TouchActionInput.h"
 #import "TouchActionOverlay.h"
+#include <TargetConditionals.h>
 #include <math.h>
 #import <UIKit/UIGestureRecognizerSubclass.h>
 
@@ -210,95 +211,17 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
 - (void)reset { [self updatePosition:CGPointZero]; }
 @end
 
-@interface AKCameraPadView : UIView
-@property(nonatomic) BOOL editing;
-@property(nonatomic, copy) BOOL (^beginDrag)(UITouch *touch, CGPoint origin);
-@property(nonatomic, copy) void (^moveDrag)(UITouch *touch);
-@property(nonatomic, copy) void (^endDrag)(UITouch *touch, BOOL cancelled);
-- (void)cancelPendingTouch;
-@end
-
-@implementation AKCameraPadView {
-    UILabel *_titleLabel;
-    __weak UITouch *_activeTouch;
-    BOOL _forwarded;
-}
-
-- (instancetype)initWithFrame:(CGRect)frame {
-    if ((self = [super initWithFrame:frame])) {
-        self.multipleTouchEnabled = NO;
-        self.backgroundColor = AKPhotoFill(0.55);
-        self.layer.cornerRadius = 22;
-        self.layer.borderWidth = 1;
-        self.layer.borderColor = AKPhotoBorder(0.45).CGColor;
-        _titleLabel = [UILabel new];
-        _titleLabel.text = @"Camera";
-        _titleLabel.textColor = AKPhotoText();
-        _titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightMedium];
-        _titleLabel.textAlignment = NSTextAlignmentCenter;
-        _titleLabel.userInteractionEnabled = NO;
-        [self addSubview:_titleLabel];
-        self.isAccessibilityElement = YES;
-        self.accessibilityLabel = @"Camera";
-        self.accessibilityIdentifier = @"wolkara.hud.camera";
-    }
-    return self;
-}
-
-- (void)layoutSubviews {
-    [super layoutSubviews];
-    _titleLabel.frame = self.bounds;
-}
-
-- (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-    (void)event;
-    if (self.editing || _activeTouch) return;
-    UITouch *touch = touches.anyObject;
-    if (!touch) return;
-    _activeTouch = touch;
-    self.backgroundColor = AKPhotoPressed();
-    _forwarded = self.beginDrag && self.beginDrag(touch, [touch locationInView:self]);
-}
-
-- (void)touchesMoved:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-    (void)event;
-    if (!_activeTouch || ![touches containsObject:_activeTouch]) return;
-    if (_forwarded && self.moveDrag) self.moveDrag(_activeTouch);
-}
-
-- (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-    (void)event;
-    if (!_activeTouch || ![touches containsObject:_activeTouch]) return;
-    if (_forwarded && self.endDrag) self.endDrag(_activeTouch, NO);
-    _activeTouch = nil;
-    _forwarded = NO;
-    self.backgroundColor = AKPhotoFill(0.55);
-}
-
-- (void)touchesCancelled:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-    (void)event;
-    if (!_activeTouch || ![touches containsObject:_activeTouch]) return;
-    [self cancelPendingTouch];
-}
-
-- (void)cancelPendingTouch {
-    if (_forwarded && _activeTouch && self.endDrag) self.endDrag(_activeTouch, YES);
-    _activeTouch = nil;
-    _forwarded = NO;
-    self.backgroundColor = AKPhotoFill(0.55);
-}
-@end
-
 @interface AKGamepadOverlay : UIView <UIGestureRecognizerDelegate>
 @property(nonatomic, readonly) NSDictionary<NSString *, AKGamepadButton *> *buttons;
 @property(nonatomic, readonly) NSDictionary<NSString *, AKGamepadButton *> *hudButtons;
-@property(nonatomic, readonly) AKCameraPadView *cameraPad;
+@property(nonatomic, readonly) AKGamepadStick *hudRightStick;
 @property(nonatomic, readonly) AKGamepadStick *leftStick;
 @property(nonatomic, readonly) AKGamepadStick *rightStick;
 @property(nonatomic, readonly) AKGamepadLayout *preferences;
 @property(nonatomic, readonly) AKTouchActionOverlay *actions;
 @property(nonatomic) BOOL controlsVisible;
 @property(nonatomic) BOOL simple;
+@property(nonatomic) BOOL externalInputActive;
 @property(nonatomic, readonly) BOOL configuring;
 @property(nonatomic, readonly) BOOL editing;
 @property(nonatomic, readonly) BOOL mobileEditing;
@@ -306,6 +229,8 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
 @property(nonatomic, copy) void (^mobileCommand)(AKMobileCommand);
 - (void)reset;
 - (void)toggleSettings;
+- (void)beginLayoutEditing;
+- (void)beginMobileEditing;
 - (void)finishConfiguration;
 - (BOOL)configurationContainsPoint:(CGPoint)point inView:(UIView *)view;
 @end
@@ -313,10 +238,11 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
 @implementation AKGamepadOverlay {
     NSDictionary<NSString *, UIView *> *_items;
     NSMutableDictionary<NSString *, NSValue *> *_dragOrigins;
-    UIView *_settings;
-    UIButton *_editDone, *_editAbilitiesButton, *_mobileDone;
+    NSDictionary *_preEditPositions;
+    UIView *_settings, *_editPill;
+    UIButton *_editDefault, *_editCancel, *_editDone, *_editAbilitiesButton;
     UILabel *_hint;
-    UISwitch *_editSwitch, *_hapticsSwitch, *_swapShouldersSwitch, *_performanceSwitch, *_leftStickWasdSwitch, *_mobileSwitch;
+    UISwitch *_editSwitch, *_hapticsSwitch, *_swapShouldersSwitch, *_performanceSwitch, *_leftStickWasdSwitch, *_mobileSwitch, *_autoHideSwitch;
     UIButton *_targetButton, *_interactButton, *_jumpButton, *_cameraDragButton, *_hudVisibilityButton, *_arrangeMobileButton;
     BOOL _mobileEditing;
     UIStackView *_settingsColumns;
@@ -405,8 +331,11 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
         [self addSubview:jumpBtn];
 
         _hudButtons = @{@"hud.target": targetBtn, @"hud.interact": interactBtn, @"hud.jump": jumpBtn};
-        _cameraPad = [AKCameraPadView new];
-        [self addSubview:_cameraPad];
+        _hudRightStick = [AKGamepadStick new];
+        _hudRightStick.element = @"hud.camera";
+        _hudRightStick.accessibilityLabel = @"Right joystick";
+        _hudRightStick.accessibilityIdentifier = @"wolkara.hud.camera";
+        [self addSubview:_hudRightStick];
 
         _leftStick = [AKGamepadStick new];
         _rightStick = [AKGamepadStick new];
@@ -430,7 +359,7 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
             @"hud.target": targetBtn,
             @"hud.interact": interactBtn,
             @"hud.jump": jumpBtn,
-            @"hud.camera": _cameraPad,
+            @"hud.camera": _hudRightStick,
         };
         for (NSString *name in _items) {
             UIView *item = _items[name];
@@ -442,20 +371,54 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
             [item addGestureRecognizer:pan];
         }
 
+        _editPill = [UIView new];
+        _editPill.backgroundColor = [UIColor colorWithRed:0.06 green:0.06 blue:0.06 alpha:0.92];
+        _editPill.layer.cornerRadius = 15;
+        _editPill.layer.borderWidth = 1;
+        _editPill.layer.borderColor = AKPhotoBorder(0.55).CGColor;
+        _editPill.accessibilityIdentifier = @"wolkara.edit.pill";
+        [self addSubview:_editPill];
+
+        _editDefault = [UIButton buttonWithType:UIButtonTypeSystem];
+        [_editDefault setTitle:@"Default" forState:UIControlStateNormal];
+        [_editDefault setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+        _editDefault.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
+        _editDefault.accessibilityIdentifier = @"wolkara.edit.default";
+        [_editDefault addTarget:self action:@selector(editDefaultTapped) forControlEvents:UIControlEventTouchUpInside];
+
+        _editCancel = [UIButton buttonWithType:UIButtonTypeSystem];
+        [_editCancel setTitle:@"Cancel" forState:UIControlStateNormal];
+        [_editCancel setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+        _editCancel.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
+        _editCancel.accessibilityIdentifier = @"wolkara.edit.cancel";
+        [_editCancel addTarget:self action:@selector(editCancelTapped) forControlEvents:UIControlEventTouchUpInside];
+
         _editDone = [UIButton buttonWithType:UIButtonTypeSystem];
-        [_editDone setTitle:AKHostLocalized(@"touch.gamepad.doneEditing") forState:UIControlStateNormal];
-        _editDone.backgroundColor = [UIColor colorWithWhite:0.12 alpha:0.96];
-        _editDone.tintColor = UIColor.systemYellowColor;
-        _editDone.layer.cornerRadius = 14;
+        [_editDone setTitle:@"Save" forState:UIControlStateNormal];
+        [_editDone setTitleColor:AKPhotoBorder(1.0) forState:UIControlStateNormal];
+        _editDone.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightBold];
         _editDone.accessibilityIdentifier = @"wolkaraforever.layout.done";
         [_editDone addTarget:self action:@selector(finishConfiguration) forControlEvents:UIControlEventTouchUpInside];
-        [self addSubview:_editDone];
+
+        UIStackView *pillRow = [[UIStackView alloc] initWithArrangedSubviews:@[_editDefault, _editCancel, _editDone]];
+        pillRow.axis = UILayoutConstraintAxisHorizontal;
+        pillRow.distribution = UIStackViewDistributionFillEqually;
+        pillRow.spacing = 6;
+        pillRow.translatesAutoresizingMaskIntoConstraints = NO;
+        [_editPill addSubview:pillRow];
+        [NSLayoutConstraint activateConstraints:@[
+            [pillRow.leadingAnchor constraintEqualToAnchor:_editPill.leadingAnchor constant:10],
+            [pillRow.trailingAnchor constraintEqualToAnchor:_editPill.trailingAnchor constant:-10],
+            [pillRow.topAnchor constraintEqualToAnchor:_editPill.topAnchor],
+            [pillRow.bottomAnchor constraintEqualToAnchor:_editPill.bottomAnchor],
+        ]];
 
         _editAbilitiesButton = [UIButton buttonWithType:UIButtonTypeSystem];
-        [_editAbilitiesButton setTitle:@"Edit Buttons…" forState:UIControlStateNormal];
-        _editAbilitiesButton.backgroundColor = [UIColor colorWithWhite:0.12 alpha:0.96];
+        [_editAbilitiesButton setTitle:@"Custom Key Buttons…" forState:UIControlStateNormal];
+        _editAbilitiesButton.titleLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightSemibold];
+        _editAbilitiesButton.backgroundColor = [UIColor colorWithWhite:0.12 alpha:0.94];
         _editAbilitiesButton.tintColor = [UIColor colorWithRed:0.92 green:0.80 blue:0.50 alpha:1];
-        _editAbilitiesButton.layer.cornerRadius = 14;
+        _editAbilitiesButton.layer.cornerRadius = 12;
         _editAbilitiesButton.accessibilityIdentifier = @"wolkara.layout.editAbilities";
         [_editAbilitiesButton addTarget:self action:@selector(editAbilities) forControlEvents:UIControlEventTouchUpInside];
         [self addSubview:_editAbilitiesButton];
@@ -468,16 +431,6 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
         _hint.userInteractionEnabled = NO;
         [self addSubview:_hint];
 
-        _mobileDone = [UIButton buttonWithType:UIButtonTypeSystem];
-        [_mobileDone setTitle:@"Done & save" forState:UIControlStateNormal];
-        _mobileDone.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightBold];
-        _mobileDone.backgroundColor = [UIColor colorWithWhite:0.12 alpha:0.96];
-        _mobileDone.tintColor = UIColor.systemYellowColor;
-        _mobileDone.layer.cornerRadius = 14;
-        _mobileDone.accessibilityIdentifier = @"wolkara.mobile.done";
-        [_mobileDone addTarget:self action:@selector(finishConfiguration) forControlEvents:UIControlEventTouchUpInside];
-        [self addSubview:_mobileDone];
-
         [self updateAppearance];
     }
     return self;
@@ -487,11 +440,11 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
 
 - (BOOL)configurationContainsPoint:(CGPoint)point inView:(UIView *)view {
     if ([_actions editorContainsPoint:point inView:view]) return YES;
-    if (_mobileEditing && _mobileDone && !_mobileDone.hidden) {
-        return CGRectContainsPoint(_mobileDone.bounds, [_mobileDone convertPoint:point fromView:view]);
+    if (_mobileEditing && _editPill && !_editPill.hidden) {
+        return CGRectContainsPoint(_editPill.bounds, [_editPill convertPoint:point fromView:view]);
     }
     if (_editing) {
-        for (UIView *v in @[_editDone, _editAbilitiesButton]) {
+        for (UIView *v in @[_editPill, _editAbilitiesButton]) {
             if (!v.hidden && CGRectContainsPoint(v.bounds, [v convertPoint:point fromView:view])) return YES;
         }
         return NO;
@@ -501,11 +454,13 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
 
 - (void)setControlsVisible:(BOOL)visible { _controlsVisible = visible; [self updateAppearance]; }
 - (void)setSimple:(BOOL)simple { _simple = simple; [self updateAppearance]; }
+- (void)setExternalInputActive:(BOOL)externalInputActive { _externalInputActive = externalInputActive; [self updateAppearance]; }
 
 - (void)updateAppearance {
-    self.hidden = !_controlsVisible && !self.configuring;
-    _actions.active = _controlsVisible && !self.configuring && (!AKMobileInterfaceEnabled() || [NSUserDefaults.standardUserDefaults boolForKey:@"WolkaraTouchAbilitiesExplicit"]);
-    BOOL showControls = (_controlsVisible || self.configuring) && !_mobileEditing;
+    self.hidden = _externalInputActive || (!_controlsVisible && !self.configuring);
+    _actions.active = !_externalInputActive && _controlsVisible && !self.configuring &&
+        (!AKMobileInterfaceEnabled() || [NSUserDefaults.standardUserDefaults boolForKey:@"WolkaraTouchAbilitiesExplicit"]);
+    BOOL showControls = !_externalInputActive && (_controlsVisible || self.configuring) && !_mobileEditing;
     NSArray<NSString *> *fullOnlyItems = @[@"right", @"LB", @"LT", @"RT", @"RB", @"menu"];
     NSArray<NSString *> *simpleOnlyItems = @[@"hud.target", @"hud.interact", @"hud.jump", @"hud.camera"];
     for (NSString *name in _items) {
@@ -519,17 +474,16 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
         }
         item.hidden = omitted || !showControls;
         item.alpha = _editing ? MAX(0.5, _preferences.opacity) : _preferences.opacity;
-        if ([item isKindOfClass:AKGamepadButton.class] || item == _cameraPad) {
+        if ([item isKindOfClass:AKGamepadButton.class]) {
             item.layer.borderWidth = 1;
             item.layer.borderColor = (_editing ? UIColor.systemYellowColor : AKPhotoBorder(0.45)).CGColor;
         } else {
-            item.layer.borderWidth = _editing ? 1 : 0;
+            item.layer.borderWidth = _editing && item != _hudRightStick ? 1 : 0;
             item.layer.borderColor = (_editing ? UIColor.systemYellowColor : AKPhotoBorder(0.45)).CGColor;
         }
     }
     _leftStick.layer.borderColor = (_editing ? UIColor.systemYellowColor : AKPhotoBorder(0.45)).CGColor;
-    // An enabled UIControl is needed for its own pan recognizer to receive
-    // touches. The manager suppresses game input throughout configuration.
+    _hudRightStick.layer.borderColor = (_editing ? UIColor.systemYellowColor : AKPhotoBorder(0.45)).CGColor;
     for (NSString *name in _buttons) {
         AKGamepadButton *button = _buttons[name];
         if ([name hasPrefix:@"dpad."]) button.hidden = _simple;
@@ -538,18 +492,20 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     for (AKGamepadButton *button in _hudButtons.allValues) {
         button.enabled = (!self.configuring || _editing) && !button.hidden;
     }
-    _cameraPad.editing = _editing || self.configuring;
     _leftStick.enabled = !self.configuring;
+    _hudRightStick.enabled = !self.configuring && _simple;
     _rightStick.enabled = !self.configuring && !_simple;
-    _editDone.hidden = _editAbilitiesButton.hidden = _hint.hidden = !_editing;
-    _mobileDone.hidden = !_mobileEditing;
+    _editPill.hidden = !(_editing || _mobileEditing);
+    _editDone.accessibilityIdentifier = _mobileEditing ? @"wolkara.mobile.done" : @"wolkaraforever.layout.done";
+    _editAbilitiesButton.hidden = !_editing || _mobileEditing;
+    _hint.hidden = !_editing;
     _editGrid.hidden = _editAxes.hidden = !_editing;
     [self setNeedsLayout];
 }
 
 - (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
     UIView *hit = [super hitTest:point withEvent:event];
-    if (_mobileEditing) return (hit == _mobileDone || [hit isDescendantOfView:_mobileDone]) ? hit : nil;
+    if (_mobileEditing) return (hit == _editPill || [hit isDescendantOfView:_editPill]) ? hit : nil;
     if (self.configuring) return hit; // Editing/settings must never click the game.
     if (hit == self || hit == _items[@"left"] || hit == _items[@"right"]) return nil;
     return hit;
@@ -594,19 +550,20 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
            baseSize:CGSizeMake(104, 104) safe:safe];
         _leftStick.frame = CGRectMake(0, 0, 104, 104);
 
+        [self place:@"hud.camera" frame:CGRectMake(right - stickSide - 6, bottom - stickSide - 4, stickSide, stickSide)
+           baseSize:CGSizeMake(104, 104) safe:safe];
         CGFloat s = _preferences.rearScale;
         CGFloat fit = MIN(1.0, safe.size.width / 700.0);
         CGFloat scale = s * fit;
-        CGFloat camW = 168 * scale, camH = 74 * scale;
         CGFloat jumpSide = 60 * scale;
         CGFloat pillW = 84 * scale, pillH = 36 * scale;
-        [self place:@"hud.camera" frame:CGRectMake(right - camW, bottom - camH, camW, camH)
-           baseSize:CGSizeMake(168, 74) safe:safe];
-        [self place:@"hud.jump" frame:CGRectMake(right - camW - 14 - jumpSide, bottom - jumpSide - 4, jumpSide, jumpSide)
+        CGFloat jumpX = right - stickSide - 18 - jumpSide;
+        CGFloat auxX = right - stickSide - 18 - MAX(jumpSide, pillW);
+        [self place:@"hud.jump" frame:CGRectMake(jumpX, bottom - jumpSide - 4, jumpSide, jumpSide)
            baseSize:CGSizeMake(60, 60) safe:safe];
-        [self place:@"hud.interact" frame:CGRectMake(right - camW - 14 - pillW, bottom - jumpSide - 12 - pillH, pillW, pillH)
+        [self place:@"hud.interact" frame:CGRectMake(auxX, bottom - jumpSide - 12 - pillH, pillW, pillH)
            baseSize:CGSizeMake(84, 36) safe:safe];
-        [self place:@"hud.target" frame:CGRectMake(right - camW - 14 - pillW, bottom - jumpSide - 18 - pillH * 2, pillW, pillH)
+        [self place:@"hud.target" frame:CGRectMake(auxX, bottom - jumpSide - 18 - pillH * 2, pillW, pillH)
            baseSize:CGSizeMake(84, 36) safe:safe];
     } else {
         CGFloat side = MAX(44, MIN(216 * _preferences.frontScale, MIN(safe.size.height - 70, safe.size.width / 2 - 12)));
@@ -630,10 +587,10 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
            baseSize:CGSizeMake(44, 44) safe:safe];
     }
 
-    _editDone.frame = CGRectMake(CGRectGetMidX(safe) - 144, CGRectGetMinY(safe) + 96, 136, 40);
-    _editAbilitiesButton.frame = CGRectMake(CGRectGetMidX(safe) + 8, CGRectGetMinY(safe) + 96, 136, 40);
-    _mobileDone.frame = CGRectMake(CGRectGetMidX(safe) - 70, CGRectGetMinY(safe) + 60, 140, 40);
-    _hint.frame = CGRectMake(CGRectGetMidX(safe) - 160, CGRectGetMinY(safe) + 140, 320, 22);
+    CGFloat pillWidth = MIN(264, MAX(180, safe.size.width - 24));
+    _editPill.frame = CGRectMake(CGRectGetMidX(safe) - pillWidth / 2, CGRectGetMaxY(safe) - 50, pillWidth, 44);
+    _editAbilitiesButton.frame = CGRectMake(CGRectGetMidX(safe) - 86, CGRectGetMinY(_editPill.frame) - 42, 172, 34);
+    _hint.frame = CGRectMake(CGRectGetMidX(safe) - 160, CGRectGetMinY(safe) + 8, 320, 22);
 
     if (_settings) {
         BOOL wide = safe.size.width >= 620;
@@ -764,7 +721,7 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
         if (self) self->_preferences.jumpBinding = c;
     }];
     NSString *camLabel = _preferences.cameraRightDrag ? @"Right Drag" : @"Left Drag";
-    [_cameraDragButton setTitle:[NSString stringWithFormat:@"Camera: %@ ▾", camLabel] forState:UIControlStateNormal];
+    [_cameraDragButton setTitle:[NSString stringWithFormat:@"Right Stick: %@ ▾", camLabel] forState:UIControlStateNormal];
     _cameraDragButton.menu = [UIMenu menuWithChildren:@[
         [UIAction actionWithTitle:@"Right Drag (Turn)" image:nil identifier:nil handler:^(__kindof UIAction *a) {
             (void)a;
@@ -803,7 +760,7 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
         visAction(@"Target", _preferences.showHudTarget, ^(AKGamepadOverlay *s) { s->_preferences.showHudTarget = !s->_preferences.showHudTarget; }),
         visAction(@"Interact", _preferences.showHudInteract, ^(AKGamepadOverlay *s) { s->_preferences.showHudInteract = !s->_preferences.showHudInteract; }),
         visAction(@"Jump", _preferences.showHudJump, ^(AKGamepadOverlay *s) { s->_preferences.showHudJump = !s->_preferences.showHudJump; }),
-        visAction(@"Camera", _preferences.showHudCamera, ^(AKGamepadOverlay *s) { s->_preferences.showHudCamera = !s->_preferences.showHudCamera; }),
+        visAction(@"Right Stick", _preferences.showHudCamera, ^(AKGamepadOverlay *s) { s->_preferences.showHudCamera = !s->_preferences.showHudCamera; }),
     ]];
 }
 
@@ -963,6 +920,16 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     wasdRow.alignment = UIStackViewAlignmentCenter;
     [options addArrangedSubview:wasdRow];
 
+    _autoHideSwitch = [UISwitch new];
+    _autoHideSwitch.on = _preferences.autoHideExternalInput;
+    _autoHideSwitch.accessibilityLabel = @"Hide on Controller or KB/Mouse";
+    _autoHideSwitch.accessibilityIdentifier = @"wolkara.controls.autoHideExternal";
+    [_autoHideSwitch addTarget:self action:@selector(autoHideExternalChanged:) forControlEvents:UIControlEventValueChanged];
+    UIStackView *autoHideRow = [[UIStackView alloc] initWithArrangedSubviews:@[[self label:@"Auto-hide on Controller / KB+M"], _autoHideSwitch]];
+    autoHideRow.axis = UILayoutConstraintAxisHorizontal;
+    autoHideRow.alignment = UIStackViewAlignmentCenter;
+    [options addArrangedSubview:autoHideRow];
+
     UIButton *reset = [UIButton buttonWithType:UIButtonTypeSystem];
     [reset setTitle:AKHostLocalized(@"touch.settings.reset") forState:UIControlStateNormal];
     reset.accessibilityIdentifier = @"wolkaraforever.controls.reset";
@@ -1038,6 +1005,12 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     if (self.configurationChanged) self.configurationChanged();
 }
 
+- (void)autoHideExternalChanged:(UISwitch *)sender {
+    _preferences.autoHideExternalInput = sender.on;
+    [_preferences save];
+    if (self.configurationChanged) self.configurationChanged();
+}
+
 - (void)clearSettingsViews {
     [_settings removeFromSuperview];
     _settings = nil;
@@ -1048,6 +1021,7 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     _swapShouldersSwitch = nil;
     _performanceSwitch = nil;
     _leftStickWasdSwitch = nil;
+    _autoHideSwitch = nil;
     _settingsColumns = nil;
     _targetButton = nil;
     _interactButton = nil;
@@ -1058,13 +1032,19 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     _arrangeMobileButton = nil;
 }
 
-- (void)beginEditing:(UISwitch *)sender {
-    if (!sender.on) return;
+- (void)beginLayoutEditing {
     [self reset];
+    _preEditPositions = [_preferences positionsSnapshot];
+    _mobileEditing = NO;
     _editing = YES;
     [self clearSettingsViews];
     [self updateAppearance];
     if (self.configurationChanged) self.configurationChanged();
+}
+
+- (void)beginEditing:(UISwitch *)sender {
+    if (!sender.on) return;
+    [self beginLayoutEditing];
 }
 
 - (void)editAbilities {
@@ -1083,6 +1063,7 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     _swapShouldersSwitch.on = !_preferences.swapShoulders;
     _performanceSwitch.on = _preferences.performanceOverlayEnabled;
     _leftStickWasdSwitch.on = _preferences.leftStickWASD;
+    _autoHideSwitch.on = _preferences.autoHideExternalInput;
     [self rebuildHudBindingMenus];
     [self updateValues];
     [self updateAppearance];
@@ -1097,13 +1078,45 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
 }
 
 - (void)beginMobileEditing {
-    if (![NSUserDefaults.standardUserDefaults boolForKey:AKMobileEnabledKey]) return;
+    if (![NSUserDefaults.standardUserDefaults boolForKey:AKMobileAvailableKey]) return;
+    if (![NSUserDefaults.standardUserDefaults boolForKey:AKMobileEnabledKey]) {
+        [NSUserDefaults.standardUserDefaults setBool:YES forKey:AKMobileEnabledKey];
+        if (self.mobileCommand) self.mobileCommand(AKMobileEnable);
+    }
     [self reset];
     _editing = NO;
     _mobileEditing = YES;
     [self clearSettingsViews];
-    [self bringSubviewToFront:_mobileDone];
+    [self bringSubviewToFront:_editPill];
     if (self.mobileCommand) self.mobileCommand(AKMobileEdit);
+    [self updateAppearance];
+    if (self.configurationChanged) self.configurationChanged();
+}
+
+- (void)editDefaultTapped {
+    if (_mobileEditing) {
+        if (self.mobileCommand) self.mobileCommand(AKMobileReset);
+    } else if (_editing) {
+        [_preferences resetPositions];
+        [self updateAppearance];
+    }
+}
+
+- (void)editCancelTapped {
+    [self reset];
+    BOOL wasMobileEditing = _mobileEditing;
+    if (wasMobileEditing) {
+        _mobileEditing = NO;
+        [self clearSettingsViews];
+        if (self.mobileCommand) self.mobileCommand(AKMobileCancel);
+    } else if (_editing) {
+        [_preferences restorePositions:_preEditPositions];
+        [_preferences save];
+        _preEditPositions = nil;
+        _editing = NO;
+        [_dragOrigins removeAllObjects];
+        [self clearSettingsViews];
+    }
     [self updateAppearance];
     if (self.configurationChanged) self.configurationChanged();
 }
@@ -1112,6 +1125,7 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     [_actions finishEditing];
     [self reset];
     [_preferences save];
+    _preEditPositions = nil;
     BOOL wasMobileEditing = _mobileEditing;
     _editing = NO;
     _mobileEditing = NO;
@@ -1124,10 +1138,10 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
 
 - (void)reset {
     [_actions releaseTouches];
-    [_cameraPad cancelPendingTouch];
     for (AKGamepadButton *button in _buttons.allValues) [button releaseInput];
     for (AKGamepadButton *button in _hudButtons.allValues) [button releaseInput];
     [_leftStick reset];
+    [_hudRightStick reset];
     [_rightStick reset];
 }
 @end
@@ -1156,9 +1170,11 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     NSMutableArray<AKPendingKeyRelease *> *_pendingKeyReleases;
     NSMutableDictionary<NSString *, AKTouchAction *> *_heldCustomActions;
     NSMutableSet<NSNumber *> *_heldWasdKeys;
-    UITapGestureRecognizer *_leftDoubleTap, *_rightDoubleTap, *_areaDoubleTap;
-    NSTimer *_leftClickTimer, *_rightClickTimer;
+    UITapGestureRecognizer *_leftDoubleTap, *_rightDoubleTap, *_hudRightDoubleTap, *_areaDoubleTap;
+    NSTimer *_leftClickTimer, *_rightClickTimer, *_hudCameraTimer;
+    NSTimeInterval _hudCameraLastTick;
     BOOL _active, _connecting, _cancelConnect, _failed, _invalidated;
+    BOOL _hudCameraActive, _externalInputActive, _mobileSuspendedForExternal;
 }
 
 - (instancetype)initWithHostView:(UIView *)host {
@@ -1237,44 +1253,24 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
             if ([host conformsToProtocol:@protocol(AKTouchDragHost)]) [host ak_endTouchDrag:touch cancelled:cancelled];
         };
 
-        _overlay.cameraPad.beginDrag = ^BOOL(UITouch *touch, CGPoint origin) {
-            AKTouchGamepad *self = weakSelf;
-            if (!self) return NO;
-            UIView<AKTouchDragHost> *host = (id)self->_host;
-            if (!self->_visible || self->_overlay.configuring || ![host conformsToProtocol:@protocol(AKTouchDragHost)]) return NO;
-            CGPoint hostOrigin = [self->_overlay.cameraPad convertPoint:origin toView:host];
-            if ([host respondsToSelector:@selector(ak_beginCameraDrag:origin:rightButton:)]) {
-                return [host ak_beginCameraDrag:touch origin:hostOrigin rightButton:self->_overlay.preferences.cameraRightDrag];
-            }
-            return [host ak_beginTouchDrag:touch origin:hostOrigin];
-        };
-        _overlay.cameraPad.moveDrag = ^(UITouch *touch) {
-            AKTouchGamepad *self = weakSelf;
-            if (!self) return;
-            UIView<AKTouchDragHost> *host = (id)self->_host;
-            if ([host conformsToProtocol:@protocol(AKTouchDragHost)]) [host ak_moveTouchDrag:touch];
-        };
-        _overlay.cameraPad.endDrag = ^(UITouch *touch, BOOL cancelled) {
-            AKTouchGamepad *self = weakSelf;
-            if (!self) return;
-            UIView<AKTouchDragHost> *host = (id)self->_host;
-            if ([host conformsToProtocol:@protocol(AKTouchDragHost)]) [host ak_endTouchDrag:touch cancelled:cancelled];
-        };
-
         _leftDoubleTap = [self installDoubleTapOn:_overlay.leftStick selector:@selector(leftStickDoubleTapped:) background:NO];
         _rightDoubleTap = [self installDoubleTapOn:_overlay.rightStick selector:@selector(rightStickDoubleTapped:) background:NO];
+        _hudRightDoubleTap = [self installDoubleTapOn:_overlay.hudRightStick selector:@selector(rightStickDoubleTapped:) background:NO];
         _areaDoubleTap = [self installDoubleTapOn:host selector:@selector(rightStickDoubleTapped:) background:YES];
         _overlay.leftStick.accessibilityHint = AKHostLocalized(@"touch.gamepad.leftStick.hint");
+        _overlay.hudRightStick.accessibilityHint = AKHostLocalized(@"touch.gamepad.rightStick.hint");
         _overlay.rightStick.accessibilityHint = AKHostLocalized(@"touch.gamepad.rightStick.hint");
         _overlay.configurationChanged = ^{
             AKTouchGamepad *self = weakSelf;
             if (!self) return;
             if (self->_overlay.configuring) {
+                [self stopHudCameraStickCancelled:YES];
                 [self cancelStickClicks];
                 [self releaseAllHudBindings];
                 [self releaseAllPendingKeyboardActions];
                 [self->_actionInput releaseAll];
             }
+            [self syncExternalInputState];
             [self updateHaptics];
             if (self.visibilityChanged) self.visibilityChanged(self.visible);
         };
@@ -1291,10 +1287,13 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
             [button addTarget:self action:@selector(hudButtonChanged:) forControlEvents:UIControlEventValueChanged];
         }
         [_overlay.leftStick addTarget:self action:@selector(stickChanged:) forControlEvents:UIControlEventValueChanged];
+        [_overlay.hudRightStick addTarget:self action:@selector(stickChanged:) forControlEvents:UIControlEventValueChanged];
         [_overlay.rightStick addTarget:self action:@selector(stickChanged:) forControlEvents:UIControlEventValueChanged];
         _active = UIApplication.sharedApplication.applicationState == UIApplicationStateActive;
         NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
         for (NSString *name in @[GCControllerDidConnectNotification, GCControllerDidDisconnectNotification,
+                                 GCMouseDidConnectNotification, GCMouseDidDisconnectNotification,
+                                 GCKeyboardDidConnectNotification, GCKeyboardDidDisconnectNotification,
                                  UIWindowDidBecomeKeyNotification, UIWindowDidResignKeyNotification,
                                  UIWindowDidBecomeVisibleNotification, UIWindowDidBecomeHiddenNotification])
             [center addObserver:self selector:@selector(environmentChanged:) name:name object:nil];
@@ -1307,6 +1306,7 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
 - (BOOL)editing { return _overlay.editing || _overlay.actions.editing; }
 - (BOOL)editingAbilities { return _overlay.actions.editing; }
 - (BOOL)mobileEditing { return _overlay.mobileEditing; }
+- (BOOL)externalInputActive { return _externalInputActive; }
 
 - (BOOL)configurationContainsPoint:(CGPoint)point inView:(UIView *)view {
     return [_overlay configurationContainsPoint:point inView:view];
@@ -1314,12 +1314,28 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
 
 - (AKGamepadLayout *)layout { return _overlay.preferences; }
 - (NSArray<GCController *> *)connectedControllers { return GCController.controllers; }
+- (BOOL)hasPhysicalMouse {
+#if TARGET_OS_SIMULATOR
+    return NO;
+#else
+    return GCMouse.mice.count > 0;
+#endif
+}
+
+- (BOOL)hasPhysicalKeyboard {
+#if TARGET_OS_SIMULATOR
+    return NO;
+#else
+    return GCKeyboard.coalescedKeyboard != nil;
+#endif
+}
 - (AKTouchHaptics *)makeHaptics { return [AKTouchHaptics new]; }
 
 - (void)updateHaptics {
     BOOL input = _visible && !_overlay.configuring;
     _haptics.enabled = input && _overlay.preferences.hapticsEnabled;
     _leftDoubleTap.enabled = _areaDoubleTap.enabled = input;
+    _hudRightDoubleTap.enabled = input && _simple;
     _rightDoubleTap.enabled = input && !_simple;
 }
 
@@ -1345,7 +1361,7 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
         CGPoint point = [touch locationInView:_host];
         return CGRectContainsPoint(safe, point) && point.x >= CGRectGetMidX(safe) && point.y >= CGRectGetMidY(safe);
     }
-    return gesture == _leftDoubleTap || (gesture == _rightDoubleTap && !_simple);
+    return gesture == _leftDoubleTap || (gesture == _hudRightDoubleTap && _simple) || (gesture == _rightDoubleTap && !_simple);
 }
 
 - (void)leftStickDoubleTapped:(UITapGestureRecognizer *)gesture {
@@ -1553,8 +1569,100 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     return NO;
 }
 
+- (BOOL)hasExternalInputDevice {
+    if ([self hasPhysicalController]) return YES;
+    if (!_overlay.preferences.autoHideExternalInput) return NO;
+    return [self hasPhysicalMouse] || [self hasPhysicalKeyboard];
+}
+
+- (void)dispatchMobileCommand:(AKMobileCommand)command {
+    id<AKMobileInterfaceHost> host = (id)_host;
+    if ([host conformsToProtocol:@protocol(AKMobileInterfaceHost)]) {
+        [host ak_mobileCommand:command];
+    }
+}
+
+- (void)syncExternalInputState {
+    BOOL external = [self hasExternalInputDevice];
+    BOOL wasExternal = _externalInputActive;
+    _externalInputActive = external;
+    _overlay.externalInputActive = external;
+    if (external) {
+        if (!wasExternal || (AKMobileInterfaceEnabled() && !_mobileSuspendedForExternal)) {
+            if (AKMobileInterfaceEnabled()) {
+                _mobileSuspendedForExternal = YES;
+                [self dispatchMobileCommand:AKMobileDisable];
+            }
+        }
+    } else if (wasExternal && _mobileSuspendedForExternal) {
+        _mobileSuspendedForExternal = NO;
+        if (AKMobileInterfaceEnabled()) {
+            [self dispatchMobileCommand:AKMobileEnable];
+        }
+    }
+    if (wasExternal != external && self.visibilityChanged) {
+        self.visibilityChanged(_visible);
+    }
+}
+
 - (BOOL)wantsController {
-    return !_invalidated && _enabled && !_keyboardVisible && [self hostIsActive];
+    return !_invalidated && _enabled && !_keyboardVisible && ![self hasExternalInputDevice] && [self hostIsActive];
+}
+
+- (void)stopHudCameraStickCancelled:(BOOL)cancelled {
+    [_hudCameraTimer invalidate];
+    _hudCameraTimer = nil;
+    if (!_hudCameraActive) return;
+    _hudCameraActive = NO;
+    UIView<AKTouchDragHost> *host = (id)_host;
+    if ([host respondsToSelector:@selector(ak_endCameraStickCancelled:)]) {
+        [host ak_endCameraStickCancelled:cancelled];
+    }
+}
+
+- (void)tickHudCameraStick {
+    if (!_hudCameraActive || !_visible || _overlay.configuring || !_simple) {
+        [self stopHudCameraStickCancelled:YES];
+        return;
+    }
+    NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
+    CGFloat dt = MAX(0.004, MIN(0.05, now - _hudCameraLastTick));
+    _hudCameraLastTick = now;
+    CGPoint pos = _overlay.hudRightStick.position;
+    if (CGPointEqualToPoint(pos, CGPointZero)) {
+        [self stopHudCameraStickCancelled:NO];
+        return;
+    }
+    static const CGFloat kCameraPointsPerSecond = 760.0;
+    CGFloat scale = kCameraPointsPerSecond * _overlay.preferences.cameraSensitivity * dt;
+    UIView<AKTouchDragHost> *host = (id)_host;
+    if ([host respondsToSelector:@selector(ak_moveCameraStickDelta:)]) {
+        [host ak_moveCameraStickDelta:CGPointMake(pos.x * scale, -pos.y * scale)];
+    }
+}
+
+- (void)updateHudCameraStick:(CGPoint)position {
+    if (!_visible || _overlay.configuring || !_simple || CGPointEqualToPoint(position, CGPointZero)) {
+        [self stopHudCameraStickCancelled:NO];
+        return;
+    }
+    UIView<AKTouchDragHost> *host = (id)_host;
+    if (![host conformsToProtocol:@protocol(AKTouchDragHost)]) return;
+    if (!_hudCameraActive) {
+        if (![host respondsToSelector:@selector(ak_beginCameraStickRightButton:)]) return;
+        _hudCameraActive = [host ak_beginCameraStickRightButton:_overlay.preferences.cameraRightDrag];
+        if (!_hudCameraActive) return;
+        _hudCameraLastTick = NSProcessInfo.processInfo.systemUptime;
+    }
+    if (!_hudCameraTimer) {
+        __weak AKTouchGamepad *weakSelf = self;
+        _hudCameraTimer = [NSTimer timerWithTimeInterval:(1.0 / 60.0) repeats:YES block:^(NSTimer *timer) {
+            (void)timer;
+            [weakSelf tickHudCameraStick];
+        }];
+        [NSRunLoop.mainRunLoop addTimer:_hudCameraTimer forMode:NSRunLoopCommonModes];
+    }
+    [self tickHudCameraStick];
 }
 
 - (void)setVisible:(BOOL)visible {
@@ -1619,7 +1727,13 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
 }
 
 - (void)stickChanged:(AKGamepadStick *)stick {
-    if (_visible && !_overlay.configuring && (!_simple || stick == _overlay.leftStick)) {
+    if (!_visible || _overlay.configuring) return;
+    if (_simple && stick == _overlay.hudRightStick) {
+        [_haptics stickMoved:stick.position left:NO];
+        [self updateHudCameraStick:stick.position];
+        return;
+    }
+    if (!_simple || stick == _overlay.leftStick) {
         [_haptics stickMoved:stick.position left:stick == _overlay.leftStick];
         if (stick == _overlay.leftStick && _overlay.preferences.leftStickWASD) {
             [self updateWasdForStickPosition:stick.position];
@@ -1633,6 +1747,7 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
 
 - (void)disconnectController {
     GCVirtualController *controller = _virtualController;
+    [self stopHudCameraStickCancelled:YES];
     [self cancelStickClicks];
     [_overlay reset];
     [self releaseAllHudBindings];
@@ -1646,12 +1761,13 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
 
 - (void)refresh {
     NSAssert(NSThread.isMainThread, @"Touch controller lifecycle belongs on the main thread");
-    if ([self hasPhysicalController] && _overlay.configuring) [_overlay finishConfiguration];
+    [self syncExternalInputState];
+    if ([self hasExternalInputDevice] && _overlay.configuring) [_overlay finishConfiguration];
     if (_connecting) {
         if (![self wantsController]) { _cancelConnect = YES; [_virtualController disconnect]; }
         return;
     }
-    if (![self wantsController] || [self hasPhysicalController]) {
+    if (![self wantsController]) {
         [self disconnectController];
         return;
     }
@@ -1668,7 +1784,7 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
             self->_connecting = NO;
             BOOL cancelled = self->_cancelConnect;
             self->_cancelConnect = NO;
-            if (error || cancelled || ![self wantsController] || [self hasPhysicalController]) {
+            if (error || cancelled || ![self wantsController]) {
                 if (error) NSLog(@"[TouchGamepad] Connection failed: %@ (%ld)", error.domain, (long)error.code);
                 self->_failed = error != nil;
                 [self disconnectController];
@@ -1702,6 +1818,7 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
 
 - (void)setSimple:(BOOL)simple {
     if (_simple == simple) return;
+    [self stopHudCameraStickCancelled:YES];
     [self cancelStickClicks];
     [_overlay reset];
     [self releaseAllHudBindings];
@@ -1726,8 +1843,11 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
 
 - (BOOL)configuring { return _overlay.configuring; }
 - (void)toggleSettings { [_overlay toggleSettings]; }
+- (void)beginLayoutEditing { [_overlay beginLayoutEditing]; }
+- (void)beginMobileEditing { [_overlay beginMobileEditing]; }
 
 - (void)invalidate {
+    [self stopHudCameraStickCancelled:YES];
     [_overlay finishConfiguration];
     _invalidated = YES;
     [NSNotificationCenter.defaultCenter removeObserver:self];
@@ -1737,6 +1857,7 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
 }
 
 - (void)dealloc {
+    [_hudCameraTimer invalidate];
     [NSNotificationCenter.defaultCenter removeObserver:self];
     [_leftClickTimer invalidate];
     [_rightClickTimer invalidate];

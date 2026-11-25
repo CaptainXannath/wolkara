@@ -10,17 +10,21 @@ This custom build updates Wolkara's in-game touch UI (based on the `v0.1.0-stikd
   - Lazily constructs `WolkaraMobile` ability buttons as needed instead of eagerly creating all 64 secure frames on load.
 - **Top-Center Quick Menu Bar & Collapsible Pill (`⌄`)** (`translation/AppKit/TouchControls.m`):
   - Gameplay (and Login) starts with a single compact dark/warm-gold chevron pill at top-center (`⌄`).
-  - Tap `⌄` to expand the top WoW bar: **`Chat | Bags | Map | Character | Talents | Quests | Spellbook | ^ | ...`**.
-  - Tap **`Chat`** to toggle the keyboard, **`Bags`–`Spellbook`** (`B`, `M`, `C`, `N`, `L`, `P`) to open game windows, **`...`** to show Wolkara's utility buttons (mouse/trackpad, keyboard, HUD/gamepad mode toggle, settings, dictation, saved-text key, and leave game), or **`^`** to collapse everything back to `⌄`.
-- **Round Blizzard Spell/Item Drag-and-Drop Side Buttons (`WolkaraMobile`)** (`addons/WolkaraMobile/`, `launcher/WoW/MobileInterface.*`, `translation/AppKit/AKMobileInterface.h`):
-  - Automatically stages the upgraded `WolkaraMobile` companion addon into `_forever_/Interface/AddOns/WolkaraMobile` (enabled by default for Forever; toggle anytime via **Settings → Round Spell Icons (WoW)** and **Arrange Spell Icons…**, or `/wm` in chat).
-  - Pre-seeds **20 circular masked Blizzard icon slots** (12 on the left side + 8 on the right side).
-  - Open **Spellbook** or **Bags** and **touch-hold-and-drag** any spell, item, or macro directly onto any round button, or tap an empty circle for the **Spells / Items / Macros / Actions Picker** (with an **Edit Layout** shortcut).
-  - In **Arrange Spell Icons…** or `/wm edit`, drag round buttons freely, adjust size, toggle **Hide empty**, **Move/size all**, **Reset sides**, and tap **Done & save**.
-- **Photo HUD Mode (Default)** (`translation/AppKit/TouchGamepad.m`, `TouchGamepadLayout.h/.m`):
-  - **Bottom-Left**: Clean circular movement joystick (no bulky outer D-pad sector wheel; double-tap still sends L3).
-  - **Bottom-Right**: **`Target`** pill (`Tab`), **`Interact`** pill (`F`), **`Jump`** circle (`Space`), and **`Camera`** drag pad (right-mouse camera/character look by default, or left-mouse orbit in Settings), plus per-button visibility toggles (**Right HUD Controls**) and a **Left Stick: WASD Keys** option in Settings.
-  - Expand `⌄ → ...` and tap the controller icon to switch between **Photo HUD** and **Full Gamepad** mode anytime, or hold to hide/show controls.
+  - Tap `⌄` to expand the top WoW bar: **`Chat | Bags | Map | Character | Talents | Quests | Spellbook | Edit Arcs | Edit HUD | ^ | ...`**.
+  - Tap **`Chat`** to toggle the keyboard, **`Bags`–`Spellbook`** (`B`, `M`, `C`, `N`, `L`, `P`) to open game windows, **`Edit Arcs`** or **`Edit HUD`** to customize layout right away, **`...`** to show Wolkara's utility buttons (mouse/trackpad, keyboard, HUD/gamepad mode toggle, settings, dictation, saved-text key, and leave game), or **`^`** to collapse everything back to `⌄`.
+- **Seamless Curved Side Ability Arcs (`WolkaraMobile`)** (`addons/WolkaraMobile/`, `launcher/WoW/MobileInterface.*`, `translation/AppKit/AKMobileInterface.h`):
+  - Automatically mirrors populated WoW action bars into left & right curved thumb arcs on load (hiding desktop bottom bars cleanly while leaving stances/pets visible, and restoring desktop bars automatically whenever round touch icons are turned off or external hardware is connected).
+  - Tap **⌄ → Edit Arcs** (or `/wm edit`) for the interactive arc editor:
+    - Drag **`Move arc`** above either the Left or Right arc to reposition the entire curved group anywhere on screen.
+    - Tap **`+`** above either arc to immediately add spells, professions, bag items, macros, or built-in actions from the Picker.
+    - Tap any icon in an arc to select it (name shown at top center) and tap **`Assign`** or **`Remove`**, or tap/drag two icons to swap slots; use **`‹ Set 1 / N ›`** + **`Add set`** / **`Remove set`** for multiple spell pages.
+    - Use the bottom **`Default | Cancel | Save`** pill to reset to synced defaults, discard draft changes, or apply live out of combat.
+  - Also supports direct Spellbook/Bags drag-and-drop onto any round button or tapping an empty slot.
+- **Photo HUD Mode with Left + Right Joysticks & Auto-Hide on Hardware** (`translation/AppKit/TouchGamepad.m`, `TouchGamepadLayout.h/.m`):
+  - **Bottom-Left**: Circular movement joystick (supports analog controller stick or **Left Stick: WASD Keys**).
+  - **Bottom-Right**: Circular **Right Joystick** (replaces the "Camera" label box — push/hold to smoothly rotate the WoW camera in 360° using Right Drag or Left Orbit mode, plus double-tap for R3), alongside **`Target`** (`Tab`), **`Interact`** (`F`), and **`Jump`** (`Space`).
+  - **Automatic Hardware Detection**: Connecting a physical game controller (`GCController`), hardware mouse (`GCMouse`), or hardware keyboard (`GCKeyboard`) automatically hides all on-screen touch HUD controls, top chrome, and circular spell arcs (restoring desktop WoW bars), and brings them back automatically when disconnected (toggleable in Settings via **Auto-hide on Controller / KB+M**).
+  - **Edit HUD**: Tap **⌄ → Edit HUD** (or Settings) to drag any button/joystick freely on grid with the same **`Default | Cancel | Save`** pill.
 - **PlayPort-Style Custom Buttons (Optional Overlay)** (`translation/AppKit/TouchActionLayout.h/.m`, `TouchActionOverlay.m`):
   - Auto-hidden whenever **Round Spell Icons (WoW)** is active so Blizzard spell circles aren't covered; turn **Touch abilities** on inside **Settings → Custom Buttons (Drag & Drop)…** to use both or run custom iOS overlay buttons independently.
   - Defaults to **8 left-side buttons** (`1`–`8`) and **8 right-side plain buttons** (`9`, `0`, `-`, `=`, `F1`–`F4`) with **no `Ctrl+` chords**.

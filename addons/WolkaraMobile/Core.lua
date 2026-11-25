@@ -7,7 +7,9 @@ ns.QUESTION = "Interface\\Icons\\INV_Misc_QuestionMark"
 ns.STICK_X, ns.STICK_Y = 0.12, 0.222
 ns.enabled, ns.editing = false, false
 local modules, events, pending = {}, {}, nil
-local pendingEdit, pendingDone
+local pendingEdit, pendingDone, pendingCancel
+local isSecretValue = issecretvalue or function() return false end
+function ns.IsSecret(value) return isSecretValue(value) end
 function ns.Print(text) DEFAULT_CHAT_FRAME:AddMessage("|cff66ccffWolkara:|r " .. tostring(text)) end
 function ns.Guard(label, fn, ...)
     local ok, err = pcall(fn, ...)
@@ -49,10 +51,23 @@ function ns.SetEditing(on)
     ns.Each("SetEditing",ns.editing); ns.Layout(); ns.Refresh()
 end
 function ns.FinishEditing()
-    if InCombatLockdown() then pendingDone=true; ns.Print("Saving queued until combat ends."); return end
-    pendingDone=nil
+    if InCombatLockdown() then pendingDone=true; pendingCancel=nil; ns.Print("Saving queued until combat ends."); return end
+    pendingDone=nil; pendingCancel=nil
+    ns.Each("SaveEditing")
+    ns.dirty=false
     ns.SetEditing(false)
-    if ns.dirty then ns.dirty=false; ReloadUI() end -- explicit Done & save, never a timer
+end
+function ns.CancelEditing()
+    if InCombatLockdown() then pendingCancel=true; pendingDone=nil; return end
+    pendingCancel=nil; pendingDone=nil
+    ns.Each("CancelEditing")
+    ns.dirty=false
+    ns.SetEditing(false)
+end
+function ns.ResetDefaults()
+    if InCombatLockdown() then ns.Print("Reset arcs outside combat."); return end
+    ns.Each("ResetDefaults")
+    ns.Layout(); ns.Refresh()
 end
 function ns.Circle(frame, texture)
     if frame and frame.CreateMaskTexture and texture and texture.AddMaskTexture then
@@ -150,6 +165,58 @@ function ns.ItemSpell(id)
     if GetItemSpell then return GetItemSpell(id) end
 end
 
+function ns.ActionInfo(slot)
+    if GetActionInfo then return GetActionInfo(slot) end
+    if C_ActionBar and C_ActionBar.GetActionInfo then return C_ActionBar.GetActionInfo(slot) end
+end
+
+function ns.ActionTexture(slot)
+    if GetActionTexture then return GetActionTexture(slot) end
+    if C_ActionBar and C_ActionBar.GetActionTexture then return C_ActionBar.GetActionTexture(slot) end
+end
+
+function ns.ActionCooldown(slot)
+    local fn = (C_ActionBar and C_ActionBar.GetActionCooldown) or GetActionCooldown
+    if fn then
+        local a, b, c, d = fn(slot)
+        if type(a) == "table" then return a.startTime, a.duration, a.isEnabled, a.modRate end
+        return a, b, c, d
+    end
+end
+
+function ns.ActionCharges(slot)
+    if C_ActionBar and C_ActionBar.GetActionCharges then return C_ActionBar.GetActionCharges(slot) end
+    if GetActionCharges then return GetActionCharges(slot) end
+end
+
+function ns.ActionCount(slot)
+    if GetActionCount then return GetActionCount(slot) end
+    if C_ActionBar and C_ActionBar.GetActionCount then return C_ActionBar.GetActionCount(slot) end
+    return 0
+end
+
+function ns.ActionUsable(slot)
+    if IsUsableAction then return IsUsableAction(slot) end
+    if C_ActionBar and C_ActionBar.IsUsableAction then return C_ActionBar.IsUsableAction(slot) end
+    return true, false
+end
+
+function ns.ActionInRange(slot)
+    if not UnitExists("target") then return nil end
+    if IsActionInRange then
+        local r = IsActionInRange(slot)
+        if r == 1 or r == true then return true elseif r == 0 or r == false then return false end
+    end
+    if C_ActionBar and C_ActionBar.IsActionInRange then return C_ActionBar.IsActionInRange(slot) end
+    return nil
+end
+
+function ns.ActionBarPage()
+    if GetActionBarPage then return GetActionBarPage() end
+    if C_ActionBar and C_ActionBar.GetActionBarPage then return C_ActionBar.GetActionBarPage() end
+    return 1
+end
+
 function ns.ItemCooldown(id)
     if C_Container and C_Container.GetItemCooldown then return C_Container.GetItemCooldown(id) end
     if GetItemCooldown then return GetItemCooldown(id) end
@@ -210,7 +277,7 @@ ns.On("PLAYER_REGEN_ENABLED",function()
     if ns.pendingLayout then ns.pendingLayout=false; ns.Layout() end
     ns.Each("AfterCombat")
     if pendingEdit~=nil then ns.SetEditing(pendingEdit) end
-    if pendingDone then ns.FinishEditing() end
+    if pendingCancel then ns.CancelEditing() elseif pendingDone then ns.FinishEditing() end
 end)
 ns.On("DISPLAY_SIZE_CHANGED",function() ns.Layout() end)
 ns.On("UI_SCALE_CHANGED",function() ns.Layout() end)

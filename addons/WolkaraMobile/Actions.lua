@@ -13,7 +13,50 @@ ns.BUILTIN = {
     { kind = "macrotext", id = "/sit", name = "Sit", icon = "Interface\\Icons\\Spell_Nature_Sleep" },
 }
 
-function ns.EntryIcon(entry)
+ns.DESKTOP_BAR_LIMIT = 180
+
+local function ValidActionID(value)
+    return not ns.IsSecret(value) and type(value) == "number" and value > 0 and value < math.huge and value % 1 == 0
+end
+
+function ns.DesktopActionList()
+    local ordered, records = {}, {}
+    local function append(slot)
+        local kind, id, subtype = ns.ActionInfo(slot)
+        if ns.IsSecret(kind) or ns.IsSecret(id) or ns.IsSecret(subtype) or not kind or not id then return end
+        local texture = ns.ActionTexture(slot)
+        if not ns.IsSecret(texture) and not texture then return end
+        local key = tostring(kind) .. ":" .. tostring(id) .. ":" .. tostring(subtype or "")
+        if records[key] then return end
+        records[key] = { slot = slot, kind = kind, id = id, subtype = subtype, texture = texture }
+        ordered[#ordered + 1] = key
+    end
+    local page = ns.ActionBarPage() or 1
+    if ns.IsSecret(page) or type(page) ~= "number" or page < 1 then page = 1 end
+    local first = (math.max(1, math.min(6, page)) - 1) * 12 + 1
+    for slot = first, first + 11 do append(slot) end
+    for slot = 1, ns.DESKTOP_BAR_LIMIT do append(slot) end
+    return ordered, records
+end
+
+function ns.SplitDesktopToSides(ordered, records)
+    local profile, count = { left = {}, right = {} }, 0
+    for _, key in ipairs(ordered or {}) do
+        local rec = records and records[key]
+        if rec then
+            count = count + 1
+            local target = (count % 2 == 1) and profile.right or profile.left
+            if ValidActionID(rec.id) and (rec.kind == "item" or (rec.kind == "spell" and rec.subtype ~= "pet" and rec.subtype ~= "flyout")) then
+                target[#target + 1] = { kind = rec.kind, id = rec.id }
+            else
+                target[#target + 1] = { kind = "desktop", key = key }
+            end
+        end
+    end
+    return profile
+end
+
+function ns.EntryIcon(entry, records)
     if not entry then return nil end
     if entry.kind == "spell" then return ns.SpellIcon(entry.id) end
     if entry.kind == "item" then return ns.ItemIcon(entry.id) end
@@ -22,25 +65,47 @@ function ns.EntryIcon(entry)
         return icon
     end
     if entry.kind == "macrotext" then return entry.icon end
+    if entry.kind == "desktop" then
+        local rec = records and records[entry.key]
+        if rec then return ns.ActionTexture(rec.slot) or rec.texture end
+    elseif entry.kind == "action" and entry.id then
+        return ns.ActionTexture(entry.id)
+    end
 end
 
-function ns.EntryName(entry)
+function ns.EntryName(entry, records)
     if not entry then return nil end
-    if entry.kind == "spell" then return ns.SpellName(entry.id) end
-    if entry.kind == "item" then return ns.ItemName(entry.id) end
-    return entry.name or entry.id
+    local kind, id = entry.kind, entry.id
+    if kind == "desktop" then
+        local rec = records and records[entry.key]
+        if not rec then return entry.key end
+        kind, id = rec.kind, rec.id
+    end
+    if kind == "spell" then return ns.SpellName(id) end
+    if kind == "item" then return ns.ItemName(id) end
+    if kind == "macro" and GetMacroInfo then return GetMacroInfo(id) or entry.name or id end
+    return entry.name or (id and tostring(id))
 end
 
-function ns.ApplyButton(button)
+function ns.ApplyButton(button, records)
     if InCombatLockdown() then return false end
     button.suppressed = nil
     local entry = button:GetEntry()
+    local recs = records or ns.desktopRecords
+    button:SetAttribute("action", nil)
     button:SetAttribute("spell", nil)
     button:SetAttribute("item", nil)
     button:SetAttribute("macro", nil)
     button:SetAttribute("macrotext", nil)
+    local rec = entry and entry.kind == "desktop" and recs and recs[entry.key] or nil
     if not ns.enabled or ns.editing or not entry then
         button:SetAttribute("type", nil)
+    elseif rec and rec.slot then
+        button:SetAttribute("type", "action")
+        button:SetAttribute("action", rec.slot)
+    elseif entry.kind == "action" and entry.id then
+        button:SetAttribute("type", "action")
+        button:SetAttribute("action", entry.id)
     elseif entry.kind == "spell" then
         button:SetAttribute("type", "spell")
         button:SetAttribute("spell", ns.SpellName(entry.id) or entry.id)
@@ -53,6 +118,8 @@ function ns.ApplyButton(button)
     elseif entry.kind == "macrotext" then
         button:SetAttribute("type", "macro")
         button:SetAttribute("macrotext", entry.id)
+    else
+        button:SetAttribute("type", nil)
     end
     return true
 end
@@ -87,13 +154,17 @@ end)
 
 function ns.UpdateCooldown(button)
     local entry = button:GetEntry()
+    local slot = button.GetAttribute and button:GetAttribute("action")
     local start, duration, enable
-    if entry and entry.kind == "spell" then
+    if slot then
+        start, duration, enable = ns.ActionCooldown(slot)
+    elseif entry and entry.kind == "spell" then
         start, duration, enable = ns.SpellCooldown(entry.id)
     elseif entry and entry.kind == "item" then
         start, duration, enable = ns.ItemCooldown(entry.id)
     end
-    if start and duration and duration > 0 and enable ~= 0 and enable ~= false then
+    if not ns.IsSecret(start) and not ns.IsSecret(duration)
+        and start and duration and duration > 0 and enable ~= 0 and enable ~= false then
         if CooldownFrame_Set then
             CooldownFrame_Set(button.cooldown, start, duration, 1)
         else
@@ -117,8 +188,12 @@ end
 function ns.UpdateState(button)
     local entry = button:GetEntry()
     if not entry then return end
+    local slot = button.GetAttribute and button:GetAttribute("action")
     local usable, noPower, inRange = true, false, nil
-    if entry.kind == "spell" then
+    if slot then
+        usable, noPower = ns.ActionUsable(slot)
+        inRange = ns.ActionInRange(slot)
+    elseif entry.kind == "spell" then
         usable, noPower = ns.SpellUsable(entry.id)
         inRange = ns.SpellInRange(entry.id)
     elseif entry.kind == "item" then
@@ -137,20 +212,26 @@ end
 
 function ns.RefreshButton(button)
     local entry = button:GetEntry()
+    local slot = button.GetAttribute and button:GetAttribute("action")
     button.count:SetText("")
     if entry then
-        button.icon:SetTexture(ns.EntryIcon(entry) or ns.QUESTION)
+        button.icon:SetTexture(ns.EntryIcon(entry, ns.desktopRecords) or ns.QUESTION)
         button.icon:Show()
         button.plus:Hide()
-        if button.ring then button.ring:SetVertexColor(0.78, 0.70, 0.50, 0.65) end
-        if entry.kind == "item" then
+        if button.ring then button.ring:SetVertexColor(0.65, 0.49, 0.28, 0.95) end
+        if slot then
+            local count = ns.ActionCount(slot)
+            if not ns.IsSecret(count) and type(count) == "number" and count > 1 then
+                button.count:SetText(count)
+            end
+        elseif entry.kind == "item" then
             local count = ns.ItemCount(entry.id) or 0
             if count ~= 1 then button.count:SetText(count) end
         end
     else
         button.icon:Hide()
         button.plus:Show()
-        if button.ring then button.ring:SetVertexColor(0.70, 0.65, 0.52, 0.35) end
+        if button.ring then button.ring:SetVertexColor(0.65, 0.49, 0.28, 0.45) end
     end
     button.icon:SetVertexColor(1, 1, 1)
     button.editGlow:SetShown(ns.editing)

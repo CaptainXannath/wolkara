@@ -212,6 +212,15 @@ static void CheckCamera(CGSize size, CGPoint start, BOOL right) {
     Send(host,event,other,UITouchPhaseBegan,start); CheckEvent(down,start,size,0,0);
     Send(host,event,other,UITouchPhaseMoved,moved); CheckEvent(drag,moved,size,moved.x-start.x,moved.y-start.y);
     Send(host,event,other,UITouchPhaseEnded,moved); CheckEvent(up,moved,size,0,0); Empty();
+    // Right joystick continuous camera deltas (turn drag + clean release).
+    Empty();
+    assert([(id<AKTouchDragHost>)host ak_beginCameraStickRightButton:YES]);
+    CheckEvent(NSEventTypeRightMouseDown, moved, size, 0, 0);
+    [(id<AKTouchDragHost>)host ak_moveCameraStickDelta:CGPointMake(14, -7)];
+    CheckEvent(NSEventTypeRightMouseDragged, CursorMoved(moved, 14, -7, size), size, 14, -7);
+    [(id<AKTouchDragHost>)host ak_endCameraStickCancelled:NO];
+    CheckEvent(NSEventTypeRightMouseUp, CursorMoved(moved, 14, -7, size), size, 0, 0);
+    Empty();
 }
 // A desktop input consumer tracks modifier edges separately from key events.
 static void Command(AKMobileCommand command, NSEventModifierFlags baseline) {
@@ -223,12 +232,14 @@ static void Command(AKMobileCommand command, NSEventModifierFlags baseline) {
         NSEventModifierFlagControl | NSEventModifierFlagShift,
         NSEventModifierFlagControl | NSEventModifierFlagShift,
         NSEventModifierFlagOption | NSEventModifierFlagShift,
-        NSEventModifierFlagOption | NSEventModifierFlagShift
+        NSEventModifierFlagOption | NSEventModifierFlagShift,
+        NSEventModifierFlagControl | NSEventModifierFlagOption | NSEventModifierFlagShift,
+        NSEventModifierFlagControl | NSEventModifierFlagOption
     };
-    const unsigned short codes[] = {97, 98, 97, 98, 97, 98, 97, 98}; // F6/F7 only; never a bag function key.
+    const unsigned short codes[] = {97, 98, 97, 98, 97, 98, 97, 98, 96, 96}; // F6/F7 (0..7) and F5 (8..9); never bag keys.
     NSEventModifierFlags state = baseline;
     const char *path = getenv("WOLKARA_MOBILE_EVENT_TRACE");
-    FILE *trace = (path && *path && !baseline) ? fopen(path, "a") : NULL;
+    FILE *trace = (path && *path && !baseline && command <= AKMobileDrag) ? fopen(path, "a") : NULL;
     BOOL down = NO, up = NO;
     do {
         NSEvent *event = Next(__LINE__);
@@ -295,6 +306,8 @@ static void CheckMobile(void) {
     }
     [host setValue:@0 forKey:@"_mods"];
     [(id<AKMobileInterfaceHost>)host ak_mobileCommand:AKMobileDone]; Command(AKMobileDone, 0);
+    [(id<AKMobileInterfaceHost>)host ak_mobileCommand:AKMobileCancel]; Command(AKMobileCancel, 0);
+    [(id<AKMobileInterfaceHost>)host ak_mobileCommand:AKMobileReset]; Command(AKMobileReset, 0);
     // Both tap and hold are labelled BEFORE the click and cleared after its up.
     for (unsigned hold = 0; hold < 2; hold++) {
         finger.testTime = 1; Send(host, event, finger, UITouchPhaseBegan, origin); Empty();
@@ -329,6 +342,8 @@ static void CheckMobile(void) {
     CheckEvent(NSEventTypeLeftMouseUp, target, size, 0, 0);
     Command(AKMobileClear, 0); Empty();
     [(id<AKMobileInterfaceHost>)host ak_mobileCommand:AKMobileDone]; Command(AKMobileDone, 0);
+    [(id<AKMobileInterfaceHost>)host ak_mobileCommand:AKMobileCancel]; Command(AKMobileCancel, 0);
+    [(id<AKMobileInterfaceHost>)host ak_mobileCommand:AKMobileReset]; Command(AKMobileReset, 0);
     // A physical pointer gets neither touch tags nor right-click conversion.
     finger.testType = UITouchTypeIndirectPointer;
     Send(host, event, finger, UITouchPhaseBegan, origin); CheckEvent(NSEventTypeLeftMouseDown, origin, size, 0, 0);

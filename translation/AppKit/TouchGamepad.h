@@ -11,6 +11,9 @@ enum { AKTouchDragThreshold = 8 };
 - (void)ak_endTouchDrag:(UITouch *)touch cancelled:(BOOL)cancelled;
 @optional
 - (BOOL)ak_beginCameraDrag:(UITouch *)touch origin:(CGPoint)origin rightButton:(BOOL)rightButton;
+- (BOOL)ak_beginCameraStickRightButton:(BOOL)rightButton;
+- (void)ak_moveCameraStickDelta:(CGPoint)delta;
+- (void)ak_endCameraStickCancelled:(BOOL)cancelled;
 - (void)ak_sendKeyCode:(unsigned short)keyCode characters:(nullable NSString *)characters modifiers:(NSUInteger)modifiers pressed:(BOOL)pressed;
 - (void)ak_sendMouseClick:(unsigned)button pressed:(BOOL)pressed;
 @end
@@ -29,6 +32,7 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size);
 @property(nonatomic, readonly) BOOL editing;
 @property(nonatomic, readonly) BOOL editingAbilities;
 @property(nonatomic, readonly) BOOL mobileEditing;
+@property(nonatomic, readonly) BOOL externalInputActive;
 /// Shared with the toolbar so a settings save cannot overwrite moved buttons.
 @property(nonatomic, readonly) AKGamepadLayout *layout;
 @property(nonatomic, copy, nullable) void (^visibilityChanged)(BOOL visible);
@@ -36,6 +40,8 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size);
 - (BOOL)configurationContainsPoint:(CGPoint)point inView:(UIView *)view;
 - (void)refresh;
 - (void)toggleSettings;
+- (void)beginLayoutEditing;
+- (void)beginMobileEditing;
 - (void)invalidate;
 @end
 NS_ASSUME_NONNULL_END

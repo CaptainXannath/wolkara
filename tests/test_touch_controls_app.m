@@ -189,6 +189,7 @@ static UIView *FindToolbarView(UIView *view, NSString *identifier) {
 - (void)holdSavedText:(UILongPressGestureRecognizer *)press;
 - (void)holdGamepad:(UILongPressGestureRecognizer *)press;
 - (BOOL)toggleGamepadEnabled;
+- (void)updateToolbarVisibility;
 @end
 
 @interface AKSavedTextTestHold : UILongPressGestureRecognizer
@@ -548,6 +549,35 @@ static void AKSavedTextSettle(UIViewController *presenter) {
     [collapse sendActionsForControlEvents:UIControlEventTouchUpInside]; [controls layoutIfNeeded];
     assert(!toggle.hidden && menuBar.hidden);
     for (UIView *item in items) assert(item.hidden);
+    // Top bar Edit HUD & Edit Arcs buttons open editing directly, and external hardware hides top chrome.
+    [toggle sendActionsForControlEvents:UIControlEventTouchUpInside]; [controls layoutIfNeeded];
+    UIButton *editHud = (id)FindToolbarView(controls, @"wolkara.toolbar.wow.editHud");
+    assert(editHud && !editHud.hidden);
+    [editHud sendActionsForControlEvents:UIControlEventTouchUpInside]; [controls layoutIfNeeded];
+    assert(gamepad.editing && menuBar.hidden);
+    UIButton *doneHud = (id)FindToolbarView(host, @"wolkaraforever.layout.done");
+    assert(doneHud);
+    [doneHud sendActionsForControlEvents:UIControlEventTouchUpInside]; [controls layoutIfNeeded];
+    assert(!gamepad.editing && !toggle.hidden);
+    [NSUserDefaults.standardUserDefaults setBool:YES forKey:@"WolkaraMobileAvailable"];
+    [toggle sendActionsForControlEvents:UIControlEventTouchUpInside]; [controls layoutIfNeeded];
+    UIButton *editArcs = (id)FindToolbarView(controls, @"wolkara.toolbar.wow.editArcs");
+    assert(editArcs && !editArcs.hidden);
+    [editArcs sendActionsForControlEvents:UIControlEventTouchUpInside]; [controls layoutIfNeeded];
+    assert(gamepad.mobileEditing && menuBar.hidden && toggle.hidden);
+    UIButton *cancelArcs = (id)FindToolbarView(host, @"wolkara.edit.cancel");
+    assert(cancelArcs);
+    [cancelArcs sendActionsForControlEvents:UIControlEventTouchUpInside]; [controls layoutIfNeeded];
+    assert(!gamepad.mobileEditing && !toggle.hidden);
+    [NSUserDefaults.standardUserDefaults removeObjectForKey:@"WolkaraMobileAvailable"];
+    [gamepad setValue:@YES forKey:@"_externalInputActive"];
+    [[gamepad valueForKey:@"_overlay"] setValue:@YES forKey:@"externalInputActive"];
+    [controls updateToolbarVisibility];
+    assert(toggle.hidden && menuBar.hidden);
+    [gamepad setValue:@NO forKey:@"_externalInputActive"];
+    [[gamepad valueForKey:@"_overlay"] setValue:@NO forKey:@"externalInputActive"];
+    [controls updateToolbarVisibility];
+    assert(!toggle.hidden);
     [toggle sendActionsForControlEvents:UIControlEventTouchUpInside]; [controls layoutIfNeeded];
     [more sendActionsForControlEvents:UIControlEventTouchUpInside]; [controls layoutIfNeeded];
     assert(!menuBar.hidden);

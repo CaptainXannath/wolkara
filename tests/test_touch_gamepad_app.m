@@ -12,6 +12,8 @@
 
 @interface AKTouchGamepad (FixtureSeams)
 - (NSArray<GCController *> *)connectedControllers;
+- (BOOL)hasPhysicalMouse;
+- (BOOL)hasPhysicalKeyboard;
 - (GCVirtualController *)makeController;
 - (AKTouchHaptics *)makeHaptics;
 - (void)clickStick:(BOOL)left;
@@ -84,11 +86,14 @@ static void Drain(void);
 @end
 @interface AKFixtureGamepad : AKTouchGamepad
 @property NSArray<GCController *> *devices;
+@property BOOL mockMouse, mockKeyboard;
 @property AKFixtureConnection *lastConnection;
 @property NSUInteger connections;
 @end
 @implementation AKFixtureGamepad
 - (NSArray<GCController *> *)connectedControllers { return self.devices?:@[]; }
+- (BOOL)hasPhysicalMouse { return self.mockMouse; }
+- (BOOL)hasPhysicalKeyboard { return self.mockKeyboard; }
 - (GCVirtualController *)makeController {
     self.connections++; self.lastConnection=[AKFixtureConnection new]; return (id)self.lastConnection;
 }
@@ -236,12 +241,25 @@ static void TestSimpleShoulderPositions(UIView *host, AKPreviewGamepad *manager)
     UISwitch *edit=(id)Find(host,@"wolkaraforever.controls.edit"); assert(edit);
     edit.on=YES; [edit sendActionsForControlEvents:UIControlEventValueChanged]; [host layoutIfNeeded];
     UIView *target=Find(host,@"wolkara.hud.target"); CGRect targetBefore=target.frame;
+    assert([Find(host,@"wolkara.hud.camera") isKindOfClass:UIControl.class]);
     AKFixturePan *pan=[AKFixturePan new]; [target addGestureRecognizer:pan];
     pan.testState=UIGestureRecognizerStateBegan; [target.superview drag:pan];
     pan.movement=CGPointMake(-20,-15); pan.testState=UIGestureRecognizerStateChanged; [target.superview drag:pan];
     pan.testState=UIGestureRecognizerStateEnded; [target.superview drag:pan];
     [target removeGestureRecognizer:pan];
     CGRect targetAfter=target.frame; assert(!SameFrame(targetBefore,targetAfter));
+    [(UIControl *)Find(host,@"wolkara.edit.cancel") sendActionsForControlEvents:UIControlEventTouchUpInside];
+    [host layoutIfNeeded];
+    assert(!manager.configuring && SameFrame(Find(host,@"wolkara.hud.target").frame,targetBefore));
+    [manager toggleSettings]; [host layoutIfNeeded];
+    edit=(id)Find(host,@"wolkaraforever.controls.edit"); assert(edit);
+    edit.on=YES; [edit sendActionsForControlEvents:UIControlEventValueChanged]; [host layoutIfNeeded];
+    [target addGestureRecognizer:pan];
+    pan.testState=UIGestureRecognizerStateBegan; [target.superview drag:pan];
+    pan.movement=CGPointMake(-20,-15); pan.testState=UIGestureRecognizerStateChanged; [target.superview drag:pan];
+    pan.testState=UIGestureRecognizerStateEnded; [target.superview drag:pan];
+    [target removeGestureRecognizer:pan];
+    targetAfter=target.frame; assert(!SameFrame(targetBefore,targetAfter));
     [(UIControl *)Find(host,@"wolkaraforever.layout.done") sendActionsForControlEvents:UIControlEventTouchUpInside];
     for (NSUInteger cycle=0;cycle<3;cycle++) {
         manager.simple=NO; [host layoutIfNeeded];
@@ -379,6 +397,12 @@ static void TestNativeInput(UIView *host, AKPreviewGamepad *manager) {
             UIView *hud=Find(host,ident);
             assert(hud && !hud.hidden);
         }
+        UIControl *hudRightStick=(id)Find(host,@"wolkara.hud.camera");
+        assert([hudRightStick isKindOfClass:UIControl.class]);
+        AKFixtureTouch *camTouch=[AKFixtureTouch new];
+        camTouch.point=CGPointMake(hudRightStick.bounds.size.width,hudRightStick.bounds.size.height/2);
+        assert([hudRightStick beginTrackingWithTouch:camTouch withEvent:nil]);
+        [hudRightStick cancelTrackingWithEvent:nil];
         CGPoint arrow=[leftStick convertPoint:CGPointMake(52,-24) toView:host];
         assert([host hitTest:arrow withEvent:nil]==host);
         CGPoint rightCenter=[rightStick convertPoint:CGPointMake(52,52) toView:host];
@@ -490,10 +514,17 @@ static void TestNativeInput(UIView *host, AKPreviewGamepad *manager) {
     assert(AKMobileInterfaceEnabled() && arrange.enabled);
     [arrange sendActionsForControlEvents:UIControlEventTouchUpInside];
     [host layoutIfNeeded]; assert(manager.configuring && manager.mobileEditing && manager.visible);
-    UIButton *save=(id)Find(host,@"wolkara.mobile.done"); assert(save && !save.hidden);
+    UIButton *mobDefault=(id)Find(host,@"wolkara.edit.default");
+    UIButton *mobCancel=(id)Find(host,@"wolkara.edit.cancel");
+    UIButton *save=(id)Find(host,@"wolkara.mobile.done");
+    assert(mobDefault && !mobDefault.hidden && mobCancel && !mobCancel.hidden && save && !save.hidden);
+    [mobDefault sendActionsForControlEvents:UIControlEventTouchUpInside]; assert(manager.mobileEditing);
     assert([host hitTest:[save convertPoint:CGPointMake(30,20) toView:host] withEvent:nil]==save);
     UIView *passHit=[host hitTest:CGPointMake(120,260) withEvent:nil];
     assert(passHit==nil || passHit==host);
+    [mobCancel sendActionsForControlEvents:UIControlEventTouchUpInside]; assert(!manager.mobileEditing && mobCancel.hidden);
+    [manager beginMobileEditing]; [host layoutIfNeeded]; assert(manager.mobileEditing);
+    save=(id)Find(host,@"wolkara.mobile.done"); assert(save && !save.hidden);
     [save sendActionsForControlEvents:UIControlEventTouchUpInside]; assert(save.hidden && !manager.mobileEditing);
     [manager toggleSettings]; mobile=(id)Find(host,@"wolkara.controls.mobileInterface"); assert(mobile.on);
     mobile.on=NO; [mobile sendActionsForControlEvents:UIControlEventValueChanged]; assert(!AKMobileInterfaceEnabled());
@@ -558,8 +589,13 @@ static void TestLifecycle(UIView *host) {
     pad.enabled=NO; pad.enabled=YES; [pad.lastConnection finish:nil]; assert(pad.visible);
     fprintf(stderr, "[TouchGamepadFixture] TestLifecycle: toggleSettings\n");
     [pad toggleSettings]; assert(pad.configuring);
-    pad.devices=@[(id)physical]; [pad refresh]; assert(!pad.visible && !pad.configuring);
-    physical.isSnapshot=YES; [pad refresh]; [pad.lastConnection finish:nil]; assert(pad.visible);
+    pad.devices=@[(id)physical]; [pad refresh]; assert(!pad.visible && !pad.configuring && pad.externalInputActive);
+    physical.isSnapshot=YES; [pad refresh]; [pad.lastConnection finish:nil]; assert(pad.visible && !pad.externalInputActive);
+    pad.mockMouse=YES; [pad refresh]; assert(!pad.visible && pad.externalInputActive);
+    pad.mockMouse=NO; [pad refresh]; [pad.lastConnection finish:nil]; assert(pad.visible && !pad.externalInputActive);
+    pad.mockKeyboard=YES; [pad refresh]; assert(!pad.visible && pad.externalInputActive);
+    pad.layout.autoHideExternalInput=NO; [pad refresh]; [pad.lastConnection finish:nil]; assert(pad.visible && !pad.externalInputActive);
+    pad.mockKeyboard=NO; pad.layout.autoHideExternalInput=YES; [pad refresh]; assert(pad.visible);
     host.hidden=YES; [pad refresh]; assert(!pad.visible);
     host.hidden=NO; [pad refresh];
     fprintf(stderr, "[TouchGamepadFixture] TestLifecycle: invalidate\n");

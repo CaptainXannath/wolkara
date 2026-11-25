@@ -265,6 +265,8 @@ NSEventModifierFlags AKModifiersReconciled(NSEventModifierFlags held, NSEventMod
     BOOL _directPressed, _directRelative;
     BOOL _directDragging, _directCancelled, _directTrackpad;
     BOOL _directMobile, _directAbsolute, _directMarked, _mobileEditing;
+    BOOL _cameraStickActive;
+    NSInteger _cameraStickButton;
     NSTimeInterval _directBeganAt;
     NSInteger _directButton;
 }
@@ -420,15 +422,22 @@ NSEventModifierFlags AKModifiersReconciled(NSEventModifierFlags held, NSEventMod
     }
 }
 - (void)ak_mobileCommand:(AKMobileCommand)command {
-    if (command > AKMobileDrag) return;
+    if (command > AKMobileReset) return;
     if (command == AKMobileEdit) _mobileEditing = YES;
-    if (command == AKMobileDone || command == AKMobileDisable) _mobileEditing = NO;
+    if (command == AKMobileDone || command == AKMobileDisable || command == AKMobileCancel) _mobileEditing = NO;
     NSEventModifierFlags control = NSEventModifierFlagControl, option = NSEventModifierFlagOption, shift = NSEventModifierFlagShift;
-    const NSEventModifierFlags masks[] = {control | option | shift, control | option | shift,
-        control | option, control | option, control | shift, control | shift, option | shift, option | shift};
-    // F6/F7 have no default bag action. Do not use F8-F12 as a transport.
-    unsigned short code = (command & 1) ? 98 : 97;
-    unichar character = 0xF709 + (command & 1); // NSF6FunctionKey / NSF7FunctionKey
+    const NSEventModifierFlags masks[] = {
+        control | option | shift, control | option | shift,
+        control | option, control | option,
+        control | shift, control | shift,
+        option | shift, option | shift,
+        control | option | shift, control | option
+    };
+    // F6/F7 for commands 0..7; F5 (keyCode 96) for Cancel/Reset. Never F8-F12.
+    const unsigned short codes[] = {97, 98, 97, 98, 97, 98, 97, 98, 96, 96};
+    const unichar chars[] = {0xF709, 0xF70A, 0xF709, 0xF70A, 0xF709, 0xF70A, 0xF709, 0xF70A, 0xF708, 0xF708};
+    unsigned short code = codes[command];
+    unichar character = chars[command];
     NSString *characters = [NSString stringWithCharacters:&character length:1];
     NSEventModifierFlags hardware = _mods;
     NSEventModifierFlags chord = AKModifiersReconciled(hardware, masks[command] | (hardware & NSEventModifierFlagCapsLock));
@@ -622,6 +631,7 @@ static UITouch *AKDirectTouch(NSSet<UITouch *> *touches) {
             [self ak_sendKeyCode:k.unsignedShortValue characters:@"" modifiers:0 pressed:NO];
         }
     }
+    [self ak_endCameraStickCancelled:YES];
     _directCancelled = YES;
     if (!_directPressed) return;
     _directPressed = NO;
@@ -648,7 +658,7 @@ static UITouch *AKDirectTouch(NSSet<UITouch *> *touches) {
     if (_directTouch && (_directTouch.phase == UITouchPhaseEnded || _directTouch.phase == UITouchPhaseCancelled)) {
         _directTouch = nil; _directPressed = NO; _directDragging = NO;
     }
-    if (_directTouch || _touchControls.configuring || _pressedLeft || _pressedRight || _pressedMiddle) return NO;
+    if (_directTouch || _cameraStickActive || _touchControls.configuring || _pressedLeft || _pressedRight || _pressedMiddle) return NO;
     [_touchControls cancelTouches];
     _directTouch = touch; _directOrigin = _directFingerLast = origin;
     _directCancelled = NO; _directTrackpad = _touchControls.trackpadEnabled; _directButton = 0;
@@ -659,12 +669,41 @@ static UITouch *AKDirectTouch(NSSet<UITouch *> *touches) {
     if (_directTouch && (_directTouch.phase == UITouchPhaseEnded || _directTouch.phase == UITouchPhaseCancelled)) {
         _directTouch = nil; _directPressed = NO; _directDragging = NO;
     }
-    if (_directTouch || _touchControls.configuring || _pressedLeft || _pressedRight || _pressedMiddle) return NO;
+    if (_directTouch || _cameraStickActive || _touchControls.configuring || _pressedLeft || _pressedRight || _pressedMiddle) return NO;
     [_touchControls cancelTouches];
     _directTouch = touch; _directOrigin = _directFingerLast = origin;
     _directCancelled = NO; _directTrackpad = NO; _directButton = rightButton ? 1 : 0;
     _directMobile = NO; _directAbsolute = NO;
     [self startDirectDrag]; return YES;
+}
+- (BOOL)ak_beginCameraStickRightButton:(BOOL)rightButton {
+    if (_directTouch && (_directTouch.phase == UITouchPhaseEnded || _directTouch.phase == UITouchPhaseCancelled)) {
+        _directTouch = nil; _directPressed = NO; _directDragging = NO;
+    }
+    if (_cameraStickActive || _directTouch || _touchControls.configuring || _pressedLeft || _pressedRight || _pressedMiddle) return NO;
+    [_touchControls cancelTouches];
+    _cameraStickActive = YES;
+    _cameraStickButton = rightButton ? 1 : 0;
+    [self postMouse:_cameraStickButton ? NSEventTypeRightMouseDown : NSEventTypeLeftMouseDown
+                 at:_last button:_cameraStickButton clicks:1 delta:CGPointZero];
+    return YES;
+}
+- (void)ak_moveCameraStickDelta:(CGPoint)delta {
+    if (!_cameraStickActive || !isfinite(delta.x) || !isfinite(delta.y) || CGPointEqualToPoint(delta, CGPointZero)) return;
+    CGPoint cursor = _last;
+    if (!AKMouseIsCaptured()) {
+        cursor.x = MAX(0, MIN(self.bounds.size.width, cursor.x + delta.x));
+        cursor.y = MAX(0, MIN(self.bounds.size.height, cursor.y + delta.y));
+    }
+    [self postMouse:_cameraStickButton ? NSEventTypeRightMouseDragged : NSEventTypeLeftMouseDragged
+                 at:cursor button:_cameraStickButton clicks:1 delta:delta];
+}
+- (void)ak_endCameraStickCancelled:(BOOL)cancelled {
+    (void)cancelled;
+    if (!_cameraStickActive) return;
+    _cameraStickActive = NO;
+    [self postMouse:_cameraStickButton ? NSEventTypeRightMouseUp : NSEventTypeLeftMouseUp
+                 at:_last button:_cameraStickButton clicks:1 delta:CGPointZero];
 }
 static NSEventModifierFlags AKTouchKeyModsToEventFlags(NSUInteger touchMods) {
     NSEventModifierFlags flags = 0;
@@ -786,7 +825,7 @@ static NSEventModifierFlags AKStandaloneModifierFlagForKeyCode(unsigned short ke
     if ([self handleTrackpadTouches:t event:ev]) return;
     UITouch *finger = AKDirectTouch(t);
     if (finger) {
-        if (_touchControls.configuring || _pressedLeft || _pressedRight || _pressedMiddle) return;
+        if (_touchControls.configuring || _cameraStickActive || _pressedLeft || _pressedRight || _pressedMiddle) return;
         _directTouch = finger; _directButton = AKIsRight(ev);
         _directOrigin = _directFingerLast = [finger locationInView:self];
         _directDragging = NO; _directCancelled = NO; _directTrackpad = NO;

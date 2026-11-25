@@ -533,6 +533,8 @@ static NSArray<NSDictionary<NSString *, id> *> *AKWowMenuItems(void) {
         @{@"title": @"Talents", @"id": @"wolkara.toolbar.wow.talents", @"code": @45, @"char": @"n"},
         @{@"title": @"Quests", @"id": @"wolkara.toolbar.wow.quests", @"code": @37, @"char": @"l"},
         @{@"title": @"Spellbook", @"id": @"wolkara.toolbar.wow.spellbook", @"code": @35, @"char": @"p"},
+        @{@"title": @"Edit Arcs", @"id": @"wolkara.toolbar.wow.editArcs", @"action": @"editArcs"},
+        @{@"title": @"Edit HUD", @"id": @"wolkara.toolbar.wow.editHud", @"action": @"editHud"},
     ];
 }
 
@@ -593,6 +595,25 @@ static NSArray<NSDictionary<NSString *, id> *> *AKWowMenuItems(void) {
     NSArray<NSDictionary<NSString *, id> *> *items = AKWowMenuItems();
     if (sender.tag < 0 || (NSUInteger)sender.tag >= items.count) return;
     NSDictionary<NSString *, id> *entry = items[(NSUInteger)sender.tag];
+    NSString *action = entry[@"action"];
+    if ([action isEqualToString:@"editArcs"]) {
+        _toolbarExpanded = NO;
+        _toolsExpanded = NO;
+        [self updateToolbarVisibility];
+        if ([NSUserDefaults.standardUserDefaults boolForKey:@"WolkaraMobileAvailable"]) {
+            [_gamepad beginMobileEditing];
+        } else {
+            [_gamepad toggleSettings];
+        }
+        return;
+    }
+    if ([action isEqualToString:@"editHud"]) {
+        _toolbarExpanded = NO;
+        _toolsExpanded = NO;
+        [self updateToolbarVisibility];
+        [_gamepad beginLayoutEditing];
+        return;
+    }
     if ([entry[@"chat"] boolValue]) {
         [self toggleKeyboard];
         return;
@@ -625,11 +646,12 @@ static NSArray<NSDictionary<NSString *, id> *> *AKWowMenuItems(void) {
     [self updateToolbarVisibility];
 }
 - (void)updateToolbarVisibility {
-    BOOL hideChrome = self.voiceDraftActive || _gamepad.editingAbilities || _gamepad.mobileEditing;
+    BOOL externalHidden = _gamepad.externalInputActive && !self.keyboardVisible && !self.voiceDraftActive && !_gamepad.editing;
+    BOOL hideChrome = self.voiceDraftActive || _gamepad.editingAbilities || _gamepad.mobileEditing || externalHidden;
     BOOL showBar = _toolbarExpanded && !_gamepad.editing && !hideChrome;
-    BOOL showItems = (_toolbarExpanded && _toolsExpanded && !hideChrome) ||
-                     (_gamepad.editing && !hideChrome) ||
-                     self.voiceDraftActive;
+    BOOL showItems = ((_toolbarExpanded && _toolsExpanded && !hideChrome) ||
+                      (_gamepad.editing && !hideChrome) ||
+                      self.voiceDraftActive) && !externalHidden;
     for (UIView *item in [self toolbarItems]) item.hidden = !showItems;
     _wowMenuBar.hidden = !showBar;
     _wowMenuMoreButton.tintColor = _toolsExpanded ? [UIColor colorWithRed:0.95 green:0.82 blue:0.48 alpha:1] : UIColor.whiteColor;

@@ -2,7 +2,8 @@
 local _,ns=...
 local Bridge=ns.Register("Host controls",{})
 local keys={"ALT-CTRL-SHIFT-F6","ALT-CTRL-SHIFT-F7","ALT-CTRL-F6","ALT-CTRL-F7",
-    "CTRL-SHIFT-F6","CTRL-SHIFT-F7","ALT-SHIFT-F6","ALT-SHIFT-F7"}
+    "CTRL-SHIFT-F6","CTRL-SHIFT-F7","ALT-SHIFT-F6","ALT-SHIFT-F7",
+    "ALT-CTRL-SHIFT-F5","ALT-CTRL-F5"}
 function ns.WrapAbilityButton(action)
     if not action or action.bridgeWrapped or not ns.bridge or InCombatLockdown() then return end
     action.bridgeWrapped=true
@@ -18,15 +19,19 @@ function Bridge:Init()
     function bridge:Command(command)
         ns.hostCommands=(ns.hostCommands or 0)+1
         if command=="on" then
+            if ns.enabled then return end
             ns.SetEnabled(true)
             if not InCombatLockdown() then ns.Print("Round spell buttons enabled.") end
         elseif command=="off" then
+            if not ns.enabled then return end
             ns.SetEnabled(false)
             if not InCombatLockdown() then ns.Print("Round spell buttons disabled.") end
         elseif command=="edit" then ns.SetEditing(true)
-        elseif command=="done" then ns.FinishEditing() end
+        elseif command=="done" then ns.FinishEditing()
+        elseif command=="cancel" then ns.CancelEditing()
+        elseif command=="reset" then ns.ResetDefaults() end
     end
-    local values={"on","off","edit","done","tap","hold","clear","drag"}
+    local values={"on","off","edit","done","tap","hold","clear","drag","cancel","reset"}
     for index,value in ipairs(values) do
         local b=CreateFrame("Button","WolkaraMobileCommand"..index,UIParent,"SecureHandlerClickTemplate")
         b:RegisterForClicks("AnyUp"); b:SetFrameRef("bridge",bridge); b:SetAttribute("command",value)
@@ -40,9 +45,6 @@ function Bridge:Init()
         ]=])
         SetOverrideBindingClick(bridge,false,keys[index],b:GetName())
     end
-    for i=1,ns.MAX_BUTTONS do
-        ns.WrapAbilityButton(_G["WolkaraMobileAbility"..i])
-    end
     if ns.Bags then ns.Bags:Watch() end
     SLASH_WOLKARAMOBILE1="/wolkaramobile"
     SLASH_WOLKARAMOBILE2="/wm"
@@ -51,8 +53,14 @@ function Bridge:Init()
         if cmd=="edit" then
             if ns.editing then ns.FinishEditing() else ns.SetEditing(true) end
             return
+        elseif cmd=="save" then
+            ns.FinishEditing()
+            return
+        elseif cmd=="cancel" then
+            ns.CancelEditing()
+            return
         elseif cmd=="reset" then
-            ns.ResetSideLayout()
+            ns.ResetDefaults()
             return
         elseif cmd=="menu" then
             if ns.Menu and ns.Menu.Open then ns.Menu:Open() end

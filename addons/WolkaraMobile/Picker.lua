@@ -6,13 +6,26 @@ local _, ns = ...
 local COLUMNS, ROWS = 6, 3
 local PER_PAGE = COLUMNS * ROWS
 local CELL_W, CELL_H = 92, 100
-local TABS = { { key = "spells", label = "Spells" }, { key = "items", label = "Items" },
-               { key = "macros", label = "Macros" }, { key = "builtin", label = "Actions" } }
+local TABS = {
+    { key = "spells", label = "Spells" },
+    { key = "prof", label = "Professions" },
+    { key = "items", label = "Items" },
+    { key = "macros", label = "Macros" },
+    { key = "builtin", label = "Actions" },
+}
 
 local Picker = ns.Register("Choose ability", {})
 ns.Picker = Picker
 
 local BOOK = BOOKTYPE_SPELL or "spell"
+
+local function SortChoices(list)
+    table.sort(list, function(a, b)
+        if a.name == b.name then return tostring(a.id) < tostring(b.id) end
+        return tostring(a.name) < tostring(b.name)
+    end)
+    return list
+end
 
 local function CollectSpells()
     local list, seen = {}, {}
@@ -42,8 +55,8 @@ local function CollectSpells()
             end
         end
     elseif GetNumSpellTabs then
-        for tab = 1, GetNumSpellTabs() do
-            local _, _, offset, count = GetSpellTabInfo(tab)
+        for tabIndex = 1, GetNumSpellTabs() do
+            local _, _, offset, count = GetSpellTabInfo(tabIndex)
             for i = (offset or 0) + 1, (offset or 0) + (count or 0) do
                 local kind, spellID = GetSpellBookItemInfo(i, BOOK)
                 local passive = IsPassiveSpell and IsPassiveSpell(i, BOOK)
@@ -55,7 +68,50 @@ local function CollectSpells()
             end
         end
     end
-    return list
+    return SortChoices(list)
+end
+
+local function CollectProfessions()
+    local list, seen = {}, {}
+    local function add(spellID, name, icon)
+        if not spellID or not name or seen[spellID] then return end
+        seen[spellID] = true
+        list[#list + 1] = { kind = "spell", id = spellID, name = name, icon = icon or ns.SpellIcon(spellID) }
+    end
+    if GetProfessions and GetProfessionInfo then
+        local book = C_SpellBook
+        local bank = Enum and Enum.SpellBookSpellBank and Enum.SpellBookSpellBank.Player or 0
+        local spellType = Enum and Enum.SpellBookItemType and Enum.SpellBookItemType.Spell
+        local function scan(...)
+            for idx = 1, select("#", ...) do
+                local prof = select(idx, ...)
+                if type(prof) == "number" and prof > 0 then
+                    local _, _, _, _, count, offset = GetProfessionInfo(prof)
+                    if type(count) == "number" and count > 0 and type(offset) == "number" and offset >= 0 then
+                        for i = offset + 1, offset + count do
+                            if book and book.GetSpellBookItemInfo then
+                                local item = book.GetSpellBookItemInfo(i, bank)
+                                if item and (item.actionID or item.spellID) and not item.isPassive and not item.isOffSpec
+                                    and (not spellType or item.itemType == spellType) then
+                                    add(item.actionID or item.spellID, item.name, item.iconID)
+                                end
+                            elseif GetSpellBookItemInfo then
+                                local kind, spellID = GetSpellBookItemInfo(i, BOOK)
+                                local passive = IsPassiveSpell and IsPassiveSpell(i, BOOK)
+                                if kind == "SPELL" and spellID and not passive then
+                                    local name = GetSpellBookItemName and GetSpellBookItemName(i, BOOK) or ns.SpellName(spellID)
+                                    local icon = GetSpellBookItemTexture and GetSpellBookItemTexture(i, BOOK) or ns.SpellIcon(spellID)
+                                    add(spellID, name, icon)
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        scan(GetProfessions())
+    end
+    return SortChoices(list)
 end
 
 local function CollectItems()
@@ -73,7 +129,7 @@ local function CollectItems()
         end
     end
     for _, slot in ipairs({ 13, 14 }) do add(GetInventoryItemID("player", slot)) end
-    return list
+    return SortChoices(list)
 end
 
 local function CollectMacros()
@@ -86,7 +142,7 @@ local function CollectMacros()
     end
     for i = 1, global or 0 do add(i) end
     for i = accountMax + 1, accountMax + (perCharacter or 0) do add(i) end
-    return list
+    return SortChoices(list)
 end
 
 local function CollectBuiltin()
@@ -94,19 +150,20 @@ local function CollectBuiltin()
     for _, entry in ipairs(ns.BUILTIN) do
         list[#list + 1] = { kind = entry.kind, id = entry.id, name = entry.name, icon = entry.icon }
     end
-    return list
+    return SortChoices(list)
 end
 
-local COLLECT = { spells = CollectSpells, items = CollectItems, macros = CollectMacros, builtin = CollectBuiltin }
+local COLLECT = { spells = CollectSpells, prof = CollectProfessions, items = CollectItems, macros = CollectMacros, builtin = CollectBuiltin }
 local EMPTY = {
     spells = "No active spells in the spellbook.",
+    prof = "No learned profession skills.",
     items = "No usable items in your bags.",
     macros = "No macros. Create one with /macro.",
     builtin = "",
 }
 
-local frame, title, pageLabel, emptyLabel, cells, tabButtons
-local target, list, page, tab = nil, {}, 1, "spells"
+local frame, title, pageLabel, emptyLabel, cells, tabButtons, clearBtn, editBtn
+local target, onPick, list, page, tab = nil, nil, {}, 1, "spells"
 
 local function Show()
     local first = (page - 1) * PER_PAGE
@@ -194,12 +251,17 @@ local function Build()
         local highlight = ns.Box(cell, "HIGHLIGHT", 1, 1, 1, 0.12)
         highlight:SetBlendMode("ADD")
         cell:SetScript("OnClick", function(self)
-            if not self.entry or not target then return end
+            if not self.entry or (not target and not onPick) then return end
             if InCombatLockdown() then ns.Print("Choose abilities outside combat."); return end
             local entry = self.entry
-            ns.AssignEntry(target, { kind = entry.kind, id = entry.id, name = entry.kind == "macrotext" and entry.name or nil,
-                icon = entry.kind == "macrotext" and entry.icon or nil })
+            local binding = { kind = entry.kind, id = entry.id,
+                name = entry.kind == "macrotext" and entry.name or nil,
+                icon = entry.kind == "macrotext" and entry.icon or nil }
+            local cb = onPick
+            local btn = target
             Picker:Close()
+            if cb then cb(binding)
+            elseif btn then ns.AssignEntry(btn, binding) end
         end)
         cells[i] = cell
     end
@@ -220,33 +282,46 @@ local function Build()
 
     local close = Button(frame, "Close", 104, 38, function() Picker:Close() end)
     close:SetPoint("BOTTOMRIGHT", -20, 14)
-    local clear = Button(frame, "Clear", 104, 38, function()
+    clearBtn = Button(frame, "Clear", 104, 38, function()
         if target and not InCombatLockdown() then ns.AssignEntry(target, nil) end
         Picker:Close()
     end)
-    clear:SetPoint("RIGHT", close, "LEFT", -8, 0)
-    local edit = Button(frame, "Edit Layout", 120, 38, function()
+    clearBtn:SetPoint("RIGHT", close, "LEFT", -8, 0)
+    editBtn = Button(frame, "Edit Layout", 120, 38, function()
         Picker:Close()
         ns.SetEditing(true)
     end)
-    edit:SetPoint("RIGHT", clear, "LEFT", -8, 0)
+    editBtn:SetPoint("RIGHT", clearBtn, "LEFT", -8, 0)
 end
 
 function Picker:Init() Build() end
 
 function Picker:Open(button)
     if InCombatLockdown() or not frame then return end
-    target = button
-    title:SetText(button:GetEntry() and ("Replace: " .. (ns.EntryName(button:GetEntry()) or "")) or "Choose an ability")
+    target, onPick = button, nil
+    if clearBtn then clearBtn:Show() end
+    if editBtn then editBtn:Show() end
+    title:SetText(button:GetEntry() and ("Replace: " .. (ns.EntryName(button:GetEntry(), ns.desktopRecords) or "")) or "Choose an ability")
     ns.FitPanel(frame)
     frame:Show()
     SelectTab(tab)
 end
 
+function Picker:OpenForSlot(callback, initialTab, heading)
+    if InCombatLockdown() or not frame or type(callback) ~= "function" then return end
+    target, onPick = nil, callback
+    if clearBtn then clearBtn:Hide() end
+    if editBtn then editBtn:Hide() end
+    title:SetText(heading or "Assign slot")
+    ns.FitPanel(frame)
+    frame:Show()
+    SelectTab(initialTab or tab)
+end
+
 function Picker:IsOpen() return frame ~= nil and frame:IsShown() end
 
 function Picker:Close()
-    target = nil
+    target, onPick = nil, nil
     if frame then frame:Hide() end
 end
 
