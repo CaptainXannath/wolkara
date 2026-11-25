@@ -580,12 +580,14 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     }
 
     CGFloat pillWidth = MIN(264, MAX(180, safe.size.width - 24));
-    _editPill.frame = CGRectMake(CGRectGetMidX(safe) - pillWidth / 2, CGRectGetMaxY(safe) - 50, pillWidth, 44);
+    CGFloat pillHeight = _mobileEditing ? 44 : 40;
+    CGFloat pillY = _mobileEditing ? (CGRectGetMaxY(safe) - 50) : (CGRectGetMinY(safe) + 100);
+    _editPill.frame = CGRectMake(CGRectGetMidX(safe) - pillWidth / 2, pillY, pillWidth, pillHeight);
     CGFloat buttonWidth = (pillWidth - 32) / 3.0;
-    _editDefault.frame = CGRectMake(10, 0, buttonWidth, 44);
-    _editCancel.frame = CGRectMake(16 + buttonWidth, 0, buttonWidth, 44);
-    _editDone.frame = CGRectMake(22 + buttonWidth * 2, 0, buttonWidth, 44);
-    _editAbilitiesButton.frame = CGRectMake(CGRectGetMidX(safe) - 86, CGRectGetMinY(_editPill.frame) - 42, 172, 34);
+    _editDefault.frame = CGRectMake(10, 0, buttonWidth, pillHeight);
+    _editCancel.frame = CGRectMake(16 + buttonWidth, 0, buttonWidth, pillHeight);
+    _editDone.frame = CGRectMake(22 + buttonWidth * 2, 0, buttonWidth, pillHeight);
+    _editAbilitiesButton.frame = CGRectMake(CGRectGetMidX(safe) - 86, CGRectGetMaxY(_editPill.frame) + 6, 172, 34);
     _hint.frame = CGRectMake(CGRectGetMidX(safe) - 160, CGRectGetMinY(safe) + 8, 320, 22);
 
     if (_settings) {
@@ -1309,7 +1311,13 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
 }
 
 - (AKGamepadLayout *)layout { return _overlay.preferences; }
-- (NSArray<GCController *> *)connectedControllers { return GCController.controllers; }
+- (NSArray<GCController *> *)connectedControllers {
+#if TARGET_OS_SIMULATOR
+    return @[];
+#else
+    return GCController.controllers;
+#endif
+}
 - (BOOL)hasPhysicalMouse {
 #if TARGET_OS_SIMULATOR
     return NO;

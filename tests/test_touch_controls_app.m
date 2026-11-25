@@ -663,6 +663,8 @@ static void AKSavedTextSettle(UIViewController *presenter) {
     [gamepad.layout reset]; [controls setNeedsLayout]; [controls layoutIfNeeded];
     for (UIView *item in items) assert(fabs(item.frame.origin.y - ([controls toolbarBounds].origin.y + 44)) < 0.01);
     [NSNotificationCenter.defaultCenter removeObserver:observer];
+    puts("TOUCH_UI_SELF_TEST_PASS: toolbar drag, persistence, resize, reset, edit isolation, Done hit-testing and dictation controls");
+    fflush(stdout);
     NSLog(@"TOUCH_UI_SELF_TEST_PASS: toolbar drag, persistence, resize, reset, edit isolation, Done hit-testing and dictation controls");
     exit(EXIT_SUCCESS);
 }
@@ -1086,8 +1088,15 @@ static void AKSavedTextSettle(UIViewController *presenter) {
 
                 [NSTimer scheduledTimerWithTimeInterval:1 repeats:NO block:^(NSTimer *timer) {
                     (void)timer;
+                    if (![fixture.text isEqual:expected] || controls.keyboardVisible || !host.isFirstResponder) {
+                        fprintf(stderr, "TOUCH_UI_FINAL_MISMATCH: textMatch=%d kb=%d hostFirst=%d\n",
+                                (int)[fixture.text isEqual:expected], (int)controls.keyboardVisible, (int)host.isFirstResponder);
+                        fflush(stderr);
+                    }
                     assert([fixture.text isEqual:expected]);
                     assert(!controls.keyboardVisible && host.isFirstResponder);
+                    puts("TOUCH_UI_SELF_TEST_PASS: system keyboard, autocorrection traits, send/dismiss, whole-field replacement, empty clearing, duplicate suppression, draft editing, dictation and cancellation");
+                    fflush(stdout);
                     NSLog(@"TOUCH_UI_SELF_TEST_PASS: system keyboard, autocorrection traits, send/dismiss, whole-field replacement, empty clearing, duplicate suppression, draft editing, dictation and cancellation");
                     exit(EXIT_SUCCESS);
                 }];

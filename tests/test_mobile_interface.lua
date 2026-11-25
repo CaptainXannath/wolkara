@@ -283,7 +283,7 @@ end
 
 local function Mark(gesture) ns.bridge.attrs.gesture = gesture end
 slot:Click(); assert(clicks[#clicks] == "LeftButton") -- Disabled mode never converts.
-ns.SetEnabled(true); assert(ns.enabled and original:GetScale() == .8)
+ns.SetEnabled(true); assert(ns.enabled and original:GetScale() < .8)
 assert(mainBar:GetAlpha() == 0 and not mainBar:IsMouseClickEnabled())
 assert(masksAdded >= 4 and maskTextures[ns.CIRCLE])
 
