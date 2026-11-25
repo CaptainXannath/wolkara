@@ -299,14 +299,17 @@ Mark("drag"); slot:Click(); assert(#clicks == count)
 Mark("hold"); slot:Click(); assert(#clicks == count and WolkaraMobileBagOptions:IsShown())
 Mark(nil); Button(WolkaraMobileBagOptions, "Cancel"):Click(); assert(not WolkaraMobileBagOptions:IsShown())
 
--- Direct live arc spell/item drop & swap via OnReceiveDrag.
+-- Direct live arc spell/item drop & swap via OnReceiveDrag (`left1` starts with synced spell 102).
 local right1 = WolkaraMobileRightButton1
 local left1 = WolkaraMobileLeftButton1
 assert(right1:IsShown() and left1:IsShown())
+assert(ns.db.pages[1].left[1].kind == "spell" and ns.db.pages[1].left[1].id == 102)
 cursor = { kind = "spell", c = 456 }
 left1:GetScript("OnReceiveDrag")(left1)
 assert(ns.db.pages[1].left[1].kind == "spell" and ns.db.pages[1].left[1].id == 456)
-assert(cursor == nil and left1:GetAttribute("type") == "spell" and left1:GetAttribute("spell") == "Spell 456")
+assert(pickedUp and pickedUp.kind == "spell" and pickedUp.id == 102)
+assert(cursor and cursor.kind == "spell" and left1:GetAttribute("type") == "spell" and left1:GetAttribute("spell") == "Spell 456")
+cursor = nil
 
 cursor = { kind = "item", a = 789 }
 left1:GetScript("OnReceiveDrag")(left1)
