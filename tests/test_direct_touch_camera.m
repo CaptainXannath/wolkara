@@ -271,6 +271,14 @@ static void Command(AKMobileCommand command, NSEventModifierFlags baseline) {
     } while (!up || state != baseline);
     if (trace) fclose(trace);
 }
+static UIView *FindViewByID(UIView *root, NSString *ident) {
+    if ([root.accessibilityIdentifier isEqualToString:ident]) return root;
+    for (UIView *child in root.subviews) {
+        UIView *hit = FindViewByID(child, ident);
+        if (hit) return hit;
+    }
+    return nil;
+}
 static void CheckMobile(void) {
     CGSize size = CGSizeMake(951, 669);
     NSWindow *window = [[NSWindow alloc] initWithContentRect:(CGRect){CGPointZero, size} styleMask:0 backing:0 defer:NO];
@@ -344,6 +352,44 @@ static void CheckMobile(void) {
     [(id<AKMobileInterfaceHost>)host ak_mobileCommand:AKMobileDone]; Command(AKMobileDone, 0);
     [(id<AKMobileInterfaceHost>)host ak_mobileCommand:AKMobileCancel]; Command(AKMobileCancel, 0);
     [(id<AKMobileInterfaceHost>)host ak_mobileCommand:AKMobileReset]; Command(AKMobileReset, 0);
+    // Gamepad-driven Edit Arcs (even on iPhone with trackpad ON) passes canvas touches to WoW while keeping the pill interactive.
+    AKTouchGamepad *gamepad = [controls valueForKey:@"_gamepad"];
+    assert(gamepad);
+    controls.trackpadEnabled = YES;
+    [gamepad beginMobileEditing];
+    [(UIView *)[gamepad valueForKey:@"_overlay"] layoutIfNeeded];
+    [host layoutIfNeeded];
+    Command(AKMobileEdit, 0);
+    Empty();
+    assert(gamepad.mobileEditing && controls.mobileEditing && controls.configuring && !controls.configuringNative);
+    UIView *mobileDone = FindViewByID(host, @"wolkara.mobile.done");
+    assert(mobileDone && !mobileDone.hidden);
+    CGPoint donePoint = [mobileDone convertPoint:CGPointMake(CGRectGetMidX(mobileDone.bounds), CGRectGetMidY(mobileDone.bounds)) toView:host];
+    assert([host hitTest:donePoint withEvent:nil] == mobileDone);
+    assert([host hitTest:origin withEvent:nil] == host);
+    assert([host hitTest:CGPointMake(size.width / 2, 160) withEvent:nil] == host);
+    finger.testType = UITouchTypeDirect;
+    finger.testTime = 4; Send(host, event, finger, UITouchPhaseBegan, origin); Empty();
+    finger.testTime = 4.6; Send(host, event, finger, UITouchPhaseEnded, origin);
+    Command(AKMobileTap, 0);
+    CheckEvent(NSEventTypeMouseMoved, origin, size, 0, 0);
+    CheckEvent(NSEventTypeLeftMouseDown, origin, size, 0, 0);
+    CheckEvent(NSEventTypeLeftMouseUp, origin, size, 0, 0);
+    Command(AKMobileClear, 0); Empty();
+    finger.testTime = 5; Send(host, event, finger, UITouchPhaseBegan, origin); Empty();
+    finger.testTime = 5.1; Send(host, event, finger, UITouchPhaseMoved, target);
+    Command(AKMobileDrag, 0);
+    CheckEvent(NSEventTypeMouseMoved, origin, size, 0, 0);
+    CheckEvent(NSEventTypeLeftMouseDown, origin, size, 0, 0);
+    CheckEvent(NSEventTypeLeftMouseDragged, target, size, 30, 10);
+    Send(host, event, finger, UITouchPhaseEnded, target);
+    CheckEvent(NSEventTypeLeftMouseUp, target, size, 0, 0);
+    Command(AKMobileClear, 0); Empty();
+    [(UIButton *)mobileDone sendActionsForControlEvents:UIControlEventTouchUpInside];
+    [host layoutIfNeeded];
+    Command(AKMobileDone, 0); Empty();
+    assert(!gamepad.mobileEditing && !controls.mobileEditing && controls.trackpadEnabled);
+    controls.trackpadEnabled = NO; Empty();
     // A physical pointer gets neither touch tags nor right-click conversion.
     finger.testType = UITouchTypeIndirectPointer;
     Send(host, event, finger, UITouchPhaseBegan, origin); CheckEvent(NSEventTypeLeftMouseDown, origin, size, 0, 0);

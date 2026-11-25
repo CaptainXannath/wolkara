@@ -223,6 +223,7 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
 @property(nonatomic) BOOL simple;
 @property(nonatomic) BOOL externalInputActive;
 @property(nonatomic, readonly) BOOL configuring;
+@property(nonatomic, readonly) BOOL configuringNative;
 @property(nonatomic, readonly) BOOL editing;
 @property(nonatomic, readonly) BOOL mobileEditing;
 @property(nonatomic, copy) void (^configurationChanged)(void);
@@ -427,7 +428,8 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     return self;
 }
 
-- (BOOL)configuring { return _settings != nil || _editing || _actions.editing || _mobileEditing; }
+- (BOOL)configuringNative { return _settings != nil || _editing || _actions.editing; }
+- (BOOL)configuring { return self.configuringNative || _mobileEditing; }
 
 - (BOOL)configurationContainsPoint:(CGPoint)point inView:(UIView *)view {
     if ([_actions editorContainsPoint:point inView:view]) return YES;
@@ -1846,6 +1848,7 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
 }
 
 - (BOOL)configuring { return _overlay.configuring; }
+- (BOOL)configuringNative { return _overlay.configuringNative; }
 - (void)toggleSettings { [_overlay toggleSettings]; }
 - (void)beginLayoutEditing { [_overlay beginLayoutEditing]; }
 - (void)beginMobileEditing { [_overlay beginMobileEditing]; }

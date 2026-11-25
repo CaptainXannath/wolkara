@@ -354,8 +354,20 @@ for _, c in ipairs(WolkaraMobilePicker.children) do
     if c.entry and c.entry.id == 456 then c:Click(); break end
 end
 Button(WolkaraMobileArcTools, "Add set"):Click()
+WolkaraMobileAddleft:Click()
+for _, c in ipairs(WolkaraMobilePicker.children) do
+    if c.entry and c.entry.id == 123 then c:Click(); break end
+end
 SlashCmdList.WOLKARAMOBILE("save")
 assert(not ns.editing and #ns.db.pages == 2 and WolkaraMobileCycleSet:IsShown())
+assert(WolkaraMobilePage2:IsShown() and not WolkaraMobilePage1:IsShown())
+assert(WolkaraMobileLeftSet2Button1 and WolkaraMobileLeftSet2Button1:IsShown() and WolkaraMobileLeftButton1:IsShown())
+local cycle = assert(compile("return function(self, button, down) " .. WolkaraMobileCycleSet:GetAttribute("_onclick") .. " end"))()
+secure = true; cycle(WolkaraMobileCycleSet, "LeftButton", false); secure = false
+assert(WolkaraMobileCycleSet:GetAttribute("page") == 1 and WolkaraMobilePage1:IsShown() and not WolkaraMobilePage2:IsShown())
+assert(WolkaraMobileLeftButton1:IsShown())
+secure = true; cycle(WolkaraMobileCycleSet, "LeftButton", false); secure = false
+assert(WolkaraMobileCycleSet:GetAttribute("page") == 2 and WolkaraMobilePage2:IsShown() and WolkaraMobileLeftSet2Button1:IsShown())
 assert(ns.db.pages[1].left[1].id == 456)
 assert(ns.db.pages[1].positions.left and ns.db.pages[1].positions.left.x > 0)
 

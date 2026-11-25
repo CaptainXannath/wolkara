@@ -563,8 +563,13 @@ static void AKSavedTextSettle(UIViewController *presenter) {
     [toggle sendActionsForControlEvents:UIControlEventTouchUpInside]; [controls layoutIfNeeded];
     UIButton *editArcs = (id)FindToolbarView(controls, @"wolkara.toolbar.wow.editArcs");
     assert(editArcs && !editArcs.hidden);
+    if ([controls toolbarBounds].size.width >= 700) {
+        UIScrollView *menuScroll = [controls valueForKey:@"_wowMenuScroll"];
+        assert(menuScroll && CGRectContainsRect(menuScroll.bounds, editArcs.frame));
+        assert(CGRectContainsRect(menuScroll.bounds, editHud.frame));
+    }
     [editArcs sendActionsForControlEvents:UIControlEventTouchUpInside]; [controls layoutIfNeeded];
-    assert(gamepad.mobileEditing && menuBar.hidden && toggle.hidden);
+    assert(gamepad.mobileEditing && controls.mobileEditing && controls.configuring && !controls.configuringNative && menuBar.hidden && toggle.hidden);
     UIButton *cancelArcs = (id)FindToolbarView(host, @"wolkara.edit.cancel");
     assert(cancelArcs);
     [cancelArcs sendActionsForControlEvents:UIControlEventTouchUpInside]; [controls layoutIfNeeded];

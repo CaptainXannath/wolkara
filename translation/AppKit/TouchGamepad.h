@@ -29,6 +29,7 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size);
 @property(nonatomic) BOOL keyboardVisible;
 @property(nonatomic, readonly) BOOL visible;
 @property(nonatomic, readonly) BOOL configuring;
+@property(nonatomic, readonly) BOOL configuringNative;
 @property(nonatomic, readonly) BOOL editing;
 @property(nonatomic, readonly) BOOL editingAbilities;
 @property(nonatomic, readonly) BOOL mobileEditing;

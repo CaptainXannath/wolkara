@@ -709,27 +709,28 @@ static NSArray<NSDictionary<NSString *, id> *> *AKWowMenuItems(void) {
     AKGamepadLayout *layout = _gamepad.layout;
     CGRect toggleFallback = CGRectMake(CGRectGetMidX(safe) - 27, safe.origin.y, 54, 36);
     _collapseButton.frame = layout ? [layout frameForItem:_collapseButton.accessibilityIdentifier defaultFrame:toggleFallback inBounds:safe] : toggleFallback;
-    CGFloat barWidth = MAX(220, MIN(safe.size.width - 8, 560));
+    CGFloat trailingWidth = 72;
+    CGFloat contentWidth = 0;
+    for (UIButton *button in _wowMenuButtons) {
+        CGSize fit = [button sizeThatFits:CGSizeMake(200, 38)];
+        contentWidth += ceil(fit.width) + 6;
+    }
+    CGFloat spacing = _wowMenuButtons.count > 1 ? 6 : 0;
+    CGFloat idealWidth = contentWidth + spacing * (_wowMenuButtons.count > 1 ? (CGFloat)(_wowMenuButtons.count - 1) : 0) + 16 + trailingWidth + 10;
+    CGFloat barWidth = MAX(220, MIN(safe.size.width - 8, MAX(560, MIN(idealWidth, 760))));
     if (barWidth > safe.size.width) barWidth = safe.size.width;
     _wowMenuBar.frame = CGRectMake(CGRectGetMidX(safe) - barWidth / 2, safe.origin.y, barWidth, 38);
-    CGFloat trailingWidth = 72;
     _wowMenuCollapseButton.frame = CGRectMake(barWidth - trailingWidth, 4, 30, 30);
     _wowMenuMoreButton.frame = CGRectMake(barWidth - 38, 4, 30, 30);
     CGFloat scrollWidth = MAX(0, barWidth - trailingWidth - 10);
     _wowMenuScroll.frame = CGRectMake(6, 0, scrollWidth, 38);
-    CGFloat contentWidth = 0;
-    for (UIButton *button in _wowMenuButtons) {
-        CGSize fit = [button sizeThatFits:CGSizeMake(200, 38)];
-        contentWidth += ceil(fit.width) + 10;
-    }
-    CGFloat spacing = _wowMenuButtons.count > 1 ? 8 : 0;
     if (_wowMenuButtons.count > 1 && scrollWidth > contentWidth + 16) {
-        spacing = MIN(16, (scrollWidth - contentWidth - 16) / (CGFloat)(_wowMenuButtons.count - 1));
+        spacing = MIN(14, (scrollWidth - contentWidth - 16) / (CGFloat)(_wowMenuButtons.count - 1));
     }
     CGFloat bx = 8;
     for (UIButton *button in _wowMenuButtons) {
         CGSize fit = [button sizeThatFits:CGSizeMake(200, 38)];
-        CGFloat bw = ceil(fit.width) + 10;
+        CGFloat bw = ceil(fit.width) + 6;
         button.frame = CGRectMake(bx, 0, bw, 38);
         bx += bw + spacing;
     }
@@ -913,6 +914,8 @@ static NSArray<NSDictionary<NSString *, id> *> *AKWowMenuItems(void) {
 // Selection handles and system text UI need the same tracking-mode service as
 // the controller settings while the guest owns the main thread.
 - (BOOL)configuring { return _gamepad.configuring || self.keyboardVisible || _savedTextEditing || ![_dictationState isEqualToString:@"idle"]; }
+- (BOOL)configuringNative { return _gamepad.configuringNative || self.keyboardVisible || _savedTextEditing || ![_dictationState isEqualToString:@"idle"]; }
+- (BOOL)mobileEditing { return _gamepad.mobileEditing; }
 - (void)showControlSettings {
     [self cancelDictation];
     if (_gamepad.editing) return;

@@ -780,7 +780,8 @@ static NSEventModifierFlags AKStandaloneModifierFlagForKeyCode(unsigned short ke
         if (hypot(point.x-_directOrigin.x, point.y-_directOrigin.y) < AKTouchDragThreshold) return;
         // Hold-then-drag manipulates original UI (such as dragging a spellbook icon
         // onto a round button); quick swipes retain the established relative camera path.
-        _directAbsolute = _directMobile && (_mobileEditing || touch.timestamp - _directBeganAt >= 0.45) && !AKMouseIsCaptured();
+        BOOL editingMobile = _mobileEditing || _touchControls.mobileEditing;
+        _directAbsolute = _directMobile && (editingMobile || touch.timestamp - _directBeganAt >= 0.45) && !AKMouseIsCaptured();
         [self startDirectDrag];
     }
     CGPoint delta = CGPointMake(point.x-_directFingerLast.x, point.y-_directFingerLast.y);
@@ -810,7 +811,7 @@ static NSEventModifierFlags AKStandaloneModifierFlagForKeyCode(unsigned short ke
     _directTouch = nil; _directPressed = NO; _directDragging = NO; _directMobile = NO; _directAbsolute = NO;
 }
 - (BOOL)handleTrackpadTouches:(NSSet<UITouch *> *)touches event:(UIEvent *)event {
-    if (!_touchControls.trackpadEnabled) return NO;
+    if (!_touchControls.trackpadEnabled || _mobileEditing || _touchControls.mobileEditing) return NO;
     for (UITouch *touch in touches) if (touch.type == UITouchTypeDirect) {
         [_touchControls processTouches:touches withEvent:event];
         return YES;
@@ -825,7 +826,7 @@ static NSEventModifierFlags AKStandaloneModifierFlagForKeyCode(unsigned short ke
     if ([self handleTrackpadTouches:t event:ev]) return;
     UITouch *finger = AKDirectTouch(t);
     if (finger) {
-        if (_touchControls.configuring || _cameraStickActive || _pressedLeft || _pressedRight || _pressedMiddle) return;
+        if (_touchControls.configuringNative || _cameraStickActive || _pressedLeft || _pressedRight || _pressedMiddle) return;
         _directTouch = finger; _directButton = AKIsRight(ev);
         _directOrigin = _directFingerLast = [finger locationInView:self];
         _directDragging = NO; _directCancelled = NO; _directTrackpad = NO;
@@ -859,7 +860,8 @@ static NSEventModifierFlags AKStandaloneModifierFlagForKeyCode(unsigned short ke
         CGPoint point = [_directTouch locationInView:self];
         if (!_directDragging && !_directCancelled && hypot(point.x-_directOrigin.x, point.y-_directOrigin.y) < AKTouchDragThreshold) {
             if (_directRelative || AKMouseIsCaptured()) point = _last;
-            [self markMobileGesture:(_directTouch.timestamp - _directBeganAt >= 0.45 && !_mobileEditing) ? AKMobileHold : AKMobileTap];
+            BOOL editingMobile = _mobileEditing || _touchControls.mobileEditing;
+            [self markMobileGesture:(_directTouch.timestamp - _directBeganAt >= 0.45 && !editingMobile) ? AKMobileHold : AKMobileTap];
             [self postMouse:NSEventTypeMouseMoved at:point button:0 clicks:0 delta:CGPointZero];
             [self postMouse:_directButton ? NSEventTypeRightMouseDown : NSEventTypeLeftMouseDown
                          at:point button:_directButton clicks:1 delta:CGPointZero];

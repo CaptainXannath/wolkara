@@ -383,7 +383,7 @@ local function SyncLiveButtons()
                 local b = EnsureLiveButton(pageIdx, side, slotIdx)
                 ns.ApplyButton(b, ns.desktopRecords)
                 ns.RefreshButton(b)
-                b:SetShown(ns.enabled and not ns.editing and pageIdx == active)
+                b:SetShown(ns.enabled and not ns.editing)
             end
             for slotIdx = #list + 1, #group.buttons do
                 local b = group.buttons[slotIdx]
