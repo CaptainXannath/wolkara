@@ -385,7 +385,12 @@ static void CheckMobile(void) {
     Send(host, event, finger, UITouchPhaseEnded, target);
     CheckEvent(NSEventTypeLeftMouseUp, target, size, 0, 0);
     Command(AKMobileClear, 0); Empty();
-    [(UIButton *)mobileDone sendActionsForControlEvents:UIControlEventTouchUpInside];
+    id doneTarget = ((UIControl *)mobileDone).allTargets.anyObject;
+    NSString *doneAction = [((UIControl *)mobileDone) actionsForTarget:doneTarget forControlEvent:UIControlEventTouchUpInside].firstObject;
+    assert(doneTarget && doneAction);
+    SEL doneSelector = NSSelectorFromString(doneAction);
+    assert([doneTarget respondsToSelector:doneSelector]);
+    ((void (*)(id, SEL))[doneTarget methodForSelector:doneSelector])(doneTarget, doneSelector);
     [host layoutIfNeeded];
     Command(AKMobileDone, 0); Empty();
     assert(!gamepad.mobileEditing && !controls.mobileEditing && controls.trackpadEnabled);
