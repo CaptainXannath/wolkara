@@ -53,9 +53,15 @@ end
 function ns.FinishEditing()
     if InCombatLockdown() then pendingDone=true; pendingCancel=nil; ns.Print("Saving queued until combat ends."); return end
     pendingDone=nil; pendingCancel=nil
+    ns.pendingReload=false
     ns.Each("SaveEditing")
     ns.dirty=false
     ns.SetEditing(false)
+    if ns.pendingReload then
+        ns.pendingReload=false
+        ns.Print("Saving arcs to disk...")
+        if type(ReloadUI)=="function" then ReloadUI() end
+    end
 end
 function ns.CancelEditing()
     if InCombatLockdown() then pendingCancel=true; pendingDone=nil; return end

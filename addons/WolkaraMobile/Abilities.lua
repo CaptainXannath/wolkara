@@ -22,7 +22,7 @@ local switcher
 local actionPages, editGroups = {}, {}
 local draft, selectedPreview, dragPreview, movingGroup
 local barAlpha, barMouse, barHooks = {}, {}, {}
-local trackerHooked, refreshQueued, pendingSync = false, false, false
+local trackerHooked, refreshQueued, pendingSync, unsavedNotice = false, false, false, false
 
 local function ValidEntry(e)
     if type(e) ~= "table" then return false end
@@ -325,7 +325,13 @@ local function EnsureLiveButton(pageIndex, side, slotIndex)
         end)
     b:SetFrameStrata("LOW")
     b.mobilePage, b.mobileSide, b.mobileSlot = pageIndex, side, slotIndex
-    b.OnAssigned = function() ns.MarkChanged() end
+    b.OnAssigned = function()
+        ns.MarkChanged()
+        if not ns.editing and not unsavedNotice then
+            unsavedNotice = true
+            ns.Print("Slot updated. Tap Edit Arcs -> Save or /reload to save to disk.")
+        end
+    end
     group.buttons[slotIndex] = b
     if ns.WrapAbilityButton then ns.WrapAbilityButton(b) end
     return b
@@ -413,6 +419,7 @@ local function SwapDraftSlots(first, second)
     local a, b = page[first.mobileSide], page[second.mobileSide]
     a[first.mobileIndex], b[second.mobileIndex] = b[second.mobileIndex], a[first.mobileIndex]
     draft.customized = true
+    draft.changed = true
 end
 
 local function EnsurePreviewButton(group, index)
@@ -474,6 +481,7 @@ local function OpenPickerForDraftSlot(side, slotIndex)
         if not draft or draft.pages[draft.index] ~= page then return end
         page[side][slotIndex] = CopyEntry(binding)
         draft.customized = true
+        draft.changed = true
         selectedPreview = nil
         UpdateEditorUI()
     end, nil, page[side][slotIndex] and ValidEntry(page[side][slotIndex]) and "Replace slot" or "Add ability")
@@ -559,6 +567,7 @@ local function BuildEditorUI()
         local page = draft.pages[draft.index]
         table.remove(page[selectedPreview.mobileSide], selectedPreview.mobileIndex)
         draft.customized = true
+        draft.changed = true
         selectedPreview = nil
         UpdateEditorUI()
     end)
@@ -579,6 +588,7 @@ local function BuildEditorUI()
         local cur = draft.pages[draft.index]
         draft.pages[#draft.pages + 1] = { left = {}, right = {}, positions = CopyPositions(cur.positions) }
         draft.index = #draft.pages
+        draft.changed = true
         selectedPreview = nil
         UpdateEditorUI()
     end)
@@ -587,6 +597,7 @@ local function BuildEditorUI()
         if not draft or draft.index <= 1 then return end
         table.remove(draft.pages, draft.index)
         draft.index = math.min(draft.index, #draft.pages)
+        draft.changed = true
         selectedPreview = nil
         UpdateEditorUI()
     end)
@@ -626,6 +637,7 @@ local function BuildEditorUI()
                     x = NormalizedCoord(left - uiLeft, tx),
                     y = NormalizedCoord(bottom - uiBot, ty),
                 }
+                draft.changed = true
             end
             LayoutAll()
         end)
@@ -726,6 +738,8 @@ function Abilities:SaveEditing()
     ns.db.pages = CopyPages(draft.pages)
     ns.db.activePage = math.max(1, math.min(draft.index, #ns.db.pages))
     ns.db.customized = draft.customized
+    if draft.changed or ns.dirty then ns.pendingReload = true end
+    unsavedNotice = false
 end
 
 function Abilities:CancelEditing()
@@ -737,6 +751,7 @@ function Abilities:ResetDefaults()
     if draft then
         draft.pages[draft.index] = CopyPage(fresh)
         if draft.index == 1 then draft.customized = not fromDesktop end
+        draft.changed = true
         selectedPreview, dragPreview = nil, nil
         UpdateEditorUI()
     elseif ns.db and ns.db.pages then

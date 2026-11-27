@@ -75,7 +75,8 @@ C_PetJournal = {
 }
 function ToggleAllBags() bagsToggled = bagsToggled + 1 end
 function ToggleWorldMap() mapToggled = mapToggled + 1 end
-function ReloadUI() end
+local reloads = 0
+function ReloadUI() reloads = reloads + 1 end
 function RegisterStateDriver(f, state, body) f.drivers = f.drivers or {}; f.drivers[state] = body end
 function SetOverrideBindingClick(_, _, key, button) bindings[key] = button end
 function hooksecurefunc(t, name, fn)
@@ -337,11 +338,17 @@ for _, c in ipairs(WolkaraMobilePicker.children) do
 end
 assert(not ns.Picker:IsOpen())
 
--- Cancel discards uncommitted draft additions cleanly.
+-- Cancel discards uncommitted draft additions cleanly without reloading.
 SlashCmdList.WOLKARAMOBILE("cancel")
-assert(not ns.editing and #ns.db.pages[1].left == 2)
+assert(not ns.editing and #ns.db.pages[1].left == 2 and reloads == 0)
 
--- Re-enter edit mode, add via +, Move arc, Assign, Add set, Save live without ReloadUI.
+-- Re-enter edit mode without changes and Save: no unnecessary ReloadUI.
+local beforeSave = reloads
+SlashCmdList.WOLKARAMOBILE("edit")
+SlashCmdList.WOLKARAMOBILE("save")
+assert(reloads == beforeSave)
+
+-- Re-enter edit mode, add via +, Move arc, Assign, Add set, Save and flush SavedVariables.
 SlashCmdList.WOLKARAMOBILE("edit")
 WolkaraMobileAddleft:Click()
 for _, c in ipairs(WolkaraMobilePicker.children) do
@@ -369,7 +376,7 @@ for _, c in ipairs(WolkaraMobilePicker.children) do
     if c.entry and c.entry.id == 123 then c:Click(); break end
 end
 SlashCmdList.WOLKARAMOBILE("save")
-assert(not ns.editing and #ns.db.pages == 2 and WolkaraMobileCycleSet:IsShown())
+assert(not ns.editing and #ns.db.pages == 2 and WolkaraMobileCycleSet:IsShown() and reloads == 1)
 assert(WolkaraMobilePage2:IsShown() and not WolkaraMobilePage1:IsShown())
 assert(WolkaraMobileLeftSet2Button1 and WolkaraMobileLeftSet2Button1:IsShown() and WolkaraMobileLeftButton1:IsShown())
 local cycle = assert(compile("return function(self, button, down) " .. WolkaraMobileCycleSet:GetAttribute("_onclick") .. " end"))()
