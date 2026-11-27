@@ -49,9 +49,28 @@ PLIST
 codesign --force --sign - "$APP" > /dev/null
 xcrun simctl install "$SIM_ID" "$APP"
 if [[ " $* " == *" --self-test "* ]]; then
-    # simctl may report success even when the app aborts an assertion.
+    # simctl may report success even when the app aborts an assertion, or under
+    # runner load drop the console stream right before the final PASS flush.
+    DATA_CONTAINER=$(xcrun simctl get_app_container "$SIM_ID" org.tolkara.tests.touch-controls data 2>/dev/null || true)
+    RESULT_FILE=""
+    if [ -n "$DATA_CONTAINER" ]; then
+        RESULT_FILE="$DATA_CONTAINER/Documents/self-test-result.txt"
+        rm -f "$RESULT_FILE"
+    fi
     LOG=build/touch-controls-fixture/self-test.log
     xcrun simctl launch --terminate-running-process --console "$SIM_ID" org.tolkara.tests.touch-controls "$@" 2>&1 | tee "$LOG"
+    if ! grep -Eq 'TOUCH_UI_SELF_TEST_PASS:|SAVED_TEXT_TEST_PASS|REVIEW_DRAFT_TEST_PASS|TOOLBAR_TEST_PASS' "$LOG"; then
+        if [ -n "$RESULT_FILE" ]; then
+            for _ in 1 2 3 4 5 6; do
+                if [ -s "$RESULT_FILE" ]; then break; fi
+                sleep 0.5
+            done
+            if [ -s "$RESULT_FILE" ]; then
+                echo "[simctl console missed final marker; recovered from $RESULT_FILE]" | tee -a "$LOG"
+                cat "$RESULT_FILE" | tee -a "$LOG"
+            fi
+        fi
+    fi
     grep -Eq 'TOUCH_UI_SELF_TEST_PASS:|SAVED_TEXT_TEST_PASS|REVIEW_DRAFT_TEST_PASS|TOOLBAR_TEST_PASS' "$LOG"
 else
     xcrun simctl launch --terminate-running-process --console "$SIM_ID" org.tolkara.tests.touch-controls "$@"

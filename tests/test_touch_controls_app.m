@@ -259,11 +259,39 @@ static void AKSavedTextSettle(UIViewController *presenter) {
     AKDrainFixtureEvents();
 }
 
+static NSString *AKSelfTestResultPath(void) {
+    return [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/self-test-result.txt"];
+}
+static void AKRecordSelfTestResult(NSString *message) {
+    NSString *line = [message stringByAppendingString:@"\n"];
+    NSFileManager *fm = NSFileManager.defaultManager;
+    (void)[fm createDirectoryAtPath:[AKSelfTestResultPath() stringByDeletingLastPathComponent]
+        withIntermediateDirectories:YES attributes:nil error:nil];
+    (void)[line writeToFile:AKSelfTestResultPath() atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    puts(message.UTF8String);
+    fflush(stdout);
+    NSLog(@"%@", message);
+}
+
 @interface AKInputFixtureScene : UIResponder <UIWindowSceneDelegate>
 @property NSWindow *guest;
 @property NSTimer *pump;
 @end
 @implementation AKInputFixtureScene
+- (void)finishSelfTest:(NSString *)passMessage {
+    [self.pump invalidate];
+    self.pump = nil;
+    AKRecordSelfTestResult(passMessage);
+    // Let the CoreSimulator console forwarder drain stdout/NSLog before process exit.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)),
+        dispatch_get_main_queue(), ^{
+            exit(EXIT_SUCCESS);
+        });
+}
+- (void)sceneDidDisconnect:(UIScene *)scene {
+    (void)scene;
+    NSLog(@"fixture: sceneDidDisconnect");
+}
 - (void)checkSavedText {
     UIView *host = [self.guest valueForKey:@"_host"];
     AKTouchControls *controls = [host valueForKey:@"_touchControls"];
@@ -346,8 +374,7 @@ static void AKSavedTextSettle(UIViewController *presenter) {
         assert(storageError != nil);
         NSLog(@"saved-text fixture: Keychain refusal reported (%ld); persistence needs the signed app", (long)storageError.code);
     }
-    NSLog(@"TOUCH_UI_SELF_TEST_PASS: secure saved-text editor, save without typing, single hold submission, persistent-store reload, empty value, background clearing and refusal paths");
-    exit(EXIT_SUCCESS);
+    [self finishSelfTest:@"TOUCH_UI_SELF_TEST_PASS: secure saved-text editor, save without typing, single hold submission, persistent-store reload, empty value, background clearing and refusal paths"];
 }
 - (void)saveFixturePreview {
     [NSTimer scheduledTimerWithTimeInterval:0.3 repeats:NO block:^(NSTimer *timer) {
@@ -369,7 +396,7 @@ static void AKSavedTextSettle(UIViewController *presenter) {
         }];
         NSString *path = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/fixture-preview.png"];
         assert([png writeToFile:path atomically:YES]);
-        NSLog(@"TOUCH_UI_SELF_TEST_PASS: saved UIKit preview"); exit(EXIT_SUCCESS);
+        [self finishSelfTest:@"TOUCH_UI_SELF_TEST_PASS: saved UIKit preview"];
     }];
 }
 - (void)checkLateMetalMetrics {
@@ -427,8 +454,7 @@ static void AKSavedTextSettle(UIViewController *presenter) {
         overlay.hidden = NO; overlay.expanded = YES; record(); [overlay updateMetrics];
         [self saveFixturePreview]; return;
     }
-    NSLog(@"TOUCH_UI_SELF_TEST_PASS: late Metal load, late HUD enable, synthetic 60 FPS and hide/show recovery");
-    exit(EXIT_SUCCESS);
+    [self finishSelfTest:@"TOUCH_UI_SELF_TEST_PASS: late Metal load, late HUD enable, synthetic 60 FPS and hide/show recovery"];
 }
 - (void)checkReviewedVoiceDraft {
     UIView *host = [self.guest valueForKey:@"_host"];
@@ -499,8 +525,7 @@ static void AKSavedTextSettle(UIViewController *presenter) {
     [NSNotificationCenter.defaultCenter postNotificationName:UIApplicationDidEnterBackgroundNotification object:nil];
     assert([lastAction isEqualToString:@"dismiss"] && !draft.text.length && draft.superview.hidden);
     [NSNotificationCenter.defaultCenter removeObserver:observer];
-    NSLog(@"TOUCH_UI_SELF_TEST_PASS: visible live draft, no game input, keyboard editing, exact reviewed confirmation, cancel and background discard");
-    exit(EXIT_SUCCESS);
+    [self finishSelfTest:@"TOUCH_UI_SELF_TEST_PASS: visible live draft, no game input, keyboard editing, exact reviewed confirmation, cancel and background discard"];
 }
 - (void)checkToolbarEditing {
     UIView *host = [self.guest valueForKey:@"_host"];
@@ -678,10 +703,7 @@ static void AKSavedTextSettle(UIViewController *presenter) {
     [gamepad.layout reset]; [controls setNeedsLayout]; [controls layoutIfNeeded];
     for (UIView *item in items) assert(fabs(item.frame.origin.y - ([controls toolbarBounds].origin.y + 44)) < 0.01);
     [NSNotificationCenter.defaultCenter removeObserver:observer];
-    puts("TOUCH_UI_SELF_TEST_PASS: toolbar drag, persistence, resize, reset, edit isolation, Done hit-testing and dictation controls");
-    fflush(stdout);
-    NSLog(@"TOUCH_UI_SELF_TEST_PASS: toolbar drag, persistence, resize, reset, edit isolation, Done hit-testing and dictation controls");
-    exit(EXIT_SUCCESS);
+    [self finishSelfTest:@"TOUCH_UI_SELF_TEST_PASS: toolbar drag, persistence, resize, reset, edit isolation, Done hit-testing and dictation controls"];
 }
 
 - (void)checkTrackingUIProgress {
@@ -709,8 +731,7 @@ static void AKSavedTextSettle(UIViewController *presenter) {
         assert(trackingFired && defaultFired);
         if (surface == 0) [controls dismissKeyboard]; else [gamepad toggleSettings];
     }
-    NSLog(@"TOUCH_UI_SELF_TEST_PASS: UIKit tracking and default work progress while native editor/settings are open");
-    exit(EXIT_SUCCESS);
+    [self finishSelfTest:@"TOUCH_UI_SELF_TEST_PASS: UIKit tracking and default work progress while native editor/settings are open"];
 }
 - (void)checkNativeUIProgress {
     UIView *host = [self.guest valueForKey:@"_host"];
@@ -770,8 +791,7 @@ static void AKSavedTextSettle(UIViewController *presenter) {
     }
     CFRunLoopRemoveSource(CFRunLoopGetCurrent(), source, kCFRunLoopDefaultMode);
     CFRelease(source);
-    NSLog(@"TOUCH_UI_SELF_TEST_PASS: native UI presentation, deferred work, slider updates and queue peeking inside guest loop");
-    exit(EXIT_SUCCESS);
+    [self finishSelfTest:@"TOUCH_UI_SELF_TEST_PASS: native UI presentation, deferred work, slider updates and queue peeking inside guest loop"];
 }
 - (void)scene:(UIScene *)scene willConnectToSession:(UISceneSession *)session options:(UISceneConnectionOptions *)options {
     (void)session; (void)options;
@@ -1101,20 +1121,23 @@ static void AKSavedTextSettle(UIViewController *presenter) {
                 NSLog(@"native: the toolbar carries Leave the game");
                 [fixture.text setString:expected];
 
-                [NSTimer scheduledTimerWithTimeInterval:1 repeats:NO block:^(NSTimer *timer) {
+                NSTimer *finalTimer = [NSTimer timerWithTimeInterval:1 repeats:NO block:^(NSTimer *timer) {
                     (void)timer;
-                    if (![fixture.text isEqual:expected] || controls.keyboardVisible || !host.isFirstResponder) {
-                        fprintf(stderr, "TOUCH_UI_FINAL_MISMATCH: textMatch=%d kb=%d hostFirst=%d\n",
-                                (int)[fixture.text isEqual:expected], (int)controls.keyboardVisible, (int)host.isFirstResponder);
+                    BOOL textMatch = [fixture.text isEqual:expected];
+                    BOOL keyboardVisible = controls.keyboardVisible;
+                    BOOL hostFirst = host.isFirstResponder;
+                    if (!textMatch || keyboardVisible || !hostFirst) {
+                        NSString *mismatch = [NSString stringWithFormat:@"TOUCH_UI_FINAL_MISMATCH: textMatch=%d kb=%d hostFirst=%d",
+                                              (int)textMatch, (int)keyboardVisible, (int)hostFirst];
+                        AKRecordSelfTestResult(mismatch);
+                        fprintf(stderr, "%s\n", mismatch.UTF8String);
                         fflush(stderr);
                     }
-                    assert([fixture.text isEqual:expected]);
-                    assert(!controls.keyboardVisible && host.isFirstResponder);
-                    puts("TOUCH_UI_SELF_TEST_PASS: system keyboard, autocorrection traits, send/dismiss, whole-field replacement, empty clearing, duplicate suppression, draft editing, dictation and cancellation");
-                    fflush(stdout);
-                    NSLog(@"TOUCH_UI_SELF_TEST_PASS: system keyboard, autocorrection traits, send/dismiss, whole-field replacement, empty clearing, duplicate suppression, draft editing, dictation and cancellation");
-                    exit(EXIT_SUCCESS);
+                    assert(textMatch);
+                    assert(!keyboardVisible && hostFirst);
+                    [self finishSelfTest:@"TOUCH_UI_SELF_TEST_PASS: system keyboard, autocorrection traits, send/dismiss, whole-field replacement, empty clearing, duplicate suppression, draft editing, dictation and cancellation"];
                 }];
+                [NSRunLoop.mainRunLoop addTimer:finalTimer forMode:NSRunLoopCommonModes];
             }];
         }];
     }
@@ -1124,6 +1147,10 @@ static void AKSavedTextSettle(UIViewController *presenter) {
 @interface AKInputFixtureApp : UIResponder <UIApplicationDelegate>
 @end
 @implementation AKInputFixtureApp
+- (void)applicationWillTerminate:(UIApplication *)application {
+    (void)application;
+    NSLog(@"fixture: applicationWillTerminate");
+}
 - (UISceneConfiguration *)application:(UIApplication *)app configurationForConnectingSceneSession:(UISceneSession *)session options:(UISceneConnectionOptions *)options {
     (void)app; (void)options;
     UISceneConfiguration *config = [[UISceneConfiguration alloc] initWithName:@"Input fixture" sessionRole:session.role];
