@@ -48,6 +48,8 @@ function ns.SplitDesktopToSides(ordered, records)
             local target = (count % 2 == 1) and profile.right or profile.left
             if ValidActionID(rec.id) and (rec.kind == "item" or (rec.kind == "spell" and rec.subtype ~= "pet" and rec.subtype ~= "flyout")) then
                 target[#target + 1] = { kind = rec.kind, id = rec.id }
+            elseif rec.kind == "summonmount" and (ValidActionID(rec.id) or rec.id == 0) then
+                target[#target + 1] = { kind = "mount", id = rec.id }
             else
                 target[#target + 1] = { kind = "desktop", key = key }
             end
@@ -60,6 +62,12 @@ function ns.EntryIcon(entry, records)
     if not entry then return nil end
     if entry.kind == "spell" then return ns.SpellIcon(entry.id) end
     if entry.kind == "item" then return ns.ItemIcon(entry.id) end
+    if entry.kind == "mount" or entry.kind == "summonmount" then
+        if entry.icon then return entry.icon end
+        local _, spellID, icon = ns.MountInfo(entry.id)
+        return icon or (spellID and ns.SpellIcon(spellID))
+    end
+    if entry.kind == "battlepet" then return entry.icon or ns.QUESTION end
     if entry.kind == "macro" then
         local _, icon = GetMacroInfo(entry.id)
         return icon
@@ -81,8 +89,13 @@ function ns.EntryName(entry, records)
         if not rec then return entry.key end
         kind, id = rec.kind, rec.id
     end
-    if kind == "spell" then return ns.SpellName(id) end
-    if kind == "item" then return ns.ItemName(id) end
+    if kind == "spell" then return ns.SpellName(id) or entry.name end
+    if kind == "item" then return ns.ItemName(id) or entry.name end
+    if kind == "mount" or kind == "summonmount" then
+        local name = ns.MountInfo(id)
+        return name or entry.name or (id and tostring(id))
+    end
+    if kind == "battlepet" then return entry.name or "Companion" end
     if kind == "macro" and GetMacroInfo then return GetMacroInfo(id) or entry.name or id end
     return entry.name or (id and tostring(id))
 end
@@ -109,6 +122,28 @@ function ns.ApplyButton(button, records)
     elseif entry.kind == "spell" then
         button:SetAttribute("type", "spell")
         button:SetAttribute("spell", ns.SpellName(entry.id) or entry.id)
+    elseif entry.kind == "mount" then
+        local name, spellID = ns.MountInfo(entry.id)
+        name = name or entry.name
+        spellID = spellID or entry.spell
+        if entry.id == 0 or entry.id == 268435455 then
+            button:SetAttribute("type", "macro")
+            button:SetAttribute("macrotext", "/run C_MountJournal.SummonByID(0)")
+        elseif type(name) == "string" and name ~= "" and not name:find("[\r\n]") then
+            button:SetAttribute("type", "macro")
+            button:SetAttribute("macrotext", "/cast " .. name)
+        elseif spellID and ns.SpellName(spellID) then
+            button:SetAttribute("type", "spell")
+            button:SetAttribute("spell", ns.SpellName(spellID))
+        elseif type(entry.id) == "number" then
+            button:SetAttribute("type", "macro")
+            button:SetAttribute("macrotext", "/run C_MountJournal.SummonByID(" .. tostring(entry.id) .. ")")
+        else
+            button:SetAttribute("type", nil)
+        end
+    elseif entry.kind == "battlepet" and type(entry.id) == "string" and entry.id:match("^[%w%-]+$") then
+        button:SetAttribute("type", "macro")
+        button:SetAttribute("macrotext", "/run C_PetJournal.SummonPetByGUID('" .. entry.id .. "')")
     elseif entry.kind == "item" then
         button:SetAttribute("type", "item")
         button:SetAttribute("item", "item:" .. entry.id)
@@ -160,6 +195,9 @@ function ns.UpdateCooldown(button)
         start, duration, enable = ns.ActionCooldown(slot)
     elseif entry and entry.kind == "spell" then
         start, duration, enable = ns.SpellCooldown(entry.id)
+    elseif entry and entry.kind == "mount" then
+        local _, spellID = ns.MountInfo(entry.id)
+        if spellID then start, duration, enable = ns.SpellCooldown(spellID) end
     elseif entry and entry.kind == "item" then
         start, duration, enable = ns.ItemCooldown(entry.id)
     end
@@ -196,6 +234,10 @@ function ns.UpdateState(button)
     elseif entry.kind == "spell" then
         usable, noPower = ns.SpellUsable(entry.id)
         inRange = ns.SpellInRange(entry.id)
+    elseif entry.kind == "mount" then
+        local _, spellID, _, _, mountUsable = ns.MountInfo(entry.id)
+        if mountUsable ~= nil then usable = mountUsable and true or false
+        elseif spellID then usable, noPower = ns.SpellUsable(spellID) end
     elseif entry.kind == "item" then
         usable = (ns.ItemCount(entry.id) or 0) > 0
     end

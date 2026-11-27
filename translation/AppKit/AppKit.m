@@ -421,6 +421,13 @@ NSEventModifierFlags AKModifiersReconciled(NSEventModifierFlags held, NSEventMod
         [NSApp postEvent:event atStart:NO];
     }
 }
+- (void)postKeyWithModifiers:(NSEventModifierFlags)targetModifiers keyCode:(unsigned short)code characters:(NSString *)characters unmodified:(NSString *)unmodified {
+    NSEventModifierFlags hardware = _mods;
+    NSEventModifierFlags chord = AKModifiersReconciled(hardware, targetModifiers | (hardware & NSEventModifierFlagCapsLock));
+    [self postMobileModifierTransitionFrom:hardware to:chord];
+    [self postTextKey:code characters:characters unmodified:unmodified modifiers:chord];
+    [self postMobileModifierTransitionFrom:chord to:hardware];
+}
 - (void)ak_mobileCommand:(AKMobileCommand)command {
     if (command > AKMobileReset) return;
     if (command == AKMobileEdit) _mobileEditing = YES;
@@ -439,11 +446,7 @@ NSEventModifierFlags AKModifiersReconciled(NSEventModifierFlags held, NSEventMod
     unsigned short code = codes[command];
     unichar character = chars[command];
     NSString *characters = [NSString stringWithCharacters:&character length:1];
-    NSEventModifierFlags hardware = _mods;
-    NSEventModifierFlags chord = AKModifiersReconciled(hardware, masks[command] | (hardware & NSEventModifierFlagCapsLock));
-    [self postMobileModifierTransitionFrom:hardware to:chord];
-    [self postTextKey:code characters:characters unmodified:characters modifiers:chord];
-    [self postMobileModifierTransitionFrom:chord to:hardware];
+    [self postKeyWithModifiers:masks[command] keyCode:code characters:characters unmodified:characters];
 }
 - (void)markMobileGesture:(AKMobileCommand)command {
     if (!_directMobile) return;
@@ -473,6 +476,15 @@ NSEventModifierFlags AKModifiersReconciled(NSEventModifierFlags held, NSEventMod
     [self touchInsertText:text];
 }
 - (void)touchSpecialKey:(unsigned short)code characters:(NSString *)characters {
+    [self touchSpecialKey:code characters:characters modifiers:0];
+}
+- (void)touchSpecialKey:(unsigned short)code characters:(NSString *)characters modifiers:(NSUInteger)modifiers {
+    if (modifiers) {
+        NSString *text = (modifiers & NSEventModifierFlagShift) ? characters.uppercaseString : characters;
+        NSString *unmodified = characters.lowercaseString ?: characters;
+        [self postKeyWithModifiers:(NSEventModifierFlags)modifiers keyCode:code characters:text unmodified:unmodified];
+        return;
+    }
     [self postTextKey:code characters:characters unmodified:characters modifiers:0];
 }
 - (BOOL)usesRelativeMouse { return AKMouseIsCaptured() && GCMouse.mice.count>0; }

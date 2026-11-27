@@ -10,6 +10,7 @@ local entries={
     {TALENTS or "Talents","TalentMicroButton"},
     {QUESTLOG_BUTTON or "Quests","QuestLogMicroButton"},
     {WORLD_MAP or "Map",nil,function() ToggleWorldMap() end},
+    {COLLECTIONS or "Collections","CollectionsMicroButton",function() if ToggleCollectionsJournal then ToggleCollectionsJournal() end end},
     {SOCIAL_BUTTON or "Social","SocialsMicroButton"},
     {GUILD or "Guild","GuildMicroButton"},
     {MAINMENU_BUTTON or "Game menu",nil,function()

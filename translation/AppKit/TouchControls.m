@@ -527,12 +527,14 @@ static void AKEmitTouch(void *context, AKTrackpadAction action, double x, double
 static NSArray<NSDictionary<NSString *, id> *> *AKWowMenuItems(void) {
     return @[
         @{@"title": @"Chat", @"id": @"wolkara.toolbar.wow.chat", @"chat": @YES},
+        @{@"title": @"Menu", @"id": @"wolkara.toolbar.wow.menu", @"code": @53, @"char": @"\x1b"},
         @{@"title": @"Bags", @"id": @"wolkara.toolbar.wow.bags", @"code": @11, @"char": @"b"},
         @{@"title": @"Map", @"id": @"wolkara.toolbar.wow.map", @"code": @46, @"char": @"m"},
         @{@"title": @"Character", @"id": @"wolkara.toolbar.wow.character", @"code": @8, @"char": @"c"},
         @{@"title": @"Talents", @"id": @"wolkara.toolbar.wow.talents", @"code": @45, @"char": @"n"},
         @{@"title": @"Quests", @"id": @"wolkara.toolbar.wow.quests", @"code": @37, @"char": @"l"},
         @{@"title": @"Spellbook", @"id": @"wolkara.toolbar.wow.spellbook", @"code": @35, @"char": @"p"},
+        @{@"title": @"Collections", @"id": @"wolkara.toolbar.wow.collections", @"code": @35, @"char": @"p", @"modifiers": @(1UL << 17)},
         @{@"title": @"Edit Arcs", @"id": @"wolkara.toolbar.wow.editArcs", @"action": @"editArcs"},
         @{@"title": @"Edit HUD", @"id": @"wolkara.toolbar.wow.editHud", @"action": @"editHud"},
     ];
@@ -618,7 +620,14 @@ static NSArray<NSDictionary<NSString *, id> *> *AKWowMenuItems(void) {
         [self toggleKeyboard];
         return;
     }
-    [self touchSpecialKey:(unsigned short)[entry[@"code"] unsignedShortValue] characters:entry[@"char"]];
+    NSUInteger modifiers = [entry[@"modifiers"] unsignedIntegerValue];
+    unsigned short code = (unsigned short)[entry[@"code"] unsignedShortValue];
+    NSString *characters = entry[@"char"];
+    if (modifiers) {
+        [self touchSpecialKey:code characters:characters modifiers:modifiers];
+    } else {
+        [self touchSpecialKey:code characters:characters];
+    }
 }
 
 - (NSArray<UIView *> *)toolbarItems {
@@ -715,9 +724,9 @@ static NSArray<NSDictionary<NSString *, id> *> *AKWowMenuItems(void) {
         CGSize fit = [button sizeThatFits:CGSizeMake(200, 38)];
         contentWidth += ceil(fit.width) + 6;
     }
-    CGFloat spacing = _wowMenuButtons.count > 1 ? 6 : 0;
+    CGFloat spacing = _wowMenuButtons.count > 1 ? 5 : 0;
     CGFloat idealWidth = contentWidth + spacing * (_wowMenuButtons.count > 1 ? (CGFloat)(_wowMenuButtons.count - 1) : 0) + 16 + trailingWidth + 10;
-    CGFloat barWidth = MAX(220, MIN(safe.size.width - 8, MAX(560, MIN(idealWidth, 760))));
+    CGFloat barWidth = MAX(220, MIN(safe.size.width - 8, MAX(560, MIN(idealWidth, 820))));
     if (barWidth > safe.size.width) barWidth = safe.size.width;
     _wowMenuBar.frame = CGRectMake(CGRectGetMidX(safe) - barWidth / 2, safe.origin.y, barWidth, 38);
     _wowMenuCollapseButton.frame = CGRectMake(barWidth - trailingWidth, 4, 30, 30);
@@ -725,7 +734,7 @@ static NSArray<NSDictionary<NSString *, id> *> *AKWowMenuItems(void) {
     CGFloat scrollWidth = MAX(0, barWidth - trailingWidth - 10);
     _wowMenuScroll.frame = CGRectMake(6, 0, scrollWidth, 38);
     if (_wowMenuButtons.count > 1 && scrollWidth > contentWidth + 16) {
-        spacing = MIN(14, (scrollWidth - contentWidth - 16) / (CGFloat)(_wowMenuButtons.count - 1));
+        spacing = MIN(12, (scrollWidth - contentWidth - 16) / (CGFloat)(_wowMenuButtons.count - 1));
     }
     CGFloat bx = 8;
     for (UIButton *button in _wowMenuButtons) {
@@ -734,7 +743,9 @@ static NSArray<NSDictionary<NSString *, id> *> *AKWowMenuItems(void) {
         button.frame = CGRectMake(bx, 0, bw, 38);
         bx += bw + spacing;
     }
-    _wowMenuScroll.contentSize = CGSizeMake(MAX(scrollWidth, bx + 4), 38);
+    CGFloat contentEnd = _wowMenuButtons.count ? (bx - spacing + 8) : scrollWidth;
+    _wowMenuScroll.contentSize = CGSizeMake(MAX(scrollWidth, contentEnd), 38);
+    _wowMenuScroll.showsHorizontalScrollIndicator = contentEnd > scrollWidth + 1;
     NSArray<UIView *> *items = [self toolbarItems];
     BOOL compact = safe.size.width < 408;
     CGFloat width = compact ? 252 : 408;
@@ -1087,6 +1098,13 @@ static NSArray<NSDictionary<NSString *, id> *> *AKWowMenuItems(void) {
 - (void)touchSpecialKey:(unsigned short)code characters:(NSString *)characters {
     if ([self.delegate respondsToSelector:@selector(touchSpecialKey:characters:)])
         [self.delegate touchSpecialKey:code characters:characters];
+}
+- (void)touchSpecialKey:(unsigned short)code characters:(NSString *)characters modifiers:(NSUInteger)modifiers {
+    if ([self.delegate respondsToSelector:@selector(touchSpecialKey:characters:modifiers:)]) {
+        [self.delegate touchSpecialKey:code characters:characters modifiers:modifiers];
+    } else if ([self.delegate respondsToSelector:@selector(touchSpecialKey:characters:)]) {
+        [self.delegate touchSpecialKey:code characters:characters];
+    }
 }
 - (void)replaceGameText:(NSString *)text {
     // A host with no draft panel leaves this out; the button then does nothing

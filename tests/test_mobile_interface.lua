@@ -63,6 +63,16 @@ function GetItemCount() return 5 end
 function GetInventoryItemID() return nil end
 function GetMacroInfo(id) return "Macro " .. tostring(id), "macro-icon" end
 function GetNumMacros() return 0, 0 end
+C_MountJournal = {
+    GetMountIDs = function() return { 901, 902 } end,
+    GetMountInfoByID = function(id)
+        if id == 901 then return "Swift Riding Horse", 3331, "mount-icon-901", false, true, 1, true, false, nil, false, true, 901 end
+        if id == 902 then return "Uncollected Drake", 3332, "mount-icon-902", false, false, 1, false, false, nil, false, false, 902 end
+    end,
+}
+C_PetJournal = {
+    GetPetInfoByPetID = function() return 10, "Mini Dragon", 1, 0, 1, 1, false, "Whelp", "pet-icon-1" end,
+}
 function ToggleAllBags() bagsToggled = bagsToggled + 1 end
 function ToggleWorldMap() mapToggled = mapToggled + 1 end
 function ReloadUI() end
@@ -287,7 +297,7 @@ ns.SetEnabled(true); assert(ns.enabled and original:GetScale() < .8)
 assert(mainBar:GetAlpha() == 0 and not mainBar:IsMouseClickEnabled())
 assert(masksAdded >= 4 and maskTextures[ns.CIRCLE])
 
-SlashCmdList.WOLKARAMOBILE("menu"); assert(WolkaraMobileMenu:IsShown())
+SlashCmdList.WOLKARAMOBILE("menu"); assert(WolkaraMobileMenu:IsShown() and Button(WolkaraMobileMenu, "Collections"))
 SlashCmdList.WOLKARAMOBILE("menu"); assert(not WolkaraMobileMenu:IsShown())
 
 slot:Click(); assert(clicks[#clicks] == "LeftButton")
@@ -393,6 +403,36 @@ local left3 = WolkaraMobileLeftButton3
 assert(left3 and left3:IsShown() and left3:GetAttribute("type") == "spell")
 Mark("drag"); left3:Click(); assert(not left3.casts)
 Mark("tap"); left3:Click("LeftButton", true); left3:Click(); assert(left3.casts == 1)
+
+-- Collections assignment: mounts (named & random favorite), battle pets, toys, and Mounts picker tab.
+cursor = { kind = "mount", a = 901 }
+left1:GetScript("OnReceiveDrag")(left1)
+assert(ns.db.pages[1].left[1].kind == "mount" and ns.db.pages[1].left[1].id == 901)
+assert(left1:GetAttribute("type") == "macro" and left1:GetAttribute("macrotext") == "/cast Swift Riding Horse")
+cursor = { kind = "mount", a = 268435455 }
+left1:GetScript("OnReceiveDrag")(left1)
+assert(left1:GetAttribute("type") == "macro" and left1:GetAttribute("macrotext") == "/run C_MountJournal.SummonByID(0)")
+cursor = { kind = "battlepet", a = "BattlePet-0-001" }
+left1:GetScript("OnReceiveDrag")(left1)
+assert(ns.db.pages[1].left[1].kind == "battlepet" and left1:GetAttribute("macrotext") == "/run C_PetJournal.SummonPetByGUID('BattlePet-0-001')")
+cursor = { kind = "toy", a = 888 }
+left1:GetScript("OnReceiveDrag")(left1)
+assert(ns.db.pages[1].left[1].kind == "item" and left1:GetAttribute("type") == "item" and left1:GetAttribute("item") == "item:888")
+cursor = nil
+
+SlashCmdList.WOLKARAMOBILE("edit")
+WolkaraMobileAddleft:Click()
+Button(WolkaraMobilePicker, "Mounts"):Click()
+local sawCollected, sawUncollected = false, false
+for _, c in ipairs(WolkaraMobilePicker.children) do
+    if c.entry and c:IsShown() then
+        if c.entry.id == 901 then sawCollected = true; c:Click(); break
+        elseif c.entry.id == 902 then sawUncollected = true end
+    end
+end
+assert(sawCollected and not sawUncollected and not ns.Picker:IsOpen())
+SlashCmdList.WOLKARAMOBILE("save")
+assert(WolkaraMobileLeftButton4 and WolkaraMobileLeftButton4:GetAttribute("macrotext") == "/cast Swift Riding Horse")
 
 -- Default reset restores desktop sync; Disable restores desktop bars (e.g. hardware connected).
 SlashCmdList.WOLKARAMOBILE("reset")

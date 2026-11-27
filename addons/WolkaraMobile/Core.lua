@@ -222,6 +222,17 @@ function ns.ItemCooldown(id)
     if GetItemCooldown then return GetItemCooldown(id) end
 end
 
+function ns.MountInfo(id)
+    if not id then return nil end
+    if id == 0 or id == 268435455 then
+        return "Random Favorite Mount", nil, "Interface\\Icons\\Ability_Mount_RidingHorse", false, true
+    end
+    if C_MountJournal and C_MountJournal.GetMountInfoByID then
+        local name, spellID, icon, active, usable = C_MountJournal.GetMountInfoByID(id)
+        if name or spellID or icon then return name, spellID, icon, active, usable end
+    end
+end
+
 function ns.PickupEntry(entry)
     if entry.kind == "spell" then
         if C_Spell and C_Spell.PickupSpell then C_Spell.PickupSpell(entry.id) elseif PickupSpell then PickupSpell(entry.id) end
@@ -229,10 +240,19 @@ function ns.PickupEntry(entry)
         if C_Item and C_Item.PickupItem then C_Item.PickupItem(entry.id) elseif PickupItem then PickupItem(entry.id) end
     elseif entry.kind == "macro" then
         PickupMacro(entry.id)
+    elseif entry.kind == "mount" and C_MountJournal and C_MountJournal.Pickup then
+        if entry.id == 0 or entry.id == 268435455 then
+            C_MountJournal.Pickup(0)
+        elseif C_MountJournal.GetNumDisplayedMounts and C_MountJournal.GetDisplayedMountInfo then
+            for i = 1, (C_MountJournal.GetNumDisplayedMounts() or 0) do
+                local _, _, _, _, _, _, _, _, _, _, _, mountID = C_MountJournal.GetDisplayedMountInfo(i)
+                if mountID == entry.id then C_MountJournal.Pickup(i); return end
+            end
+        end
     end
 end
 
--- What the cursor holds as an assignable slot entry: a spell, item, or macro.
+-- What the cursor holds as an assignable slot entry: a spell, mount, item, toy, companion, or macro.
 function ns.CursorEntry()
     local kind, a, b, c = GetCursorInfo()
     if kind == "spell" then
@@ -246,13 +266,40 @@ function ns.CursorEntry()
             spellID = id
         end
         if spellID then return { kind = "spell", id = spellID } end
-    elseif kind == "item" and a then
+    elseif kind == "mount" and a then
+        local name, spellID, icon = ns.MountInfo(a)
+        return { kind = "mount", id = a, spell = spellID, name = name, icon = icon }
+    elseif kind == "companion" and a then
+        if b == "MOUNT" and GetCompanionInfo then
+            local _, name, spellID, icon = GetCompanionInfo("MOUNT", a)
+            if spellID then return { kind = "spell", id = spellID, name = name, icon = icon } end
+        end
+    elseif (kind == "item" or kind == "toy") and a then
         return { kind = "item", id = a }
+    elseif kind == "battlepet" and type(a) == "string" and a:match("^[%w%-]+$") then
+        local name, icon
+        if C_PetJournal and C_PetJournal.GetPetInfoByPetID then
+            local info = { C_PetJournal.GetPetInfoByPetID(a) }
+            name = info[2] or info[8]
+            icon = info[9]
+        end
+        return { kind = "battlepet", id = a, name = name, icon = icon }
+    elseif kind == "equipmentset" and type(a) == "string" and a ~= "" then
+        local setName = a:gsub("[\r\n]", "")
+        local icon
+        if C_EquipmentSet and C_EquipmentSet.GetEquipmentSetID and C_EquipmentSet.GetEquipmentSetInfo then
+            local setID = C_EquipmentSet.GetEquipmentSetID(setName)
+            if setID then
+                local n, ic = C_EquipmentSet.GetEquipmentSetInfo(setID)
+                setName, icon = (n and n:gsub("[\r\n]", "")) or setName, ic
+            end
+        end
+        if setName ~= "" then return { kind = "macrotext", id = "/equipset " .. setName, name = setName, icon = icon or ns.QUESTION } end
     elseif kind == "macro" and a then
         local name = GetMacroInfo(a)
         if name then return { kind = "macro", id = name } end
     elseif kind then
-        ns.Print("Only spells, usable items, and macros can be dropped here.")
+        ns.Print("Drop a spell, mount, item, toy, pet, or macro here.")
     end
     return nil
 end

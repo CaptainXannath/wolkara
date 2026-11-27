@@ -27,13 +27,13 @@ local trackerHooked, refreshQueued, pendingSync = false, false, false
 local function ValidEntry(e)
     if type(e) ~= "table" then return false end
     local k = e.kind
-    return (k == "spell" or k == "item" or k == "macro" or k == "macrotext" or k == "action") and e.id ~= nil
+    return (k == "spell" or k == "item" or k == "macro" or k == "macrotext" or k == "action" or k == "mount" or k == "battlepet") and e.id ~= nil
         or (k == "desktop" and type(e.key) == "string")
 end
 
 local function CopyEntry(e)
     if not ValidEntry(e) then return {} end
-    return { kind = e.kind, id = e.id, key = e.key, name = e.name, icon = e.icon }
+    return { kind = e.kind, id = e.id, key = e.key, spell = e.spell, name = e.name, icon = e.icon }
 end
 
 local function CopyPositions(src)

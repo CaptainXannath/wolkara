@@ -8,9 +8,10 @@ local PER_PAGE = COLUMNS * ROWS
 local CELL_W, CELL_H = 92, 100
 local TABS = {
     { key = "spells", label = "Spells" },
-    { key = "prof", label = "Professions" },
+    { key = "prof", label = "Profs" },
     { key = "items", label = "Items" },
     { key = "macros", label = "Macros" },
+    { key = "mounts", label = "Mounts" },
     { key = "builtin", label = "Actions" },
 }
 
@@ -145,6 +146,31 @@ local function CollectMacros()
     return SortChoices(list)
 end
 
+local function CollectMounts()
+    local list, seen = {}, {}
+    if C_MountJournal and C_MountJournal.GetMountIDs and C_MountJournal.GetMountInfoByID then
+        for _, mountID in ipairs(C_MountJournal.GetMountIDs() or {}) do
+            local name, spellID, icon, _, _, _, _, _, _, hideOnChar, isCollected = C_MountJournal.GetMountInfoByID(mountID)
+            if isCollected and not hideOnChar and name and not seen[mountID] then
+                seen[mountID] = true
+                list[#list + 1] = {
+                    kind = "mount", id = mountID, spell = spellID, name = name,
+                    icon = icon or (spellID and ns.SpellIcon(spellID)),
+                }
+            end
+        end
+    elseif GetNumCompanions and GetCompanionInfo then
+        for i = 1, (GetNumCompanions("MOUNT") or 0) do
+            local _, name, spellID, icon = GetCompanionInfo("MOUNT", i)
+            if spellID and name and not seen[spellID] then
+                seen[spellID] = true
+                list[#list + 1] = { kind = "spell", id = spellID, name = name, icon = icon or ns.SpellIcon(spellID) }
+            end
+        end
+    end
+    return SortChoices(list)
+end
+
 local function CollectBuiltin()
     local list = {}
     for _, entry in ipairs(ns.BUILTIN) do
@@ -153,12 +179,13 @@ local function CollectBuiltin()
     return SortChoices(list)
 end
 
-local COLLECT = { spells = CollectSpells, prof = CollectProfessions, items = CollectItems, macros = CollectMacros, builtin = CollectBuiltin }
+local COLLECT = { spells = CollectSpells, prof = CollectProfessions, items = CollectItems, macros = CollectMacros, mounts = CollectMounts, builtin = CollectBuiltin }
 local EMPTY = {
     spells = "No active spells in the spellbook.",
     prof = "No learned profession skills.",
     items = "No usable items in your bags.",
     macros = "No macros. Create one with /macro.",
+    mounts = "No collected mounts found.",
     builtin = "",
 }
 
@@ -222,11 +249,12 @@ local function Build()
     title:SetPoint("TOP", 0, -12)
 
     tabButtons = {}
-    local tabWidth = (COLUMNS * CELL_W) / #TABS - 6
+    local tabGap = 6
+    local tabWidth = (COLUMNS * CELL_W - (#TABS - 1) * tabGap) / #TABS
     for i, info in ipairs(TABS) do
         local button = Button(frame, info.label, tabWidth, 34, function() SelectTab(info.key) end)
         button.key = info.key
-        button:SetPoint("TOPLEFT", 20 + (i - 1) * (tabWidth + 8), -40)
+        button:SetPoint("TOPLEFT", 20 + (i - 1) * (tabWidth + tabGap), -40)
         tabButtons[i] = button
     end
 
@@ -254,9 +282,11 @@ local function Build()
             if not self.entry or (not target and not onPick) then return end
             if InCombatLockdown() then ns.Print("Choose abilities outside combat."); return end
             local entry = self.entry
+            local preserveMeta = entry.kind == "macrotext" or entry.kind == "mount"
             local binding = { kind = entry.kind, id = entry.id,
-                name = entry.kind == "macrotext" and entry.name or nil,
-                icon = entry.kind == "macrotext" and entry.icon or nil }
+                spell = entry.spell,
+                name = preserveMeta and entry.name or nil,
+                icon = preserveMeta and entry.icon or nil }
             local cb = onPick
             local btn = target
             Picker:Close()

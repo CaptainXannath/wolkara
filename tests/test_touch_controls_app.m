@@ -524,6 +524,7 @@ static void AKSavedTextSettle(UIViewController *presenter) {
     assert([controls pointInside:CGPointMake(CGRectGetMidX(menuBar.frame), CGRectGetMidY(menuBar.frame)) withEvent:nil]);
     for (UIView *item in items) assert(item.hidden);
     NSArray<NSDictionary<NSString *, id> *> *wowChecks = @[
+        @{@"id": @"wolkara.toolbar.wow.menu", @"code": @53},
         @{@"id": @"wolkara.toolbar.wow.bags", @"code": @11},
         @{@"id": @"wolkara.toolbar.wow.map", @"code": @46},
         @{@"id": @"wolkara.toolbar.wow.character", @"code": @8},
@@ -538,6 +539,14 @@ static void AKSavedTextSettle(UIViewController *presenter) {
         AKDrainFixtureEvents();
         assert(guest.lastKeyEvent.keyCode == [entry[@"code"] unsignedShortValue]);
     }
+    UIButton *collections = (id)FindToolbarView(controls, @"wolkara.toolbar.wow.collections");
+    assert(collections && !collections.hidden);
+    guest.lastKeyEvent = nil;
+    [collections sendActionsForControlEvents:UIControlEventTouchUpInside];
+    AKDrainFixtureEvents();
+    assert(guest.lastKeyEvent && guest.lastKeyEvent.keyCode == 35);
+    assert((guest.lastKeyEvent.modifierFlags & NSEventModifierFlagShift) != 0);
+    assert([[host valueForKey:@"_mods"] unsignedIntegerValue] == 0);
     [guest.text setString:@""]; guest.selection = NSMakeRange(0, 0); guest.lastKeyEvent = nil;
     UIButton *chat = (id)FindToolbarView(controls, @"wolkara.toolbar.wow.chat");
     assert(chat && !chat.hidden);
@@ -563,9 +572,10 @@ static void AKSavedTextSettle(UIViewController *presenter) {
     [toggle sendActionsForControlEvents:UIControlEventTouchUpInside]; [controls layoutIfNeeded];
     UIButton *editArcs = (id)FindToolbarView(controls, @"wolkara.toolbar.wow.editArcs");
     assert(editArcs && !editArcs.hidden);
-    if ([controls toolbarBounds].size.width >= 700) {
+    if ([controls toolbarBounds].size.width >= 780) {
         UIScrollView *menuScroll = [controls valueForKey:@"_wowMenuScroll"];
-        assert(menuScroll && CGRectContainsRect(menuScroll.bounds, editArcs.frame));
+        assert(menuScroll && menuScroll.contentSize.width <= menuScroll.bounds.size.width + 1);
+        assert(CGRectContainsRect(menuScroll.bounds, editArcs.frame));
         assert(CGRectContainsRect(menuScroll.bounds, editHud.frame));
     }
     [editArcs sendActionsForControlEvents:UIControlEventTouchUpInside]; [controls layoutIfNeeded];

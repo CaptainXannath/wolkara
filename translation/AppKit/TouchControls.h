@@ -39,6 +39,7 @@ BOOL AKIsPrivateInputEvent(id event);
 // Explicit user-requested replacement of the focused field; no text is read.
 - (void)touchReplaceText:(NSString *)text;
 - (void)touchKeyboardVisibilityChanged:(BOOL)visible;
+- (void)touchSpecialKey:(unsigned short)code characters:(NSString *)characters modifiers:(NSUInteger)modifiers;
 - (void)touchGamepadPreferenceChanged:(BOOL)enabled;
 - (void)touchControlSettings;
 @end
@@ -85,4 +86,5 @@ extern NSString *const AKTouchOwnedKeyUsagesKey;                             // 
 // is what turns words into the guest's key events.
 - (void)touchInsertText:(NSString *)text;
 - (void)touchSpecialKey:(unsigned short)code characters:(NSString *)characters;
+- (void)touchSpecialKey:(unsigned short)code characters:(NSString *)characters modifiers:(NSUInteger)modifiers;
 @end
