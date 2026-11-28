@@ -72,6 +72,7 @@ jobs:
 
       - name: Keep IPA build logs on failure
         if: failure()
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: Wolkara-custom-hud-ipa-logs
@@ -95,6 +96,8 @@ jobs:
           shasum -a 256 Wolkara.ipa > Wolkara.ipa.sha256
 
       - name: Upload Wolkara IPA Artifact
+        id: upload_ipa_1
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: Wolkara-IPA
@@ -103,6 +106,40 @@ jobs:
             Wolkara.ipa.sha256
           if-no-files-found: error
           retention-days: 30
+
+      - name: Back off before retrying IPA artifact upload (attempt 2)
+        if: steps.upload_ipa_1.outcome != 'success'
+        run: sleep 20
+
+      - name: Upload Wolkara IPA Artifact (attempt 2)
+        id: upload_ipa_2
+        if: steps.upload_ipa_1.outcome != 'success'
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: Wolkara-IPA
+          path: |
+            Wolkara.ipa
+            Wolkara.ipa.sha256
+          if-no-files-found: error
+          retention-days: 30
+          overwrite: true
+
+      - name: Back off before retrying IPA artifact upload (attempt 3)
+        if: steps.upload_ipa_1.outcome != 'success' && steps.upload_ipa_2.outcome != 'success'
+        run: sleep 45
+
+      - name: Upload Wolkara IPA Artifact (attempt 3)
+        if: steps.upload_ipa_1.outcome != 'success' && steps.upload_ipa_2.outcome != 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Wolkara-IPA
+          path: |
+            Wolkara.ipa
+            Wolkara.ipa.sha256
+          if-no-files-found: error
+          retention-days: 30
+          overwrite: true
 
   simulator-tests:
     name: Touch HUD & Gamepad Simulator Tests
@@ -169,7 +206,7 @@ jobs:
 
           if [ "$failed" -ne 0 ]; then
             echo "=== Collecting Simulator & Diagnostic Crash Logs ==="
-            find "$HOME/Library/Logs/DiagnosticReports" -maxdepth 2 \( -name '*.ips' -o -name '*.crash' \) -exec cp {} logs/crash-reports/ \; 2>/dev/null || true
+            find "$HOME/Library/Logs/DiagnosticReports" -maxdepth 2 -mmin -90 \( -name '*.ips' -o -name '*.crash' \) ! -name 'Spotlight*' ! -name 'com.apple.dock*' ! -name 'iconservicesagent*' -exec cp {} logs/crash-reports/ \; 2>/dev/null || true
             if [ -f "$HOME/Library/Logs/CoreSimulator/${SIM_ID}/system.log" ]; then
               tail -n 200 "$HOME/Library/Logs/CoreSimulator/${SIM_ID}/system.log" > logs/crash-reports/simulator-system-tail.log || true
             fi
@@ -182,13 +219,30 @@ jobs:
           fi
 
       - name: Keep test logs
+        id: upload_logs_1
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: Wolkara-custom-hud-logs
           path: logs/
           if-no-files-found: ignore
           retention-days: 14
+
+      - name: Back off before retrying test log upload
+        if: always() && steps.upload_logs_1.outcome != 'success'
+        run: sleep 15
+
+      - name: Retry test log upload on transient failure
+        if: always() && steps.upload_logs_1.outcome != 'success'
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: Wolkara-custom-hud-logs
+          path: logs/
+          if-no-files-found: ignore
+          retention-days: 14
+          overwrite: true
 
   publish-release:
     name: Publish GitHub Release
