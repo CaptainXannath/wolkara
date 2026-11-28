@@ -111,12 +111,6 @@
     self.lastAction = @"Keyboard input received";
     [self refresh];
 }
-- (void)keyUp:(NSEvent *)event {
-    [self.recordedEvents addObject:event];
-}
-- (void)flagsChanged:(NSEvent *)event {
-    [self.recordedEvents addObject:event];
-}
 - (void)mouseMoved:(NSEvent *)event {
     self.lastAction = [NSString stringWithFormat:@"Pointer %.0f, %.0f", event.locationInWindow.x, event.locationInWindow.y];
     [self refresh];
@@ -654,14 +648,15 @@ static void AKRecordSelfTestResult(NSString *message) {
         }
     }
     assert(sawCtrlKeyCodeDown && sawCtrlKeyCodeUp);
+    [guest.text setString:@""]; guest.selection = NSMakeRange(0, 0); guest.lastKeyEvent = nil;
     UIButton *editArcs = (id)FindToolbarView(controls, @"wolkara.toolbar.wow.editArcs");
     assert(editArcs && !editArcs.hidden);
     CGRect wideBefore = host.bounds;
-    if ([controls toolbarBounds].size.width < 920) {
-        host.bounds = CGRectMake(0, 0, 956, MAX(wideBefore.size.height, 440));
+    if ([controls toolbarBounds].size.width < 980) {
+        host.bounds = CGRectMake(0, 0, 1160, MAX(wideBefore.size.height, 440));
         [controls setNeedsLayout]; [controls layoutIfNeeded];
     }
-    if ([controls toolbarBounds].size.width >= 920) {
+    if ([controls toolbarBounds].size.width >= 980) {
         UIScrollView *menuScroll = [controls valueForKey:@"_wowMenuScroll"];
         assert(menuScroll && menuScroll.contentSize.width <= menuScroll.bounds.size.width + 1);
         assert(CGRectContainsRect(menuScroll.bounds, editArcs.frame));

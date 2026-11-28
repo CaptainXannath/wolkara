@@ -732,7 +732,7 @@ static NSArray<NSDictionary<NSString *, id> *> *AKWowMenuItems(void) {
     }
     CGFloat spacing = _wowMenuButtons.count > 1 ? 5 : 0;
     CGFloat idealWidth = contentWidth + spacing * (_wowMenuButtons.count > 1 ? (CGFloat)(_wowMenuButtons.count - 1) : 0) + 16 + trailingWidth + 10;
-    CGFloat barWidth = MAX(220, MIN(safe.size.width - 8, MAX(560, MIN(idealWidth, 900))));
+    CGFloat barWidth = MAX(220, MIN(safe.size.width - 8, MAX(560, MIN(idealWidth, 980))));
     if (barWidth > safe.size.width) barWidth = safe.size.width;
     _wowMenuBar.frame = CGRectMake(CGRectGetMidX(safe) - barWidth / 2, safe.origin.y, barWidth, 38);
     _wowMenuCollapseButton.frame = CGRectMake(barWidth - trailingWidth, 4, 30, 30);

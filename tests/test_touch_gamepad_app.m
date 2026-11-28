@@ -179,6 +179,16 @@ static void Drain(void) {
 @property BOOL sentPressed;
 @end
 @implementation AKHudTriggerTestHost
+- (BOOL)ak_beginTouchDrag:(UITouch *)touch origin:(CGPoint)origin {
+    (void)touch; (void)origin;
+    return NO;
+}
+- (void)ak_moveTouchDrag:(UITouch *)touch {
+    (void)touch;
+}
+- (void)ak_endTouchDrag:(UITouch *)touch cancelled:(BOOL)cancelled {
+    (void)touch; (void)cancelled;
+}
 - (void)ak_triggerKeyCode:(unsigned short)keyCode characters:(NSString *)characters modifiers:(NSUInteger)modifiers {
     self.triggerCount++;
     self.triggeredCode = keyCode;
