@@ -256,15 +256,22 @@ Event("PLAYER_LOGIN"); assert(not ns.enabled and original:GetScale() == .8)
 assert(bindings["ALT-CTRL-SHIFT-F6"] == "WolkaraMobileCommand1")
 assert(bindings["ALT-CTRL-F5"] == "WolkaraMobileCommand10")
 assert(bindings["CTRL-F5"] == "WolkaraMobileTargetButton")
+assert(bindings["ALT-F5"] == "WolkaraMobileGameMenuButton")
 assert(WolkaraMobileTargetButton and WolkaraMobileTargetButton:GetAttribute("type") == "macro")
 assert(WolkaraMobileTargetButton:GetAttribute("macrotext") == "/targetenemy\n/targetfriend [noexists,nocombat][help,nocombat]")
+assert(WolkaraMobileGameMenuButton and not GameMenuFrame:IsShown())
+local runMenu = assert(compile("return function(self) " .. WolkaraMobileGameMenuButton:GetAttribute("_onclick") .. " end"))()
+secure = true; runMenu(WolkaraMobileGameMenuButton); secure = false
+assert(GameMenuFrame:IsShown())
+secure = true; runMenu(WolkaraMobileGameMenuButton); secure = false
+assert(not GameMenuFrame:IsShown())
 assert(overrideActions["CTRL-SHIFT-F5"] == "INTERACTTARGET")
 assert(overrideActions["ALT-SHIFT-F5"] == "TOGGLEPROFESSIONBOOK")
 assert(cvars.SoftTargetInteract == "3" and ns.db.softInteractInit)
 cvars.SoftTargetInteract = "0"
-bindings["CTRL-F5"], overrideActions["CTRL-SHIFT-F5"], overrideActions["ALT-SHIFT-F5"] = nil, nil, nil
+bindings["CTRL-F5"], bindings["ALT-F5"], overrideActions["CTRL-SHIFT-F5"], overrideActions["ALT-SHIFT-F5"] = nil, nil, nil, nil
 Event("PLAYER_LOGIN"); assert(cvars.SoftTargetInteract == "0")
-assert(bindings["CTRL-F5"] == "WolkaraMobileTargetButton" and overrideActions["CTRL-SHIFT-F5"] == "INTERACTTARGET")
+assert(bindings["CTRL-F5"] == "WolkaraMobileTargetButton" and bindings["ALT-F5"] == "WolkaraMobileGameMenuButton" and overrideActions["CTRL-SHIFT-F5"] == "INTERACTTARGET")
 overrideActions["ALT-SHIFT-F5"] = nil; Event("PLAYER_ENTERING_WORLD"); assert(overrideActions["ALT-SHIFT-F5"] == "TOGGLEPROFESSIONBOOK")
 
 local tracePath = os.getenv("WOLKARA_MOBILE_EVENT_TRACE")

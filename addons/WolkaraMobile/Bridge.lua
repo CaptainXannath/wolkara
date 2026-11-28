@@ -21,6 +21,9 @@ function Bridge:InstallBindings()
     if SetOverrideBindingClick and ns.targetButton then
         SetOverrideBindingClick(ns.bridge,true,"CTRL-F5",ns.targetButton:GetName())
     end
+    if SetOverrideBindingClick and ns.gameMenuButton then
+        SetOverrideBindingClick(ns.bridge,true,"ALT-F5",ns.gameMenuButton:GetName())
+    end
     if SetOverrideBinding then
         SetOverrideBinding(ns.bridge,true,"CTRL-SHIFT-F5","INTERACTTARGET")
         SetOverrideBinding(ns.bridge,true,"ALT-SHIFT-F5","TOGGLEPROFESSIONBOOK")
@@ -45,7 +48,23 @@ function Bridge:Init()
         elseif command=="edit" then ns.SetEditing(true)
         elseif command=="done" then ns.FinishEditing()
         elseif command=="cancel" then ns.CancelEditing()
-        elseif command=="reset" then ns.ResetDefaults() end
+        elseif command=="reset" then ns.ResetDefaults()
+        elseif command=="gamemenu" then
+            if GameMenuFrame then
+                if InCombatLockdown() and GameMenuFrame.IsProtected and GameMenuFrame:IsProtected() then
+                    ns.Print("Open the game menu outside combat.")
+                elseif GameMenuFrame:IsShown() then
+                    if HideUIPanel and not InCombatLockdown() then HideUIPanel(GameMenuFrame) else GameMenuFrame:Hide() end
+                else
+                    if SettingsPanel and SettingsPanel.IsShown and SettingsPanel:IsShown() and not InCombatLockdown() then
+                        if HideUIPanel then HideUIPanel(SettingsPanel) else SettingsPanel:Hide() end
+                    end
+                    if ShowUIPanel and not InCombatLockdown() then ShowUIPanel(GameMenuFrame) else GameMenuFrame:Show() end
+                end
+            elseif ToggleGameMenu and not InCombatLockdown() then
+                ToggleGameMenu()
+            end
+        end
     end
     local values={"on","off","edit","done","tap","hold","clear","drag","cancel","reset"}
     ns.bridgeButtons={}
@@ -67,6 +86,14 @@ function Bridge:Init()
     targetButton:SetAttribute("type","macro")
     targetButton:SetAttribute("macrotext","/targetenemy\n/targetfriend [noexists,nocombat][help,nocombat]")
     ns.targetButton=targetButton
+    local gameMenuButton=CreateFrame("Button","WolkaraMobileGameMenuButton",UIParent,"SecureHandlerClickTemplate")
+    gameMenuButton:RegisterForClicks("AnyUp")
+    gameMenuButton:SetFrameRef("bridge",bridge)
+    gameMenuButton:SetAttribute("_onclick",[=[
+        local bridge=self:GetFrameRef("bridge")
+        bridge:CallMethod("Command","gamemenu")
+    ]=])
+    ns.gameMenuButton=gameMenuButton
     self:InstallBindings()
     if ns.Bags then ns.Bags:Watch() end
     SLASH_WOLKARAMOBILE1="/wolkaramobile"

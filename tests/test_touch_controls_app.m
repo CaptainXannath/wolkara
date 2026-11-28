@@ -607,6 +607,16 @@ static void AKRecordSelfTestResult(NSString *message) {
     assert(!gamepad.editing && !toggle.hidden);
     [NSUserDefaults.standardUserDefaults setBool:YES forKey:@"WolkaraMobileAvailable"];
     [toggle sendActionsForControlEvents:UIControlEventTouchUpInside]; [controls layoutIfNeeded];
+    UIButton *wowMenu = (id)FindToolbarView(controls, @"wolkara.toolbar.wow.menu");
+    assert(wowMenu && !wowMenu.hidden);
+    guest.lastKeyEvent = nil;
+    [guest.recordedEvents removeAllObjects];
+    [wowMenu sendActionsForControlEvents:UIControlEventTouchUpInside];
+    AKDrainFixtureEvents();
+    assert(guest.lastKeyEvent && guest.lastKeyEvent.keyCode == 96);
+    assert((guest.lastKeyEvent.modifierFlags & NSEventModifierFlagOption) != 0);
+    assert((guest.lastKeyEvent.modifierFlags & NSEventModifierFlagShift) == 0);
+    assert([[host valueForKey:@"_mods"] unsignedIntegerValue] == 0);
     UIButton *professions = (id)FindToolbarView(controls, @"wolkara.toolbar.wow.professions");
     assert(professions && !professions.hidden);
     guest.lastKeyEvent = nil;

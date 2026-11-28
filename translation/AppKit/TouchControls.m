@@ -528,7 +528,8 @@ static void AKEmitTouch(void *context, AKTrackpadAction action, double x, double
 static NSArray<NSDictionary<NSString *, id> *> *AKWowMenuItems(void) {
     return @[
         @{@"title": @"Chat", @"id": @"wolkara.toolbar.wow.chat", @"chat": @YES},
-        @{@"title": @"Menu", @"id": @"wolkara.toolbar.wow.menu", @"code": @53, @"char": @"\x1b"},
+        @{@"title": @"Menu", @"id": @"wolkara.toolbar.wow.menu", @"code": @53, @"char": @"\x1b",
+          @"mobileCode": @96, @"mobileChar": @"\uF708", @"mobileModifiers": @(1UL << 19)},
         @{@"title": @"Bags", @"id": @"wolkara.toolbar.wow.bags", @"code": @11, @"char": @"b"},
         @{@"title": @"Map", @"id": @"wolkara.toolbar.wow.map", @"code": @46, @"char": @"m"},
         @{@"title": @"Character", @"id": @"wolkara.toolbar.wow.character", @"code": @8, @"char": @"c"},
