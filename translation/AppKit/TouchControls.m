@@ -309,10 +309,12 @@ static NSString *AKComposerDefaultLabel(void) { return AKHostLocalized(@"touch.d
 
 @implementation AKTouchControls {
     UIButton *_collapseButton;
+    UIControl *_drawerBackdrop;
     UIView *_wowMenuBar;
-    UIScrollView *_wowMenuScroll;
-    UIButton *_wowMenuCollapseButton, *_wowMenuMoreButton;
-    NSArray<UIButton *> *_wowMenuButtons;
+    UIScrollView *_wowMenuScroll, *_toolsScroll;
+    UILabel *_wowSectionLabel, *_toolsSectionLabel;
+    UIButton *_wowMenuCollapseButton, *_wowMenuMoreButton, *_toolTrackpadButton;
+    NSArray<UIButton *> *_wowMenuButtons, *_toolMenuButtons;
     UIButton *_keyboardButton, *_trackpadButton, *_gamepadButton, *_settingsButton, *_leaveButton;
     UIButton *_insertDraftButton, *_clearDraftButton;
     UIButton *_savedTextButton;
@@ -527,31 +529,130 @@ static void AKEmitTouch(void *context, AKTrackpadAction action, double x, double
 
 static NSArray<NSDictionary<NSString *, id> *> *AKWowMenuItems(void) {
     return @[
-        @{@"title": @"Chat", @"id": @"wolkara.toolbar.wow.chat", @"chat": @YES},
-        @{@"title": @"Menu", @"id": @"wolkara.toolbar.wow.menu", @"code": @53, @"char": @"\x1b",
-          @"mobileCode": @96, @"mobileChar": @"\uF708", @"mobileModifiers": @(1UL << 19)},
-        @{@"title": @"Bags", @"id": @"wolkara.toolbar.wow.bags", @"code": @11, @"char": @"b"},
-        @{@"title": @"Map", @"id": @"wolkara.toolbar.wow.map", @"code": @46, @"char": @"m"},
-        @{@"title": @"Character", @"id": @"wolkara.toolbar.wow.character", @"code": @8, @"char": @"c"},
-        @{@"title": @"Talents", @"id": @"wolkara.toolbar.wow.talents", @"code": @45, @"char": @"n"},
-        @{@"title": @"Quests", @"id": @"wolkara.toolbar.wow.quests", @"code": @37, @"char": @"l"},
-        @{@"title": @"Spellbook", @"id": @"wolkara.toolbar.wow.spellbook", @"code": @35, @"char": @"p"},
-        @{@"title": @"Professions", @"id": @"wolkara.toolbar.wow.professions", @"code": @40, @"char": @"k",
+        @{@"title": @"Char", @"label": @"Character", @"symbol": @"person.fill", @"id": @"wolkara.toolbar.wow.character", @"code": @8, @"char": @"c"},
+        @{@"title": @"Bags", @"label": @"Bags", @"symbol": @"bag.fill", @"id": @"wolkara.toolbar.wow.bags", @"code": @11, @"char": @"b"},
+        @{@"title": @"Spells", @"label": @"Spellbook", @"symbol": @"book.closed.fill", @"id": @"wolkara.toolbar.wow.spellbook", @"code": @35, @"char": @"p"},
+        @{@"title": @"Profs", @"label": @"Professions", @"symbol": @"wrench.and.screwdriver.fill", @"id": @"wolkara.toolbar.wow.professions", @"code": @40, @"char": @"k",
           @"mobileCode": @96, @"mobileChar": @"\uF708", @"mobileModifiers": @((1UL << 19) | (1UL << 17))},
-        @{@"title": @"Collections", @"id": @"wolkara.toolbar.wow.collections", @"code": @35, @"char": @"p", @"modifiers": @(1UL << 17)},
-        @{@"title": @"Edit Arcs", @"id": @"wolkara.toolbar.wow.editArcs", @"action": @"editArcs"},
-        @{@"title": @"Edit HUD", @"id": @"wolkara.toolbar.wow.editHud", @"action": @"editHud"},
+        @{@"title": @"Talents", @"label": @"Talents", @"symbol": @"sparkles", @"id": @"wolkara.toolbar.wow.talents", @"code": @45, @"char": @"n"},
+        @{@"title": @"Quests", @"label": @"Quests", @"symbol": @"scroll.fill", @"id": @"wolkara.toolbar.wow.quests", @"code": @37, @"char": @"l"},
+        @{@"title": @"Collect", @"label": @"Collections", @"symbol": @"square.grid.2x2.fill", @"id": @"wolkara.toolbar.wow.collections", @"code": @35, @"char": @"p", @"modifiers": @(1UL << 17)},
+        @{@"title": @"Map", @"label": @"Map", @"symbol": @"map.fill", @"id": @"wolkara.toolbar.wow.map", @"code": @46, @"char": @"m"},
+        @{@"title": @"Menu", @"label": @"Menu", @"symbol": @"line.3.horizontal", @"id": @"wolkara.toolbar.wow.menu", @"code": @53, @"char": @"\x1b",
+          @"mobileCode": @96, @"mobileChar": @"\uF708", @"mobileModifiers": @(1UL << 19)},
     ];
 }
 
+static NSArray<NSDictionary<NSString *, id> *> *AKDrawerToolItems(void) {
+    return @[
+        @{@"title": @"Chat", @"label": @"Chat", @"symbol": @"bubble.left.fill", @"id": @"wolkara.toolbar.wow.chat", @"action": @"chat"},
+        @{@"title": @"Voice", @"label": @"Voice", @"symbol": @"mic.fill", @"id": @"wolkara.toolbar.tool.voice", @"action": @"voice"},
+        @{@"title": @"Saved", @"label": @"Saved Text", @"symbol": @"text.quote", @"id": @"wolkara.toolbar.tool.saved", @"action": @"saved"},
+        @{@"title": @"Trackpad", @"label": @"Trackpad", @"symbol": @"cursorarrow.motionlines", @"id": @"wolkara.toolbar.tool.trackpad", @"action": @"trackpad"},
+        @{@"title": @"Edit Arcs", @"label": @"Edit Arcs", @"symbol": @"circle.grid.cross", @"id": @"wolkara.toolbar.wow.editArcs", @"action": @"editArcs", @"accent": @"gold"},
+        @{@"title": @"Edit HUD", @"label": @"Edit HUD", @"symbol": @"arrow.up.and.down.and.arrow.left.and.right", @"id": @"wolkara.toolbar.wow.editHud", @"action": @"editHud", @"accent": @"gold"},
+        @{@"title": @"Settings", @"label": @"Settings", @"symbol": @"gearshape.fill", @"id": @"wolkara.toolbar.tool.settings", @"action": @"settings", @"accent": @"gold"},
+        @{@"title": @"Leave", @"label": @"Leave game", @"symbol": @"rectangle.portrait.and.arrow.right", @"id": @"wolkara.toolbar.tool.leave", @"action": @"leave", @"accent": @"danger"},
+    ];
+}
+
+static UIButton *AKMakeDrawerTile(NSString *title, NSString *label, NSString *symbol, UIColor *iconTint, UIColor *textTint, UIColor *fill, UIColor *border) {
+    UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
+    UIButtonConfiguration *cfg = [UIButtonConfiguration plainButtonConfiguration];
+    UIImageSymbolConfiguration *symCfg = [UIImageSymbolConfiguration configurationWithPointSize:14 weight:UIImageSymbolWeightMedium];
+    cfg.image = [UIImage systemImageNamed:symbol withConfiguration:symCfg];
+    cfg.imagePlacement = NSDirectionalRectEdgeTop;
+    cfg.imagePadding = 3;
+    cfg.contentInsets = NSDirectionalEdgeInsetsMake(4, 2, 4, 2);
+    cfg.baseForegroundColor = iconTint;
+    NSMutableParagraphStyle *para = [NSMutableParagraphStyle new];
+    para.alignment = NSTextAlignmentCenter;
+    para.lineBreakMode = NSLineBreakByTruncatingTail;
+    cfg.attributedTitle = [[NSAttributedString alloc] initWithString:title attributes:@{
+        NSFontAttributeName: [UIFont systemFontOfSize:10.5 weight:UIFontWeightMedium],
+        NSForegroundColorAttributeName: textTint,
+        NSParagraphStyleAttributeName: para,
+    }];
+    button.configuration = cfg;
+    button.backgroundColor = fill;
+    button.layer.cornerRadius = 11;
+    button.layer.borderWidth = 1;
+    button.layer.borderColor = border.CGColor;
+    button.accessibilityLabel = label;
+    return button;
+}
+
+- (void)updateDrawerTrackpadTile {
+    if (!_toolTrackpadButton) return;
+    UIColor *fill = _trackpadEnabled ? [UIColor colorWithRed:0.18 green:0.65 blue:0.92 alpha:0.26] : [UIColor colorWithWhite:1 alpha:0.06];
+    UIColor *border = _trackpadEnabled ? [UIColor colorWithRed:0.35 green:0.78 blue:0.98 alpha:0.78] : [UIColor colorWithWhite:1 alpha:0.10];
+    UIColor *tint = _trackpadEnabled ? [UIColor colorWithRed:0.55 green:0.88 blue:1.0 alpha:1.0] : [UIColor colorWithRed:0.95 green:0.94 blue:0.90 alpha:0.94];
+    _toolTrackpadButton.backgroundColor = fill;
+    _toolTrackpadButton.layer.borderColor = border.CGColor;
+    UIButtonConfiguration *cfg = _toolTrackpadButton.configuration;
+    if (cfg) {
+        cfg.baseForegroundColor = tint;
+        NSMutableParagraphStyle *para = [NSMutableParagraphStyle new];
+        para.alignment = NSTextAlignmentCenter;
+        para.lineBreakMode = NSLineBreakByTruncatingTail;
+        cfg.attributedTitle = [[NSAttributedString alloc] initWithString:@"Trackpad" attributes:@{
+            NSFontAttributeName: [UIFont systemFontOfSize:10.5 weight:UIFontWeightMedium],
+            NSForegroundColorAttributeName: tint,
+            NSParagraphStyleAttributeName: para,
+        }];
+        _toolTrackpadButton.configuration = cfg;
+    }
+}
+
 - (void)buildWowMenuBar {
+    _drawerBackdrop = [UIControl new];
+    _drawerBackdrop.backgroundColor = UIColor.clearColor;
+    _drawerBackdrop.accessibilityIdentifier = @"wolkara.toolbar.backdrop";
+    _drawerBackdrop.hidden = YES;
+    [_drawerBackdrop addTarget:self action:@selector(collapseMenuBar) forControlEvents:UIControlEventTouchUpInside];
+    [self insertSubview:_drawerBackdrop atIndex:0];
+
     _wowMenuBar = [UIView new];
-    _wowMenuBar.backgroundColor = [UIColor colorWithRed:0.06 green:0.06 blue:0.06 alpha:0.78];
-    _wowMenuBar.layer.cornerRadius = 19;
+    _wowMenuBar.backgroundColor = [UIColor colorWithRed:0.06 green:0.06 blue:0.08 alpha:0.90];
+    _wowMenuBar.layer.cornerRadius = 18;
     _wowMenuBar.layer.borderWidth = 1;
+    _wowMenuBar.layer.borderColor = [UIColor colorWithRed:0.84 green:0.75 blue:0.55 alpha:0.45].CGColor;
     _wowMenuBar.clipsToBounds = YES;
     _wowMenuBar.accessibilityIdentifier = @"wolkara.toolbar.menuBar";
     [self addSubview:_wowMenuBar];
+
+    UIColor *goldTint = [UIColor colorWithRed:0.94 green:0.84 blue:0.58 alpha:1.0];
+    UIColor *textTint = [UIColor colorWithRed:0.96 green:0.95 blue:0.90 alpha:0.95];
+    UIColor *tileFill = [UIColor colorWithWhite:1 alpha:0.06];
+    UIColor *tileBorder = [UIColor colorWithWhite:1 alpha:0.10];
+
+    _wowSectionLabel = [UILabel new];
+    _wowSectionLabel.text = @"WOW WINDOWS";
+    _wowSectionLabel.font = [UIFont systemFontOfSize:10.5 weight:UIFontWeightBold];
+    _wowSectionLabel.textColor = [UIColor colorWithRed:0.84 green:0.75 blue:0.55 alpha:0.90];
+    [_wowMenuBar addSubview:_wowSectionLabel];
+
+    _wowMenuCollapseButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    [_wowMenuCollapseButton setImage:[UIImage systemImageNamed:@"chevron.up"] forState:UIControlStateNormal];
+    _wowMenuCollapseButton.tintColor = UIColor.whiteColor;
+    _wowMenuCollapseButton.backgroundColor = [UIColor colorWithWhite:1 alpha:0.10];
+    _wowMenuCollapseButton.layer.cornerRadius = 11;
+    _wowMenuCollapseButton.accessibilityIdentifier = @"wolkara.toolbar.collapse";
+    _wowMenuCollapseButton.accessibilityLabel = AKHostLocalized(@"touch.toolbar.toggle");
+    [_wowMenuCollapseButton addTarget:self action:@selector(buttonTouchDown) forControlEvents:UIControlEventTouchDown];
+    [_wowMenuCollapseButton addTarget:self action:@selector(collapseMenuBar) forControlEvents:UIControlEventTouchUpInside];
+    [_wowMenuBar addSubview:_wowMenuCollapseButton];
+
+    _wowMenuMoreButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    [_wowMenuMoreButton setImage:[UIImage systemImageNamed:@"ellipsis"] forState:UIControlStateNormal];
+    _wowMenuMoreButton.tintColor = UIColor.whiteColor;
+    _wowMenuMoreButton.backgroundColor = [UIColor colorWithWhite:1 alpha:0.08];
+    _wowMenuMoreButton.layer.cornerRadius = 11;
+    _wowMenuMoreButton.accessibilityIdentifier = @"wolkara.toolbar.more";
+    _wowMenuMoreButton.accessibilityLabel = @"More tools";
+    [_wowMenuMoreButton addTarget:self action:@selector(buttonTouchDown) forControlEvents:UIControlEventTouchDown];
+    [_wowMenuMoreButton addTarget:self action:@selector(toggleToolbarTools) forControlEvents:UIControlEventTouchUpInside];
+    [_wowMenuBar addSubview:_wowMenuMoreButton];
 
     _wowMenuScroll = [UIScrollView new];
     _wowMenuScroll.showsHorizontalScrollIndicator = NO;
@@ -562,14 +663,9 @@ static NSArray<NSDictionary<NSString *, id> *> *AKWowMenuItems(void) {
     NSArray<NSDictionary<NSString *, id> *> *items = AKWowMenuItems();
     for (NSUInteger i = 0; i < items.count; i++) {
         NSDictionary<NSString *, id> *entry = items[i];
-        UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
+        UIButton *button = AKMakeDrawerTile(entry[@"title"], entry[@"label"], entry[@"symbol"], goldTint, textTint, tileFill, tileBorder);
         button.tag = (NSInteger)i;
-        [button setTitle:entry[@"title"] forState:UIControlStateNormal];
-        [button setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
-        button.tintColor = UIColor.whiteColor;
-        button.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
         button.accessibilityIdentifier = entry[@"id"];
-        button.accessibilityLabel = entry[@"title"];
         [button addTarget:self action:@selector(buttonTouchDown) forControlEvents:UIControlEventTouchDown];
         [button addTarget:self action:@selector(wowMenuItemTapped:) forControlEvents:UIControlEventTouchUpInside];
         [_wowMenuScroll addSubview:button];
@@ -577,23 +673,43 @@ static NSArray<NSDictionary<NSString *, id> *> *AKWowMenuItems(void) {
     }
     _wowMenuButtons = buttons;
 
-    _wowMenuCollapseButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    [_wowMenuCollapseButton setImage:[UIImage systemImageNamed:@"chevron.up"] forState:UIControlStateNormal];
-    _wowMenuCollapseButton.tintColor = UIColor.whiteColor;
-    _wowMenuCollapseButton.accessibilityIdentifier = @"wolkara.toolbar.collapse";
-    _wowMenuCollapseButton.accessibilityLabel = AKHostLocalized(@"touch.toolbar.toggle");
-    [_wowMenuCollapseButton addTarget:self action:@selector(buttonTouchDown) forControlEvents:UIControlEventTouchDown];
-    [_wowMenuCollapseButton addTarget:self action:@selector(collapseMenuBar) forControlEvents:UIControlEventTouchUpInside];
-    [_wowMenuBar addSubview:_wowMenuCollapseButton];
+    _toolsSectionLabel = [UILabel new];
+    _toolsSectionLabel.text = @"QUICK TOOLS";
+    _toolsSectionLabel.font = [UIFont systemFontOfSize:10.5 weight:UIFontWeightBold];
+    _toolsSectionLabel.textColor = [UIColor colorWithRed:0.84 green:0.75 blue:0.55 alpha:0.90];
+    [_wowMenuBar addSubview:_toolsSectionLabel];
 
-    _wowMenuMoreButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    [_wowMenuMoreButton setImage:[UIImage systemImageNamed:@"ellipsis"] forState:UIControlStateNormal];
-    _wowMenuMoreButton.tintColor = UIColor.whiteColor;
-    _wowMenuMoreButton.accessibilityIdentifier = @"wolkara.toolbar.more";
-    _wowMenuMoreButton.accessibilityLabel = @"More tools";
-    [_wowMenuMoreButton addTarget:self action:@selector(buttonTouchDown) forControlEvents:UIControlEventTouchDown];
-    [_wowMenuMoreButton addTarget:self action:@selector(toggleToolbarTools) forControlEvents:UIControlEventTouchUpInside];
-    [_wowMenuBar addSubview:_wowMenuMoreButton];
+    _toolsScroll = [UIScrollView new];
+    _toolsScroll.showsHorizontalScrollIndicator = NO;
+    _toolsScroll.alwaysBounceHorizontal = NO;
+    [_wowMenuBar addSubview:_toolsScroll];
+
+    NSMutableArray<UIButton *> *toolButtons = [NSMutableArray array];
+    NSArray<NSDictionary<NSString *, id> *> *tools = AKDrawerToolItems();
+    for (NSUInteger i = 0; i < tools.count; i++) {
+        NSDictionary<NSString *, id> *entry = tools[i];
+        NSString *accent = entry[@"accent"];
+        UIColor *iconCol = textTint, *txtCol = textTint, *fillCol = tileFill, *borderCol = tileBorder;
+        if ([accent isEqualToString:@"gold"]) {
+            iconCol = txtCol = [UIColor colorWithRed:0.99 green:0.90 blue:0.56 alpha:1.0];
+            fillCol = [UIColor colorWithRed:0.84 green:0.75 blue:0.55 alpha:0.20];
+            borderCol = [UIColor colorWithRed:0.94 green:0.83 blue:0.54 alpha:0.65];
+        } else if ([accent isEqualToString:@"danger"]) {
+            iconCol = txtCol = [UIColor colorWithRed:0.99 green:0.65 blue:0.65 alpha:1.0];
+            fillCol = [UIColor colorWithRed:0.90 green:0.28 blue:0.28 alpha:0.16];
+            borderCol = [UIColor colorWithRed:0.95 green:0.45 blue:0.45 alpha:0.45];
+        }
+        UIButton *button = AKMakeDrawerTile(entry[@"title"], entry[@"label"], entry[@"symbol"], iconCol, txtCol, fillCol, borderCol);
+        button.tag = (NSInteger)i;
+        button.accessibilityIdentifier = entry[@"id"];
+        [button addTarget:self action:@selector(buttonTouchDown) forControlEvents:UIControlEventTouchDown];
+        [button addTarget:self action:@selector(drawerToolTapped:) forControlEvents:UIControlEventTouchUpInside];
+        [_toolsScroll addSubview:button];
+        [toolButtons addObject:button];
+        if ([entry[@"action"] isEqualToString:@"trackpad"]) _toolTrackpadButton = button;
+    }
+    _toolMenuButtons = toolButtons;
+    [self updateDrawerTrackpadTile];
 }
 
 - (void)wowMenuItemTapped:(UIButton *)sender {
@@ -601,29 +717,9 @@ static NSArray<NSDictionary<NSString *, id> *> *AKWowMenuItems(void) {
     NSArray<NSDictionary<NSString *, id> *> *items = AKWowMenuItems();
     if (sender.tag < 0 || (NSUInteger)sender.tag >= items.count) return;
     NSDictionary<NSString *, id> *entry = items[(NSUInteger)sender.tag];
-    NSString *action = entry[@"action"];
-    if ([action isEqualToString:@"editArcs"]) {
-        _toolbarExpanded = NO;
-        _toolsExpanded = NO;
-        if ([NSUserDefaults.standardUserDefaults boolForKey:@"WolkaraMobileAvailable"]) {
-            [_gamepad beginMobileEditing];
-        } else {
-            [_gamepad toggleSettings];
-        }
-        [self updateToolbarVisibility];
-        return;
-    }
-    if ([action isEqualToString:@"editHud"]) {
-        _toolbarExpanded = NO;
-        _toolsExpanded = NO;
-        [_gamepad beginLayoutEditing];
-        [self updateToolbarVisibility];
-        return;
-    }
-    if ([entry[@"chat"] boolValue]) {
-        [self toggleKeyboard];
-        return;
-    }
+    _toolbarExpanded = NO;
+    _toolsExpanded = NO;
+    [self updateToolbarVisibility];
     BOOL mobileAvailable = [NSUserDefaults.standardUserDefaults boolForKey:AKMobileAvailableKey];
     NSNumber *mobileCode = mobileAvailable ? entry[@"mobileCode"] : nil;
     NSUInteger modifiers = mobileCode ? [entry[@"mobileModifiers"] unsignedIntegerValue]
@@ -634,6 +730,39 @@ static NSArray<NSDictionary<NSString *, id> *> *AKWowMenuItems(void) {
         [self touchSpecialKey:code characters:characters modifiers:modifiers];
     } else {
         [self touchSpecialKey:code characters:characters];
+    }
+}
+
+- (void)drawerToolTapped:(UIButton *)sender {
+    if (_gamepad.editing || self.voiceDraftActive) return;
+    NSArray<NSDictionary<NSString *, id> *> *tools = AKDrawerToolItems();
+    if (sender.tag < 0 || (NSUInteger)sender.tag >= tools.count) return;
+    NSString *action = tools[(NSUInteger)sender.tag][@"action"];
+    if ([action isEqualToString:@"trackpad"]) {
+        [self toggleTrackpad];
+        return;
+    }
+    _toolbarExpanded = NO;
+    _toolsExpanded = NO;
+    [self updateToolbarVisibility];
+    if ([action isEqualToString:@"chat"]) {
+        [self toggleKeyboard];
+    } else if ([action isEqualToString:@"voice"]) {
+        [self startDictation];
+    } else if ([action isEqualToString:@"saved"]) {
+        [self editSavedText];
+    } else if ([action isEqualToString:@"editArcs"]) {
+        if ([NSUserDefaults.standardUserDefaults boolForKey:AKMobileAvailableKey]) {
+            [_gamepad beginMobileEditing];
+        } else {
+            [_gamepad toggleSettings];
+        }
+    } else if ([action isEqualToString:@"editHud"]) {
+        [_gamepad beginLayoutEditing];
+    } else if ([action isEqualToString:@"settings"]) {
+        [self showControlSettings];
+    } else if ([action isEqualToString:@"leave"]) {
+        [self leaveGame];
     }
 }
 
@@ -670,6 +799,7 @@ static NSArray<NSDictionary<NSString *, id> *> *AKWowMenuItems(void) {
                       self.voiceDraftActive) && !externalHidden;
     for (UIView *item in [self toolbarItems]) item.hidden = !showItems;
     _wowMenuBar.hidden = !showBar;
+    _drawerBackdrop.hidden = !showBar;
     _wowMenuMoreButton.tintColor = _toolsExpanded ? [UIColor colorWithRed:0.95 green:0.82 blue:0.48 alpha:1] : UIColor.whiteColor;
     [_collapseButton setImage:[UIImage systemImageNamed:@"chevron.down"] forState:UIControlStateNormal];
     _collapseButton.hidden = hideChrome || showBar;
@@ -718,6 +848,7 @@ static NSArray<NSDictionary<NSString *, id> *> *AKWowMenuItems(void) {
     [super layoutSubviews];
     if (self.superview) [self placeToolbarInHost:self.superview];
     _dictationShield.frame = self.bounds;
+    _drawerBackdrop.frame = self.bounds;
     CGRect safe = [self toolbarBounds];
     if (CGRectIsEmpty(safe) || CGRectIsNull(safe) ||
         !isfinite(safe.origin.x) || !isfinite(safe.origin.y) ||
@@ -725,39 +856,46 @@ static NSArray<NSDictionary<NSString *, id> *> *AKWowMenuItems(void) {
     AKGamepadLayout *layout = _gamepad.layout;
     CGRect toggleFallback = CGRectMake(CGRectGetMidX(safe) - 27, safe.origin.y, 54, 36);
     _collapseButton.frame = layout ? [layout frameForItem:_collapseButton.accessibilityIdentifier defaultFrame:toggleFallback inBounds:safe] : toggleFallback;
-    CGFloat trailingWidth = 72;
-    CGFloat contentWidth = 0;
+    CGFloat drawerWidth = MAX(240, MIN(safe.size.width - 12, 576));
+    if (drawerWidth > safe.size.width) drawerWidth = safe.size.width;
+    CGFloat drawerHeight = 154;
+    _wowMenuBar.frame = CGRectMake(CGRectGetMidX(safe) - drawerWidth / 2, safe.origin.y, drawerWidth, drawerHeight);
+    _wowSectionLabel.frame = CGRectMake(12, 7, MAX(80, drawerWidth - 92), 18);
+    _wowMenuCollapseButton.frame = CGRectMake(drawerWidth - 64, 5, 24, 22);
+    _wowMenuMoreButton.frame = CGRectMake(drawerWidth - 36, 5, 24, 22);
+
+    CGFloat scrollWidth = MAX(0, drawerWidth - 20);
+    CGFloat gap = 4;
+    _wowMenuScroll.frame = CGRectMake(10, 29, scrollWidth, 48);
+    NSUInteger wowCount = _wowMenuButtons.count;
+    CGFloat wowTileW = wowCount ? MAX(52, floor((scrollWidth - gap * (CGFloat)(wowCount - 1)) / (CGFloat)wowCount)) : 52;
+    CGFloat wx = 0;
     for (UIButton *button in _wowMenuButtons) {
-        CGSize fit = [button sizeThatFits:CGSizeMake(200, 38)];
-        contentWidth += ceil(fit.width) + 6;
+        button.frame = CGRectMake(wx, 0, wowTileW, 48);
+        wx += wowTileW + gap;
     }
-    CGFloat spacing = _wowMenuButtons.count > 1 ? 5 : 0;
-    CGFloat idealWidth = contentWidth + spacing * (_wowMenuButtons.count > 1 ? (CGFloat)(_wowMenuButtons.count - 1) : 0) + 16 + trailingWidth + 10;
-    CGFloat barWidth = MAX(220, MIN(safe.size.width - 8, MAX(560, MIN(idealWidth, 980))));
-    if (barWidth > safe.size.width) barWidth = safe.size.width;
-    _wowMenuBar.frame = CGRectMake(CGRectGetMidX(safe) - barWidth / 2, safe.origin.y, barWidth, 38);
-    _wowMenuCollapseButton.frame = CGRectMake(barWidth - trailingWidth, 4, 30, 30);
-    _wowMenuMoreButton.frame = CGRectMake(barWidth - 38, 4, 30, 30);
-    CGFloat scrollWidth = MAX(0, barWidth - trailingWidth - 10);
-    _wowMenuScroll.frame = CGRectMake(6, 0, scrollWidth, 38);
-    if (_wowMenuButtons.count > 1 && scrollWidth > contentWidth + 16) {
-        spacing = MIN(12, (scrollWidth - contentWidth - 16) / (CGFloat)(_wowMenuButtons.count - 1));
+    CGFloat wowContentW = wowCount ? (wx - gap) : scrollWidth;
+    _wowMenuScroll.contentSize = CGSizeMake(MAX(scrollWidth, wowContentW), 48);
+    _wowMenuScroll.showsHorizontalScrollIndicator = wowContentW > scrollWidth + 1;
+
+    _toolsSectionLabel.frame = CGRectMake(12, 81, MAX(80, drawerWidth - 24), 16);
+    _toolsScroll.frame = CGRectMake(10, 99, scrollWidth, 48);
+    NSUInteger toolCount = _toolMenuButtons.count;
+    CGFloat toolTileW = toolCount ? MAX(56, floor((scrollWidth - gap * (CGFloat)(toolCount - 1)) / (CGFloat)toolCount)) : 56;
+    CGFloat tx = 0;
+    for (UIButton *button in _toolMenuButtons) {
+        button.frame = CGRectMake(tx, 0, toolTileW, 48);
+        tx += toolTileW + gap;
     }
-    CGFloat bx = 8;
-    for (UIButton *button in _wowMenuButtons) {
-        CGSize fit = [button sizeThatFits:CGSizeMake(200, 38)];
-        CGFloat bw = ceil(fit.width) + 6;
-        button.frame = CGRectMake(bx, 0, bw, 38);
-        bx += bw + spacing;
-    }
-    CGFloat contentEnd = _wowMenuButtons.count ? (bx - spacing + 8) : scrollWidth;
-    _wowMenuScroll.contentSize = CGSizeMake(MAX(scrollWidth, contentEnd), 38);
-    _wowMenuScroll.showsHorizontalScrollIndicator = contentEnd > scrollWidth + 1;
+    CGFloat toolContentW = toolCount ? (tx - gap) : scrollWidth;
+    _toolsScroll.contentSize = CGSizeMake(MAX(scrollWidth, toolContentW), 48);
+    _toolsScroll.showsHorizontalScrollIndicator = toolContentW > scrollWidth + 1;
+
     NSArray<UIView *> *items = [self toolbarItems];
     BOOL compact = safe.size.width < 408;
     CGFloat width = compact ? 252 : 408;
     CGFloat x = CGRectGetMidX(safe) - width / 2;
-    CGFloat rowY = safe.origin.y + 44;
+    CGFloat rowY = (!_wowMenuBar.hidden && _toolsExpanded) ? MIN(CGRectGetMaxY(safe) - 44, CGRectGetMaxY(_wowMenuBar.frame) + 8) : (safe.origin.y + 44);
     for (NSUInteger index = 0; index < items.count; index++) {
         UIView *item = items[index];
         CGRect fallback = CGRectMake(x + index * 52, rowY, index == 5 ? 96 : 44, 44);
@@ -921,6 +1059,7 @@ static NSArray<NSDictionary<NSString *, id> *> *AKWowMenuItems(void) {
     _trackpadButton.tintColor = enabled ? UIColor.systemCyanColor : UIColor.whiteColor;
     _trackpadButton.accessibilityLabel = enabled ? AKHostLocalized(@"touch.trackpad.disable") : AKHostLocalized(@"touch.trackpad.enable");
     _trackpadButton.accessibilityValue = enabled ? AKHostLocalized(@"touch.value.on") : AKHostLocalized(@"touch.value.off");
+    [self updateDrawerTrackpadTile];
     [self.delegate touchTrackpadChanged:enabled];
 }
 - (void)toggleTrackpad {
@@ -1067,7 +1206,7 @@ static NSArray<NSDictionary<NSString *, id> *> *AKWowMenuItems(void) {
     if (self.voiceDraftActive) return CGRectContainsPoint(self.bounds, point);
     if ([_gamepad configurationContainsPoint:point inView:self]) return NO;
     if (!_collapseButton.hidden && CGRectContainsPoint(_collapseButton.frame, point)) return YES;
-    if (!_wowMenuBar.hidden && CGRectContainsPoint(_wowMenuBar.frame, point)) return YES;
+    if (!_wowMenuBar.hidden) return CGRectContainsPoint(self.bounds, point);
     for (UIView *control in [self toolbarItems]) {
         if (!control.hidden && CGRectContainsPoint(control.frame, point)) return YES;
     }

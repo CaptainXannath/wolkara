@@ -248,6 +248,7 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
 @property(nonatomic, readonly) BOOL mobileEditing;
 @property(nonatomic, copy) void (^configurationChanged)(void);
 @property(nonatomic, copy) void (^mobileCommand)(AKMobileCommand);
+@property(nonatomic, copy) void (^simpleModeChanged)(BOOL);
 - (void)reset;
 - (void)toggleSettings;
 - (void)beginLayoutEditing;
@@ -265,8 +266,13 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     UILabel *_hint;
     UISwitch *_editSwitch, *_hapticsSwitch, *_swapShouldersSwitch, *_performanceSwitch, *_leftStickWasdSwitch, *_mobileSwitch, *_autoHideSwitch;
     UIButton *_targetButton, *_interactButton, *_jumpButton, *_cameraDragButton, *_hudVisibilityButton, *_arrangeMobileButton;
+    UISegmentedControl *_settingsTabs, *_modeSegment;
+    UIView *_hudTabView, *_controlsTabView, *_styleTabView;
+    UIStackView *_hudSwitchColumns;
+    UISlider *_cameraSensitivitySlider;
+    UILabel *_cameraSensitivityLabel;
+    NSDictionary<NSString *, UIButton *> *_hudChipButtons;
     BOOL _mobileEditing;
-    UIStackView *_settingsColumns;
     NSArray<UISlider *> *_sliders;
     NSArray<UILabel *> *_values;
     CAShapeLayer *_editGrid, *_editAxes;
@@ -499,7 +505,11 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
 }
 
 - (void)setControlsVisible:(BOOL)visible { _controlsVisible = visible; [self updateAppearance]; }
-- (void)setSimple:(BOOL)simple { _simple = simple; [self updateAppearance]; }
+- (void)setSimple:(BOOL)simple {
+    _simple = simple;
+    if (_modeSegment) _modeSegment.selectedSegmentIndex = simple ? 0 : 1;
+    [self updateAppearance];
+}
 - (void)setExternalInputActive:(BOOL)externalInputActive { _externalInputActive = externalInputActive; [self updateAppearance]; }
 
 - (void)updateAppearance {
@@ -676,13 +686,15 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     _hint.frame = CGRectMake(CGRectGetMidX(safe) - 160, CGRectGetMinY(safe) + 8, 320, 22);
 
     if (_settings) {
-        BOOL wide = safe.size.width >= 620;
-        CGFloat width = MIN(wide ? 700 : 390, safe.size.width - 24);
-        CGFloat height = MIN(wide ? 315 : 460, safe.size.height - 100);
-        _settingsColumns.axis = wide ? UILayoutConstraintAxisHorizontal : UILayoutConstraintAxisVertical;
-        _settingsColumns.alignment = wide ? UIStackViewAlignmentTop : UIStackViewAlignmentFill;
-        _settingsColumns.distribution = wide ? UIStackViewDistributionFillEqually : UIStackViewDistributionFill;
-        _settings.frame = CGRectMake(CGRectGetMidX(safe) - width / 2, CGRectGetMaxY(safe) - height - 8, width, height);
+        BOOL wide = safe.size.width >= 520;
+        CGFloat width = MIN(wide ? 548 : 372, safe.size.width - 20);
+        CGFloat height = MIN(wide ? 304 : 450, safe.size.height - 20);
+        _hudSwitchColumns.axis = wide ? UILayoutConstraintAxisHorizontal : UILayoutConstraintAxisVertical;
+        _hudSwitchColumns.alignment = wide ? UIStackViewAlignmentTop : UIStackViewAlignmentFill;
+        _hudSwitchColumns.distribution = wide ? UIStackViewDistributionFillEqually : UIStackViewDistributionFill;
+        CGFloat sx = CGRectGetMidX(safe) - width / 2;
+        CGFloat sy = MAX(CGRectGetMinY(safe) + 6, MIN(CGRectGetMaxY(safe) - height - 6, CGRectGetMidY(safe) - height / 2));
+        _settings.frame = CGRectMake(sx, sy, width, height);
     }
 }
 
@@ -752,8 +764,14 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
 - (UIButton *)menuButtonWithIdentifier:(NSString *)identifier {
     UIButton *btn = [UIButton buttonWithType:UIButtonTypeSystem];
     btn.showsMenuAsPrimaryAction = YES;
-    btn.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
+    btn.titleLabel.font = [UIFont systemFontOfSize:12.5 weight:UIFontWeightSemibold];
+    btn.tintColor = [UIColor colorWithRed:0.96 green:0.88 blue:0.62 alpha:1.0];
+    btn.backgroundColor = [UIColor colorWithWhite:1 alpha:0.08];
+    btn.layer.cornerRadius = 10;
+    btn.layer.borderWidth = 1;
+    btn.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.14].CGColor;
     btn.accessibilityIdentifier = identifier;
+    [btn.heightAnchor constraintEqualToConstant:34].active = YES;
     return btn;
 }
 
@@ -852,63 +870,226 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     ]];
 }
 
+- (void)updateHudChipStyles {
+    if (!_hudChipButtons.count) return;
+    NSDictionary<NSString *, NSNumber *> *states = @{
+        @"target": @(_preferences.showHudTarget),
+        @"interact": @(_preferences.showHudInteract),
+        @"jump": @(_preferences.showHudJump),
+        @"camera": @(_preferences.showHudCamera),
+        @"shift": @(_preferences.showHudShift),
+        @"ctrl": @(_preferences.showHudCtrl),
+        @"rclick": @(_preferences.showHudRightClick),
+    };
+    UIColor *onBg = [UIColor colorWithRed:0.84 green:0.68 blue:0.28 alpha:0.34];
+    UIColor *onBorder = [UIColor colorWithRed:0.95 green:0.83 blue:0.54 alpha:0.82];
+    UIColor *onText = [UIColor colorWithRed:1.0 green:0.96 blue:0.82 alpha:1.0];
+    UIColor *offBg = [UIColor colorWithWhite:1 alpha:0.06];
+    UIColor *offBorder = [UIColor colorWithWhite:1 alpha:0.16];
+    UIColor *offText = [UIColor colorWithWhite:0.78 alpha:0.85];
+    for (NSString *key in _hudChipButtons) {
+        UIButton *chip = _hudChipButtons[key];
+        BOOL on = states[key].boolValue;
+        chip.backgroundColor = on ? onBg : offBg;
+        chip.layer.borderColor = (on ? onBorder : offBorder).CGColor;
+        [chip setTitleColor:(on ? onText : offText) forState:UIControlStateNormal];
+        chip.accessibilityValue = on ? @"On" : @"Off";
+    }
+}
+
+- (void)hudChipTapped:(UIButton *)sender {
+    NSString *key = sender.accessibilityIdentifier;
+    if ([key isEqualToString:@"wolkara.controls.chip.target"]) _preferences.showHudTarget = !_preferences.showHudTarget;
+    else if ([key isEqualToString:@"wolkara.controls.chip.interact"]) _preferences.showHudInteract = !_preferences.showHudInteract;
+    else if ([key isEqualToString:@"wolkara.controls.chip.jump"]) _preferences.showHudJump = !_preferences.showHudJump;
+    else if ([key isEqualToString:@"wolkara.controls.chip.camera"]) _preferences.showHudCamera = !_preferences.showHudCamera;
+    else if ([key isEqualToString:@"wolkara.controls.chip.shift"]) _preferences.showHudShift = !_preferences.showHudShift;
+    else if ([key isEqualToString:@"wolkara.controls.chip.ctrl"]) _preferences.showHudCtrl = !_preferences.showHudCtrl;
+    else if ([key isEqualToString:@"wolkara.controls.chip.rclick"]) _preferences.showHudRightClick = !_preferences.showHudRightClick;
+    [_preferences save];
+    [self updateHudChipStyles];
+    [self rebuildHudBindingMenus];
+    [self updateAppearance];
+}
+
+- (void)settingsTabChanged:(UISegmentedControl *)sender {
+    NSInteger idx = sender.selectedSegmentIndex;
+    _hudTabView.hidden = idx != 0;
+    _controlsTabView.hidden = idx != 1;
+    _styleTabView.hidden = idx != 2;
+}
+
+- (void)cameraSensitivityChanged:(UISlider *)slider {
+    _preferences.cameraSensitivity = slider.value;
+    [_preferences save];
+    [self updateValues];
+}
+
+- (void)controlModeChanged:(UISegmentedControl *)sender {
+    BOOL simple = sender.selectedSegmentIndex == 0;
+    if (self.simpleModeChanged) self.simpleModeChanged(simple);
+}
+
+- (UIStackView *)switchRowWithTitle:(NSString *)title control:(UISwitch *)toggle {
+    UILabel *lbl = [self label:title];
+    lbl.font = [UIFont systemFontOfSize:12.5 weight:UIFontWeightMedium];
+    lbl.numberOfLines = 1;
+    lbl.adjustsFontSizeToFitWidth = YES;
+    lbl.minimumScaleFactor = 0.8;
+    UIStackView *row = [[UIStackView alloc] initWithArrangedSubviews:@[lbl, toggle]];
+    row.axis = UILayoutConstraintAxisHorizontal;
+    row.alignment = UIStackViewAlignmentCenter;
+    row.spacing = 8;
+    return row;
+}
+
+- (UIButton *)actionPillButton:(NSString *)title identifier:(NSString *)identifier gold:(BOOL)gold action:(SEL)action {
+    UIButton *btn = [UIButton buttonWithType:UIButtonTypeSystem];
+    [btn setTitle:title forState:UIControlStateNormal];
+    btn.titleLabel.font = [UIFont systemFontOfSize:12.5 weight:UIFontWeightSemibold];
+    btn.titleLabel.adjustsFontSizeToFitWidth = YES;
+    btn.titleLabel.minimumScaleFactor = 0.8;
+    btn.tintColor = gold ? [UIColor colorWithRed:0.99 green:0.90 blue:0.56 alpha:1.0] : UIColor.whiteColor;
+    btn.backgroundColor = gold ? [UIColor colorWithRed:0.84 green:0.75 blue:0.55 alpha:0.20] : [UIColor colorWithWhite:1 alpha:0.08];
+    btn.layer.cornerRadius = 11;
+    btn.layer.borderWidth = 1;
+    btn.layer.borderColor = (gold ? [UIColor colorWithRed:0.94 green:0.83 blue:0.54 alpha:0.65] : [UIColor colorWithWhite:1 alpha:0.16]).CGColor;
+    btn.accessibilityIdentifier = identifier;
+    [btn.heightAnchor constraintEqualToConstant:36].active = YES;
+    [btn addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];
+    return btn;
+}
+
 - (void)toggleSettings {
     if (self.configuring) { [self finishConfiguration]; return; }
     [self reset];
     _settings = [UIView new];
-    _settings.backgroundColor = [UIColor colorWithRed:0.06 green:0.07 blue:0.09 alpha:0.97];
+    _settings.backgroundColor = [UIColor colorWithRed:0.06 green:0.07 blue:0.09 alpha:0.94];
     _settings.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
     _settings.layer.cornerRadius = 20;
     _settings.layer.borderWidth = 1;
-    _settings.layer.borderColor = AKPhotoBorder(0.45).CGColor;
+    _settings.layer.borderColor = AKPhotoBorder(0.50).CGColor;
     _settings.accessibilityIdentifier = @"wolkaraforever.controls.settings";
     [self addSubview:_settings];
+
+    // Header: title + 3-tab segmented switcher
+    UILabel *titleLabel = [self label:@"Wolkara Settings"];
+    titleLabel.font = [UIFont systemFontOfSize:13.5 weight:UIFontWeightBold];
+    titleLabel.textColor = [UIColor colorWithRed:0.95 green:0.85 blue:0.58 alpha:1.0];
+    [titleLabel setContentHuggingPriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
+
+    _settingsTabs = [[UISegmentedControl alloc] initWithItems:@[@"HUD", @"Controls", @"Style"]];
+    _settingsTabs.selectedSegmentIndex = 0;
+    _settingsTabs.selectedSegmentTintColor = [UIColor colorWithRed:0.84 green:0.68 blue:0.28 alpha:0.42];
+    [_settingsTabs setTitleTextAttributes:@{NSForegroundColorAttributeName: [UIColor colorWithRed:1.0 green:0.95 blue:0.78 alpha:1.0],
+                                            NSFontAttributeName: [UIFont systemFontOfSize:12 weight:UIFontWeightSemibold]}
+                                 forState:UIControlStateSelected];
+    [_settingsTabs setTitleTextAttributes:@{NSForegroundColorAttributeName: [UIColor colorWithWhite:0.82 alpha:0.9],
+                                            NSFontAttributeName: [UIFont systemFontOfSize:12 weight:UIFontWeightMedium]}
+                                 forState:UIControlStateNormal];
+    _settingsTabs.accessibilityIdentifier = @"wolkara.settings.tabs";
+    [_settingsTabs addTarget:self action:@selector(settingsTabChanged:) forControlEvents:UIControlEventValueChanged];
+
+    UIStackView *header = [[UIStackView alloc] initWithArrangedSubviews:@[titleLabel, _settingsTabs]];
+    header.axis = UILayoutConstraintAxisHorizontal;
+    header.alignment = UIStackViewAlignmentCenter;
+    header.spacing = 12;
+    header.translatesAutoresizingMaskIntoConstraints = NO;
+    [_settings addSubview:header];
 
     UIScrollView *scroll = [UIScrollView new];
     scroll.translatesAutoresizingMaskIntoConstraints = NO;
     [_settings addSubview:scroll];
 
-    UIStackView *stack = [[UIStackView alloc] initWithArrangedSubviews:@[[self label:AKHostLocalized(@"touch.settings.title")]]];
-    stack.axis = UILayoutConstraintAxisVertical;
-    stack.spacing = 6;
-    stack.translatesAutoresizingMaskIntoConstraints = NO;
-    [scroll addSubview:stack];
+    UIStackView *body = [UIStackView new];
+    body.axis = UILayoutConstraintAxisVertical;
+    body.spacing = 0;
+    body.translatesAutoresizingMaskIntoConstraints = NO;
+    [scroll addSubview:body];
 
-    UIStackView *sizes = [UIStackView new], *options = [UIStackView new];
-    sizes.axis = options.axis = UILayoutConstraintAxisVertical;
-    sizes.spacing = 6;
-    options.spacing = 7;
-    _settingsColumns = [[UIStackView alloc] initWithArrangedSubviews:@[sizes, options]];
-    _settingsColumns.spacing = 24;
-    _settingsColumns.alignment = UIStackViewAlignmentTop;
-    [stack addArrangedSubview:_settingsColumns];
+    // --- Tab 0: HUD ---
+    UIStackView *hudTab = [UIStackView new];
+    hudTab.axis = UILayoutConstraintAxisVertical;
+    hudTab.spacing = 10;
+    _hudTabView = hudTab;
 
-    NSMutableArray *sliders = [NSMutableArray new], *values = [NSMutableArray new];
-    NSArray *names = @[
-        AKHostLocalized(@"touch.settings.transparency"),
-        AKHostLocalized(@"touch.settings.shoulderSize"),
-        AKHostLocalized(@"touch.settings.stickSize")
-    ];
-    CGFloat initial[] = {1 - _preferences.opacity, _preferences.rearScale, _preferences.frontScale};
-    CGFloat min[] = {0, 0.8, 0.65}, max[] = {0.8, 1.5, 1.4};
-    for (NSUInteger i = 0; i < 3; i++) {
-        UILabel *value = [self label:@""];
-        [values addObject:value];
-        [sizes addArrangedSubview:value];
-        UISlider *slider = [UISlider new];
-        slider.tag = (NSInteger)i;
-        slider.minimumValue = min[i];
-        slider.maximumValue = max[i];
-        slider.value = initial[i];
-        slider.accessibilityLabel = names[i];
-        slider.accessibilityIdentifier = [@"wolkaraforever.controls." stringByAppendingString:@[@"transparency", @"rearScale", @"frontScale"][i]];
-        [slider addTarget:self action:@selector(sliderChanged:) forControlEvents:UIControlEventValueChanged];
-        [sliders addObject:slider];
-        [sizes addArrangedSubview:slider];
+    NSMutableArray<UIView *> *quickActions = [NSMutableArray array];
+    if ([NSUserDefaults.standardUserDefaults boolForKey:AKMobileAvailableKey]) {
+        _mobileSwitch = [UISwitch new];
+        _mobileSwitch.on = [NSUserDefaults.standardUserDefaults boolForKey:AKMobileEnabledKey];
+        _mobileSwitch.accessibilityLabel = @"Round Spell Icons (WoW)";
+        _mobileSwitch.accessibilityIdentifier = @"wolkara.controls.mobileInterface";
+        [_mobileSwitch addTarget:self action:@selector(mobileChanged:) forControlEvents:UIControlEventValueChanged];
+
+        _arrangeMobileButton = [self actionPillButton:@"Edit Spell Arcs" identifier:@"wolkara.controls.mobileEdit" gold:YES action:@selector(beginMobileEditing)];
+        _arrangeMobileButton.enabled = _mobileSwitch.on;
+        [quickActions addObject:_arrangeMobileButton];
     }
-    _sliders = sliders;
-    _values = values;
-    [self updateValues];
+    UIButton *editHudBtn = [self actionPillButton:@"Edit HUD Layout" identifier:@"wolkara.controls.editHudButton" gold:YES action:@selector(beginLayoutEditing)];
+    [quickActions addObject:editHudBtn];
+    UIButton *abilities = [self actionPillButton:@"Custom Buttons…" identifier:@"wolkara.controls.abilities" gold:NO action:@selector(editAbilities)];
+    [quickActions addObject:abilities];
+
+    UIStackView *actionRow = [[UIStackView alloc] initWithArrangedSubviews:quickActions];
+    actionRow.axis = UILayoutConstraintAxisHorizontal;
+    actionRow.distribution = UIStackViewDistributionFillEqually;
+    actionRow.spacing = 8;
+    [hudTab addArrangedSubview:actionRow];
+
+    _editSwitch = [UISwitch new];
+    _editSwitch.accessibilityLabel = AKHostLocalized(@"touch.settings.edit");
+    _editSwitch.accessibilityIdentifier = @"wolkaraforever.controls.edit";
+    [_editSwitch addTarget:self action:@selector(beginEditing:) forControlEvents:UIControlEventValueChanged];
+
+    _hapticsSwitch = [UISwitch new];
+    _hapticsSwitch.on = _preferences.hapticsEnabled;
+    _hapticsSwitch.accessibilityLabel = AKHostLocalized(@"touch.settings.haptics");
+    _hapticsSwitch.accessibilityIdentifier = @"wolkaraforever.controls.haptics";
+    [_hapticsSwitch addTarget:self action:@selector(hapticsChanged:) forControlEvents:UIControlEventValueChanged];
+
+    _performanceSwitch = [UISwitch new];
+    _performanceSwitch.on = _preferences.performanceOverlayEnabled;
+    _performanceSwitch.accessibilityLabel = AKHostLocalized(@"touch.settings.overlay.detail");
+    _performanceSwitch.accessibilityIdentifier = @"wolkara.controls.performance";
+    [_performanceSwitch addTarget:self action:@selector(performanceChanged:) forControlEvents:UIControlEventValueChanged];
+
+    _leftStickWasdSwitch = [UISwitch new];
+    _leftStickWasdSwitch.on = _preferences.leftStickWASD;
+    _leftStickWasdSwitch.accessibilityLabel = @"Left Stick WASD";
+    _leftStickWasdSwitch.accessibilityIdentifier = @"wolkara.controls.leftStickWASD";
+    [_leftStickWasdSwitch addTarget:self action:@selector(leftStickWasdChanged:) forControlEvents:UIControlEventValueChanged];
+
+    _autoHideSwitch = [UISwitch new];
+    _autoHideSwitch.on = _preferences.autoHideExternalInput;
+    _autoHideSwitch.accessibilityLabel = @"Hide on Controller or KB/Mouse";
+    _autoHideSwitch.accessibilityIdentifier = @"wolkara.controls.autoHideExternal";
+    [_autoHideSwitch addTarget:self action:@selector(autoHideExternalChanged:) forControlEvents:UIControlEventValueChanged];
+
+    UIStackView *leftSwitches = [UIStackView new], *rightSwitches = [UIStackView new];
+    leftSwitches.axis = rightSwitches.axis = UILayoutConstraintAxisVertical;
+    leftSwitches.spacing = rightSwitches.spacing = 8;
+    if (_mobileSwitch) {
+        [leftSwitches addArrangedSubview:[self switchRowWithTitle:@"Round Spell Icons (WoW)" control:_mobileSwitch]];
+    }
+    [leftSwitches addArrangedSubview:[self switchRowWithTitle:@"Left Stick: WASD Keys" control:_leftStickWasdSwitch]];
+    [leftSwitches addArrangedSubview:[self switchRowWithTitle:AKHostLocalized(@"touch.settings.edit") control:_editSwitch]];
+    [rightSwitches addArrangedSubview:[self switchRowWithTitle:@"Auto-hide on Controller / KB+M" control:_autoHideSwitch]];
+    [rightSwitches addArrangedSubview:[self switchRowWithTitle:AKHostLocalized(@"touch.settings.haptics") control:_hapticsSwitch]];
+    [rightSwitches addArrangedSubview:[self switchRowWithTitle:AKHostLocalized(@"touch.settings.overlay.detail") control:_performanceSwitch]];
+
+    _hudSwitchColumns = [[UIStackView alloc] initWithArrangedSubviews:@[leftSwitches, rightSwitches]];
+    _hudSwitchColumns.spacing = 18;
+    _hudSwitchColumns.alignment = UIStackViewAlignmentTop;
+    _hudSwitchColumns.distribution = UIStackViewDistributionFillEqually;
+    [hudTab addArrangedSubview:_hudSwitchColumns];
+    [body addArrangedSubview:hudTab];
+
+    // --- Tab 1: Controls ---
+    UIStackView *controlsTab = [UIStackView new];
+    controlsTab.axis = UILayoutConstraintAxisVertical;
+    controlsTab.spacing = 8;
+    controlsTab.hidden = YES;
+    _controlsTabView = controlsTab;
 
     _targetButton = [self menuButtonWithIdentifier:@"wolkara.controls.targetBinding"];
     _interactButton = [self menuButtonWithIdentifier:@"wolkara.controls.interactBinding"];
@@ -920,111 +1101,134 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     UIStackView *hudRow1 = [[UIStackView alloc] initWithArrangedSubviews:@[_targetButton, _interactButton]];
     hudRow1.axis = UILayoutConstraintAxisHorizontal;
     hudRow1.distribution = UIStackViewDistributionFillEqually;
-    hudRow1.spacing = 6;
-    [sizes addArrangedSubview:hudRow1];
+    hudRow1.spacing = 8;
+    [controlsTab addArrangedSubview:hudRow1];
 
     UIStackView *hudRow2 = [[UIStackView alloc] initWithArrangedSubviews:@[_jumpButton, _cameraDragButton]];
     hudRow2.axis = UILayoutConstraintAxisHorizontal;
     hudRow2.distribution = UIStackViewDistributionFillEqually;
-    hudRow2.spacing = 6;
-    [sizes addArrangedSubview:hudRow2];
-    [sizes addArrangedSubview:_hudVisibilityButton];
+    hudRow2.spacing = 8;
+    [controlsTab addArrangedSubview:hudRow2];
 
-    if ([NSUserDefaults.standardUserDefaults boolForKey:AKMobileAvailableKey]) {
-        _mobileSwitch = [UISwitch new];
-        _mobileSwitch.on = [NSUserDefaults.standardUserDefaults boolForKey:AKMobileEnabledKey];
-        _mobileSwitch.accessibilityLabel = @"Round Spell Icons (WoW)";
-        _mobileSwitch.accessibilityIdentifier = @"wolkara.controls.mobileInterface";
-        [_mobileSwitch addTarget:self action:@selector(mobileChanged:) forControlEvents:UIControlEventValueChanged];
-        UIStackView *mobileRow = [[UIStackView alloc] initWithArrangedSubviews:@[[self label:@"Round Spell Icons (WoW)"], _mobileSwitch]];
-        mobileRow.axis = UILayoutConstraintAxisHorizontal;
-        mobileRow.alignment = UIStackViewAlignmentCenter;
-        [options addArrangedSubview:mobileRow];
+    _cameraSensitivityLabel = [self label:@""];
+    _cameraSensitivityLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightMedium];
+    _cameraSensitivitySlider = [UISlider new];
+    _cameraSensitivitySlider.minimumValue = 0.25;
+    _cameraSensitivitySlider.maximumValue = 3.0;
+    _cameraSensitivitySlider.value = _preferences.cameraSensitivity;
+    _cameraSensitivitySlider.minimumTrackTintColor = [UIColor colorWithRed:0.90 green:0.76 blue:0.42 alpha:1.0];
+    _cameraSensitivitySlider.accessibilityLabel = @"Camera sensitivity";
+    _cameraSensitivitySlider.accessibilityIdentifier = @"wolkara.controls.cameraSensitivity";
+    [_cameraSensitivitySlider addTarget:self action:@selector(cameraSensitivityChanged:) forControlEvents:UIControlEventValueChanged];
+    UIStackView *sensRow = [[UIStackView alloc] initWithArrangedSubviews:@[_cameraSensitivityLabel, _cameraSensitivitySlider]];
+    sensRow.axis = UILayoutConstraintAxisHorizontal;
+    sensRow.alignment = UIStackViewAlignmentCenter;
+    sensRow.spacing = 10;
+    [controlsTab addArrangedSubview:sensRow];
 
-        _arrangeMobileButton = [UIButton buttonWithType:UIButtonTypeSystem];
-        [_arrangeMobileButton setTitle:@"Arrange Spell Icons…" forState:UIControlStateNormal];
-        _arrangeMobileButton.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
-        _arrangeMobileButton.tintColor = [UIColor colorWithRed:0.95 green:0.82 blue:0.48 alpha:1];
-        _arrangeMobileButton.accessibilityIdentifier = @"wolkara.controls.mobileEdit";
-        _arrangeMobileButton.enabled = _mobileSwitch.on;
-        [_arrangeMobileButton addTarget:self action:@selector(beginMobileEditing) forControlEvents:UIControlEventTouchUpInside];
-        [options addArrangedSubview:_arrangeMobileButton];
+    UILabel *chipsHeading = [self label:@"Show / Hide HUD Buttons (tap to toggle live):"];
+    chipsHeading.font = [UIFont systemFontOfSize:11.5 weight:UIFontWeightMedium];
+    chipsHeading.textColor = [UIColor colorWithWhite:0.75 alpha:0.9];
+    [controlsTab addArrangedSubview:chipsHeading];
+
+    NSArray<NSArray<NSString *> *> *chipSpecs = @[
+        @[@"target", @"Target"], @[@"interact", @"Interact"], @[@"jump", @"Jump"], @[@"camera", @"Right Stick"],
+        @[@"shift", @"Shift"], @[@"ctrl", @"Ctrl"], @[@"rclick", @"R-Click"],
+    ];
+    NSMutableDictionary<NSString *, UIButton *> *chips = [NSMutableDictionary new];
+    UIStackView *chipRow1 = [UIStackView new], *chipRow2 = [UIStackView new];
+    chipRow1.axis = chipRow2.axis = UILayoutConstraintAxisHorizontal;
+    chipRow1.distribution = chipRow2.distribution = UIStackViewDistributionFillEqually;
+    chipRow1.spacing = chipRow2.spacing = 6;
+    for (NSUInteger i = 0; i < chipSpecs.count; i++) {
+        NSString *key = chipSpecs[i][0], *title = chipSpecs[i][1];
+        UIButton *chip = [UIButton buttonWithType:UIButtonTypeSystem];
+        [chip setTitle:title forState:UIControlStateNormal];
+        chip.titleLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightSemibold];
+        chip.layer.cornerRadius = 14;
+        chip.layer.borderWidth = 1;
+        chip.accessibilityIdentifier = [@"wolkara.controls.chip." stringByAppendingString:key];
+        [chip.heightAnchor constraintEqualToConstant:28].active = YES;
+        [chip addTarget:self action:@selector(hudChipTapped:) forControlEvents:UIControlEventTouchUpInside];
+        chips[key] = chip;
+        [(i < 4 ? chipRow1 : chipRow2) addArrangedSubview:chip];
     }
+    _hudChipButtons = chips;
+    [self updateHudChipStyles];
+    [controlsTab addArrangedSubview:chipRow1];
+    [controlsTab addArrangedSubview:chipRow2];
+    [body addArrangedSubview:controlsTab];
 
-    UIButton *abilities = [UIButton buttonWithType:UIButtonTypeSystem];
-    [abilities setTitle:@"Custom Buttons (Drag & Drop)…" forState:UIControlStateNormal];
-    abilities.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightBold];
-    abilities.tintColor = [UIColor colorWithRed:0.95 green:0.82 blue:0.48 alpha:1];
-    abilities.accessibilityIdentifier = @"wolkara.controls.abilities";
-    [abilities addTarget:self action:@selector(editAbilities) forControlEvents:UIControlEventTouchUpInside];
-    [options addArrangedSubview:abilities];
+    // --- Tab 2: Style ---
+    UIStackView *styleTab = [UIStackView new];
+    styleTab.axis = UILayoutConstraintAxisVertical;
+    styleTab.spacing = 7;
+    styleTab.hidden = YES;
+    _styleTabView = styleTab;
 
-    _editSwitch = [UISwitch new];
-    _editSwitch.accessibilityLabel = AKHostLocalized(@"touch.settings.edit");
-    _editSwitch.accessibilityIdentifier = @"wolkaraforever.controls.edit";
-    [_editSwitch addTarget:self action:@selector(beginEditing:) forControlEvents:UIControlEventValueChanged];
-    UIStackView *editRow = [[UIStackView alloc] initWithArrangedSubviews:@[[self label:AKHostLocalized(@"touch.settings.edit")], _editSwitch]];
-    editRow.axis = UILayoutConstraintAxisHorizontal;
-    editRow.alignment = UIStackViewAlignmentCenter;
-    [options addArrangedSubview:editRow];
+    NSMutableArray *sliders = [NSMutableArray new], *values = [NSMutableArray new];
+    NSArray *names = @[
+        AKHostLocalized(@"touch.settings.transparency"),
+        AKHostLocalized(@"touch.settings.shoulderSize"),
+        AKHostLocalized(@"touch.settings.stickSize")
+    ];
+    CGFloat initial[] = {1 - _preferences.opacity, _preferences.rearScale, _preferences.frontScale};
+    CGFloat min[] = {0, 0.8, 0.65}, max[] = {0.8, 1.5, 1.4};
+    for (NSUInteger i = 0; i < 3; i++) {
+        UILabel *value = [self label:@""];
+        value.font = [UIFont systemFontOfSize:12 weight:UIFontWeightMedium];
+        [values addObject:value];
+        UISlider *slider = [UISlider new];
+        slider.tag = (NSInteger)i;
+        slider.minimumValue = min[i];
+        slider.maximumValue = max[i];
+        slider.value = initial[i];
+        slider.minimumTrackTintColor = [UIColor colorWithRed:0.90 green:0.76 blue:0.42 alpha:1.0];
+        slider.accessibilityLabel = names[i];
+        slider.accessibilityIdentifier = [@"wolkaraforever.controls." stringByAppendingString:@[@"transparency", @"rearScale", @"frontScale"][i]];
+        [slider addTarget:self action:@selector(sliderChanged:) forControlEvents:UIControlEventValueChanged];
+        [sliders addObject:slider];
+        UIStackView *sRow = [[UIStackView alloc] initWithArrangedSubviews:@[value, slider]];
+        sRow.axis = UILayoutConstraintAxisHorizontal;
+        sRow.alignment = UIStackViewAlignmentCenter;
+        sRow.spacing = 10;
+        [value.widthAnchor constraintEqualToConstant:168].active = YES;
+        [styleTab addArrangedSubview:sRow];
+    }
+    _sliders = sliders;
+    _values = values;
+    [self updateValues];
 
-    _hapticsSwitch = [UISwitch new];
-    _hapticsSwitch.on = _preferences.hapticsEnabled;
-    _hapticsSwitch.accessibilityLabel = AKHostLocalized(@"touch.settings.haptics");
-    _hapticsSwitch.accessibilityIdentifier = @"wolkaraforever.controls.haptics";
-    [_hapticsSwitch addTarget:self action:@selector(hapticsChanged:) forControlEvents:UIControlEventValueChanged];
-    UIStackView *hapticsRow = [[UIStackView alloc] initWithArrangedSubviews:@[[self label:AKHostLocalized(@"touch.settings.haptics")], _hapticsSwitch]];
-    hapticsRow.axis = UILayoutConstraintAxisHorizontal;
-    hapticsRow.alignment = UIStackViewAlignmentCenter;
-    [options addArrangedSubview:hapticsRow];
-
-    _performanceSwitch = [UISwitch new];
-    _performanceSwitch.on = _preferences.performanceOverlayEnabled;
-    _performanceSwitch.accessibilityLabel = AKHostLocalized(@"touch.settings.overlay.detail");
-    _performanceSwitch.accessibilityIdentifier = @"wolkara.controls.performance";
-    [_performanceSwitch addTarget:self action:@selector(performanceChanged:) forControlEvents:UIControlEventValueChanged];
-    UIStackView *performanceRow = [[UIStackView alloc] initWithArrangedSubviews:@[[self label:AKHostLocalized(@"touch.settings.overlay.detail")], _performanceSwitch]];
-    performanceRow.axis = UILayoutConstraintAxisHorizontal;
-    performanceRow.alignment = UIStackViewAlignmentCenter;
-    [options addArrangedSubview:performanceRow];
+    _modeSegment = [[UISegmentedControl alloc] initWithItems:@[@"Photo HUD", @"Full Gamepad"]];
+    _modeSegment.selectedSegmentIndex = _simple ? 0 : 1;
+    _modeSegment.selectedSegmentTintColor = [UIColor colorWithRed:0.84 green:0.68 blue:0.28 alpha:0.42];
+    _modeSegment.accessibilityIdentifier = @"wolkara.controls.modeSegment";
+    [_modeSegment addTarget:self action:@selector(controlModeChanged:) forControlEvents:UIControlEventValueChanged];
+    UIStackView *modeRow = [[UIStackView alloc] initWithArrangedSubviews:@[[self label:@"Control Mode"], _modeSegment]];
+    modeRow.axis = UILayoutConstraintAxisHorizontal;
+    modeRow.alignment = UIStackViewAlignmentCenter;
+    modeRow.spacing = 10;
+    [styleTab addArrangedSubview:modeRow];
 
     _swapShouldersSwitch = [UISwitch new];
     _swapShouldersSwitch.on = !_preferences.swapShoulders;
     _swapShouldersSwitch.accessibilityLabel = AKHostLocalized(@"touch.settings.outerTriggers");
     _swapShouldersSwitch.accessibilityIdentifier = @"wolkaraforever.controls.swapShoulders";
     [_swapShouldersSwitch addTarget:self action:@selector(swapShouldersChanged:) forControlEvents:UIControlEventValueChanged];
-    UIStackView *shouldersRow = [[UIStackView alloc] initWithArrangedSubviews:@[[self label:AKHostLocalized(@"touch.settings.outerTriggers")], _swapShouldersSwitch]];
-    shouldersRow.axis = UILayoutConstraintAxisHorizontal;
-    shouldersRow.alignment = UIStackViewAlignmentCenter;
-    [options addArrangedSubview:shouldersRow];
-
-    _leftStickWasdSwitch = [UISwitch new];
-    _leftStickWasdSwitch.on = _preferences.leftStickWASD;
-    _leftStickWasdSwitch.accessibilityLabel = @"Left Stick WASD";
-    _leftStickWasdSwitch.accessibilityIdentifier = @"wolkara.controls.leftStickWASD";
-    [_leftStickWasdSwitch addTarget:self action:@selector(leftStickWasdChanged:) forControlEvents:UIControlEventValueChanged];
-    UIStackView *wasdRow = [[UIStackView alloc] initWithArrangedSubviews:@[[self label:@"Left Stick: WASD Keys"], _leftStickWasdSwitch]];
-    wasdRow.axis = UILayoutConstraintAxisHorizontal;
-    wasdRow.alignment = UIStackViewAlignmentCenter;
-    [options addArrangedSubview:wasdRow];
-
-    _autoHideSwitch = [UISwitch new];
-    _autoHideSwitch.on = _preferences.autoHideExternalInput;
-    _autoHideSwitch.accessibilityLabel = @"Hide on Controller or KB/Mouse";
-    _autoHideSwitch.accessibilityIdentifier = @"wolkara.controls.autoHideExternal";
-    [_autoHideSwitch addTarget:self action:@selector(autoHideExternalChanged:) forControlEvents:UIControlEventValueChanged];
-    UIStackView *autoHideRow = [[UIStackView alloc] initWithArrangedSubviews:@[[self label:@"Auto-hide on Controller / KB+M"], _autoHideSwitch]];
-    autoHideRow.axis = UILayoutConstraintAxisHorizontal;
-    autoHideRow.alignment = UIStackViewAlignmentCenter;
-    [options addArrangedSubview:autoHideRow];
+    [styleTab addArrangedSubview:[self switchRowWithTitle:AKHostLocalized(@"touch.settings.outerTriggers") control:_swapShouldersSwitch]];
+    [body addArrangedSubview:styleTab];
 
     UIButton *reset = [UIButton buttonWithType:UIButtonTypeSystem];
     [reset setTitle:AKHostLocalized(@"touch.settings.reset") forState:UIControlStateNormal];
+    reset.tintColor = [UIColor colorWithRed:0.99 green:0.62 blue:0.62 alpha:1.0];
+    reset.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
     reset.accessibilityIdentifier = @"wolkaraforever.controls.reset";
     [reset addTarget:self action:@selector(resetLayout) forControlEvents:UIControlEventTouchUpInside];
 
     UIButton *done = [UIButton buttonWithType:UIButtonTypeSystem];
     [done setTitle:AKHostLocalized(@"common.done") forState:UIControlStateNormal];
+    done.tintColor = [UIColor colorWithRed:0.98 green:0.88 blue:0.56 alpha:1.0];
+    done.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightBold];
     done.accessibilityIdentifier = @"wolkaraforever.controls.done";
     [done addTarget:self action:@selector(finishConfiguration) forControlEvents:UIControlEventTouchUpInside];
 
@@ -1035,19 +1239,23 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     [_settings addSubview:footer];
 
     [NSLayoutConstraint activateConstraints:@[
+        [header.topAnchor constraintEqualToAnchor:_settings.topAnchor constant:12],
+        [header.leadingAnchor constraintEqualToAnchor:_settings.leadingAnchor constant:16],
+        [header.trailingAnchor constraintEqualToAnchor:_settings.trailingAnchor constant:-16],
+        [header.heightAnchor constraintEqualToConstant:32],
         [footer.bottomAnchor constraintEqualToAnchor:_settings.bottomAnchor constant:-8],
-        [footer.heightAnchor constraintEqualToConstant:44],
-        [footer.leadingAnchor constraintEqualToAnchor:_settings.leadingAnchor constant:18],
-        [footer.trailingAnchor constraintEqualToAnchor:_settings.trailingAnchor constant:-18],
-        [scroll.topAnchor constraintEqualToAnchor:_settings.topAnchor constant:16],
-        [scroll.bottomAnchor constraintEqualToAnchor:footer.topAnchor constant:-8],
-        [scroll.leadingAnchor constraintEqualToAnchor:_settings.leadingAnchor constant:18],
-        [scroll.trailingAnchor constraintEqualToAnchor:_settings.trailingAnchor constant:-18],
-        [stack.topAnchor constraintEqualToAnchor:scroll.contentLayoutGuide.topAnchor],
-        [stack.bottomAnchor constraintEqualToAnchor:scroll.contentLayoutGuide.bottomAnchor],
-        [stack.leadingAnchor constraintEqualToAnchor:scroll.contentLayoutGuide.leadingAnchor],
-        [stack.trailingAnchor constraintEqualToAnchor:scroll.contentLayoutGuide.trailingAnchor],
-        [stack.widthAnchor constraintEqualToAnchor:scroll.frameLayoutGuide.widthAnchor]
+        [footer.heightAnchor constraintEqualToConstant:38],
+        [footer.leadingAnchor constraintEqualToAnchor:_settings.leadingAnchor constant:16],
+        [footer.trailingAnchor constraintEqualToAnchor:_settings.trailingAnchor constant:-16],
+        [scroll.topAnchor constraintEqualToAnchor:header.bottomAnchor constant:10],
+        [scroll.bottomAnchor constraintEqualToAnchor:footer.topAnchor constant:-6],
+        [scroll.leadingAnchor constraintEqualToAnchor:_settings.leadingAnchor constant:16],
+        [scroll.trailingAnchor constraintEqualToAnchor:_settings.trailingAnchor constant:-16],
+        [body.topAnchor constraintEqualToAnchor:scroll.contentLayoutGuide.topAnchor],
+        [body.bottomAnchor constraintEqualToAnchor:scroll.contentLayoutGuide.bottomAnchor],
+        [body.leadingAnchor constraintEqualToAnchor:scroll.contentLayoutGuide.leadingAnchor],
+        [body.trailingAnchor constraintEqualToAnchor:scroll.contentLayoutGuide.trailingAnchor],
+        [body.widthAnchor constraintEqualToAnchor:scroll.frameLayoutGuide.widthAnchor]
     ]];
     [self updateAppearance];
     if (self.configurationChanged) self.configurationChanged();
@@ -1058,6 +1266,10 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     _values[1].text = AKHostLocalizedFormat(@"touch.settings.shoulderSize.value", _preferences.rearScale * 100);
     _values[2].text = AKHostLocalizedFormat(@"touch.settings.stickSize.value", _preferences.frontScale * 100);
     for (NSUInteger i = 0; i < _sliders.count; i++) _sliders[i].accessibilityValue = _values[i].text;
+    if (_cameraSensitivityLabel) {
+        _cameraSensitivityLabel.text = [NSString stringWithFormat:@"Camera Sensitivity %.1f×", _preferences.cameraSensitivity];
+        _cameraSensitivitySlider.accessibilityValue = _cameraSensitivityLabel.text;
+    }
 }
 
 - (void)sliderChanged:(UISlider *)slider {
@@ -1110,7 +1322,6 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     _performanceSwitch = nil;
     _leftStickWasdSwitch = nil;
     _autoHideSwitch = nil;
-    _settingsColumns = nil;
     _targetButton = nil;
     _interactButton = nil;
     _jumpButton = nil;
@@ -1118,6 +1329,15 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     _hudVisibilityButton = nil;
     _mobileSwitch = nil;
     _arrangeMobileButton = nil;
+    _settingsTabs = nil;
+    _modeSegment = nil;
+    _hudTabView = nil;
+    _controlsTabView = nil;
+    _styleTabView = nil;
+    _hudSwitchColumns = nil;
+    _cameraSensitivitySlider = nil;
+    _cameraSensitivityLabel = nil;
+    _hudChipButtons = nil;
 }
 
 - (void)beginLayoutEditing {
@@ -1152,6 +1372,9 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     _performanceSwitch.on = _preferences.performanceOverlayEnabled;
     _leftStickWasdSwitch.on = _preferences.leftStickWASD;
     _autoHideSwitch.on = _preferences.autoHideExternalInput;
+    _cameraSensitivitySlider.value = _preferences.cameraSensitivity;
+    _modeSegment.selectedSegmentIndex = _simple ? 0 : 1;
+    [self updateHudChipStyles];
     [self rebuildHudBindingMenus];
     [self updateValues];
     [self updateAppearance];
@@ -1377,6 +1600,12 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
             if (!self) return;
             id<AKMobileInterfaceHost> host = (id)self->_host;
             if ([host conformsToProtocol:@protocol(AKMobileInterfaceHost)]) [host ak_mobileCommand:command];
+        };
+        _overlay.simpleModeChanged = ^(BOOL simple) {
+            AKTouchGamepad *self = weakSelf;
+            if (!self) return;
+            [NSUserDefaults.standardUserDefaults setBool:simple forKey:@"TKTouchGamepadSimple"];
+            self.simple = simple;
         };
         for (AKGamepadButton *button in _overlay.buttons.allValues) {
             [button addTarget:self action:@selector(buttonChanged:) forControlEvents:UIControlEventValueChanged];

@@ -8,10 +8,15 @@ This custom build updates Wolkara's in-game touch UI (based on the `v0.1.0-stikd
   - Caps External JIT arena reservation to 256 MiB (with `MADV_FREE` on unused arena pages past the loaded image) so StikDebug page-marking does not exhaust iOS Jetsam limits on devices without `increased-memory-limit`.
   - Defaults iPhone External JIT builds to **Settings → Rendering quality → Performance (1×)** (with active checkmark in Settings; **Balanced (2×)** remains selectable).
   - Lazily constructs `WolkaraMobile` ability buttons as needed instead of eagerly creating all 64 secure frames on load.
-- **Top-Center Quick Menu Bar & Collapsible Pill (`⌄`)** (`translation/AppKit/TouchControls.m`):
+- **Top-Center Collapsible Pill (`⌄`) & Zero-Scroll 2-Row Glass Drawer** (`translation/AppKit/TouchControls.m`):
   - Gameplay (and Login) starts with a single compact dark/warm-gold chevron pill at top-center (`⌄`).
-  - Tap `⌄` to expand the top WoW bar: **`Chat | Menu | Bags | Map | Character | Talents | Quests | Spellbook | Professions | Collections | Edit Arcs | Edit HUD | ^ | ...`**.
-  - Tap **`Chat`** to toggle the keyboard, **`Menu`–`Collections`** (`Menu`, `B`, `M`, `C`, `N`, `L`, `P`, `Professions`, `Shift+P`) to open game windows (`Menu` toggles `GameMenuFrame` directly via WolkaraMobile's `ALT-F5` bridge chord with `Esc` fallback; `Professions` uses `TOGGLEPROFESSIONBOOK` with `K` fallback), **`Edit Arcs`** or **`Edit HUD`** to customize layout right away, **`...`** to show Wolkara's utility buttons (mouse/trackpad, keyboard, HUD/gamepad mode toggle, settings, dictation, saved-text key, and leave game), or **`^`** to collapse everything back to `⌄`.
+  - Tap `⌄` to open the **zero-scroll 2-row floating drawer** (tap anywhere outside the drawer or tap `^` to dismiss):
+    - **Row 1 — WoW Windows** (auto-closes after opening): **`Char`** (`C`), **`Bags`** (`B`), **`Spells`** (`P`), **`Profs`** (`TOGGLEPROFESSIONBOOK` / `K`), **`Talents`** (`N`), **`Quests`** (`L`), **`Collect`** (`Shift+P`), **`Map`** (`M`), and **`Menu`** (`GameMenuFrame` via `ALT-F5` / `Esc`).
+    - **Row 2 — Quick Tools**: **`Chat`**, **`Voice`**, **`Saved`**, **`Trackpad`** (glows cyan when ON), **`Edit Arcs`**, **`Edit HUD`**, **`Settings`** (opens the 3-tab Settings sheet directly), and **`Leave`**.
+- **3-Tab Segmented Settings Sheet (`HUD` | `Controls` | `Style`)** (`translation/AppKit/TouchGamepad.m`):
+  - **`HUD`**: Quick buttons for **Edit Spell Arcs**, **Edit HUD Layout**, and **Custom Buttons…**, plus switches for Round Spell Icons, Left Stick WASD, Auto-hide on Controller/KB+M, Haptics, and Performance Overlay.
+  - **`Controls`**: Binding pickers (`Target`, `Interact`, `Jump`, `Right Stick`), live **Camera Sensitivity** slider, and tappable live visibility chips for all 7 HUD controls (`Target`, `Interact`, `Jump`, `Right Stick`, `Shift`, `Ctrl`, `R-Click`).
+  - **`Style`**: Live **Transparency**, **Button Size**, and **Stick Size** sliders, **Photo HUD / Full Gamepad** mode switcher, and **Outer Triggers**.
 - **Seamless Curved Side Ability Arcs (`WolkaraMobile`)** (`addons/WolkaraMobile/`, `launcher/WoW/MobileInterface.*`, `translation/AppKit/AKMobileInterface.h`):
   - Automatically mirrors populated WoW action bars into left & right curved thumb arcs on load (hiding desktop bottom bars cleanly while leaving stances/pets visible, and restoring desktop bars automatically whenever round touch icons are turned off or external hardware is connected).
   - Tap **⌄ → Edit Arcs** (or `/wm edit`) for the interactive arc editor:

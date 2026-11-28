@@ -687,17 +687,42 @@ static void AKRecordSelfTestResult(NSString *message) {
     assert([[host valueForKey:@"_mods"] unsignedIntegerValue] == 0);
     [guest.text setString:@""]; guest.selection = NSMakeRange(0, 0); guest.lastKeyEvent = nil;
     UIButton *editArcs = (id)FindToolbarView(controls, @"wolkara.toolbar.wow.editArcs");
-    assert(editArcs && !editArcs.hidden);
+    UIButton *toolSettings = (id)FindToolbarView(controls, @"wolkara.toolbar.tool.settings");
+    UIButton *toolTrackpad = (id)FindToolbarView(controls, @"wolkara.toolbar.tool.trackpad");
+    UIControl *drawerBackdrop = (id)FindToolbarView(controls, @"wolkara.toolbar.backdrop");
+    assert(editArcs && !editArcs.hidden && toolSettings && toolTrackpad && drawerBackdrop);
+    // Verify tapping drawer backdrop dismisses the 2-row drawer cleanly, and Trackpad/Settings tiles work directly.
+    [toggle sendActionsForControlEvents:UIControlEventTouchUpInside]; [controls layoutIfNeeded];
+    assert(!menuBar.hidden && !drawerBackdrop.hidden);
+    BOOL trackpadBefore = controls.trackpadEnabled;
+    [toolTrackpad sendActionsForControlEvents:UIControlEventTouchUpInside];
+    assert(controls.trackpadEnabled == !trackpadBefore && !menuBar.hidden);
+    [toolTrackpad sendActionsForControlEvents:UIControlEventTouchUpInside];
+    assert(controls.trackpadEnabled == trackpadBefore);
+    [drawerBackdrop sendActionsForControlEvents:UIControlEventTouchUpInside]; [controls layoutIfNeeded];
+    assert(menuBar.hidden && drawerBackdrop.hidden && !toggle.hidden);
+    [toggle sendActionsForControlEvents:UIControlEventTouchUpInside]; [controls layoutIfNeeded];
+    [toolSettings sendActionsForControlEvents:UIControlEventTouchUpInside]; [controls layoutIfNeeded];
+    assert(gamepad.configuring && menuBar.hidden && FindToolbarView(host, @"wolkaraforever.controls.settings"));
+    [gamepad toggleSettings]; [controls layoutIfNeeded];
+    assert(!gamepad.configuring);
+    // Zero-scroll 2-row drawer fits all 9 WoW windows and all 8 quick tools cleanly on landscape iPhone.
+    [toggle sendActionsForControlEvents:UIControlEventTouchUpInside]; [controls layoutIfNeeded];
     CGRect wideBefore = host.bounds;
-    if ([controls toolbarBounds].size.width < 980) {
-        host.bounds = CGRectMake(0, 0, 1160, MAX(wideBefore.size.height, 440));
+    if ([controls toolbarBounds].size.width < 600) {
+        host.bounds = CGRectMake(0, 0, 844, MAX(wideBefore.size.height, 390));
         [controls setNeedsLayout]; [controls layoutIfNeeded];
     }
-    if ([controls toolbarBounds].size.width >= 980) {
+    if ([controls toolbarBounds].size.width >= 600) {
         UIScrollView *menuScroll = [controls valueForKey:@"_wowMenuScroll"];
+        UIScrollView *toolsScroll = [controls valueForKey:@"_toolsScroll"];
         assert(menuScroll && menuScroll.contentSize.width <= menuScroll.bounds.size.width + 1);
-        assert(CGRectContainsRect(menuScroll.bounds, editArcs.frame));
-        assert(CGRectContainsRect(menuScroll.bounds, editHud.frame));
+        assert(toolsScroll && toolsScroll.contentSize.width <= toolsScroll.bounds.size.width + 1);
+        assert(CGRectContainsRect(menuScroll.bounds, wowMenu.frame));
+        assert(CGRectContainsRect(menuScroll.bounds, professions.frame));
+        assert(CGRectContainsRect(toolsScroll.bounds, editArcs.frame));
+        assert(CGRectContainsRect(toolsScroll.bounds, editHud.frame));
+        assert(CGRectContainsRect(toolsScroll.bounds, toolSettings.frame));
     }
     if (!CGRectEqualToRect(host.bounds, wideBefore)) {
         host.bounds = wideBefore;
