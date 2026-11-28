@@ -317,10 +317,21 @@ ns.On("ADDON_LOADED",function(name)
     if type(ns.db.buttons)~="table" then ns.db.buttons={} end
     ns.Each("Init")
 end)
+local function EnsureSoftTargetInteract()
+    if ns.db and not ns.db.softInteractInit and GetCVar and SetCVar then
+        ns.db.softInteractInit=true
+        if GetCVar("SoftTargetInteract")=="0" then SetCVar("SoftTargetInteract","3") end
+    end
+end
 ns.On("PLAYER_LOGIN",function() if ns.db.hostSession~=ns.hostSession then
         ns.db.hostSession=ns.hostSession; ns.db.enabled=ns.hostEnabled==true
     end
+    EnsureSoftTargetInteract()
+    ns.Each("InstallBindings")
     ns.SetEnabled(ns.db.enabled==true) end)
+ns.On("PLAYER_ENTERING_WORLD",function()
+    if not InCombatLockdown() then ns.Each("InstallBindings") end
+end)
 ns.On("PLAYER_REGEN_DISABLED",function()
     -- Do not change protected attributes here: combat has already begun.
     ns.Each("CombatStarts")

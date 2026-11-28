@@ -4,6 +4,7 @@
 #import "../translation/AppKit/AKMobileInterface.h"
 #import "../translation/AppKit/TouchGamepad.h"
 #import "../translation/AppKit/TouchGamepadLayout.h"
+#import "../translation/AppKit/TouchActionLayout.h"
 #import "../translation/AppKit/TouchHaptics.h"
 #import "../translation/AppKit/TouchStickButtons.h"
 #include <assert.h>
@@ -170,20 +171,100 @@ static void Drain(void) {
 @interface UIView (LayoutFixture)
 - (void)drag:(UIPanGestureRecognizer *)pan;
 @end
+@interface AKHudTriggerTestHost : UIView <AKTouchDragHost>
+@property NSUInteger triggerCount, sendCount;
+@property unsigned short triggeredCode, sentCode;
+@property(nonatomic, copy) NSString *triggeredChars;
+@property NSUInteger triggeredMods, sentMods;
+@property BOOL sentPressed;
+@end
+@implementation AKHudTriggerTestHost
+- (void)ak_triggerKeyCode:(unsigned short)keyCode characters:(NSString *)characters modifiers:(NSUInteger)modifiers {
+    self.triggerCount++;
+    self.triggeredCode = keyCode;
+    self.triggeredChars = characters ?: @"";
+    self.triggeredMods = modifiers;
+}
+- (void)ak_sendKeyCode:(unsigned short)keyCode characters:(NSString *)characters modifiers:(NSUInteger)modifiers pressed:(BOOL)pressed {
+    (void)characters;
+    self.sendCount++;
+    self.sentCode = keyCode;
+    self.sentMods = modifiers;
+    self.sentPressed = pressed;
+}
+@end
+static void TestHudBindingDispatch(UIView *container) {
+    [NSUserDefaults.standardUserDefaults removeObjectForKey:AKMobileAvailableKey];
+    [NSUserDefaults.standardUserDefaults removeObjectForKey:@"WolkaraForeverTouchLayoutV1"];
+    AKHudTriggerTestHost *hudHost = [[AKHudTriggerTestHost alloc] initWithFrame:container.bounds];
+    [container addSubview:hudHost];
+    AKFixtureGamepad *hudPad = [[AKFixtureGamepad alloc] initWithHostView:hudHost];
+    [hudPad.layout reset];
+    hudPad.simple = YES;
+    [hudPad refresh];
+    [hudPad.lastConnection finish:nil];
+    [hudHost layoutIfNeeded];
+    assert(hudPad.visible);
+    UIControl *hudTarget = (id)Find(hudHost, @"wolkara.hud.target");
+    UIControl *hudInteract = (id)Find(hudHost, @"wolkara.hud.interact");
+    assert(hudTarget && !hudTarget.hidden && hudInteract && !hudInteract.hidden);
+    [hudTarget sendActionsForControlEvents:UIControlEventTouchDown];
+    assert(hudHost.triggerCount == 1 && hudHost.triggeredCode == 48 && hudHost.triggeredMods == 0 && hudHost.sendCount == 0);
+    [hudTarget sendActionsForControlEvents:UIControlEventTouchUpInside];
+    assert(hudHost.triggerCount == 1 && hudHost.sendCount == 0);
+    [hudInteract sendActionsForControlEvents:UIControlEventTouchDown];
+    assert(hudHost.triggerCount == 2 && hudHost.triggeredCode == 3 && hudHost.triggeredMods == 0);
+    [hudInteract sendActionsForControlEvents:UIControlEventTouchUpInside];
+    assert(hudHost.triggerCount == 2);
+    [NSUserDefaults.standardUserDefaults setBool:YES forKey:AKMobileAvailableKey];
+    [hudTarget sendActionsForControlEvents:UIControlEventTouchDown];
+    assert(hudHost.triggerCount == 3 && hudHost.triggeredCode == 96 && [hudHost.triggeredChars isEqualToString:@"\uF708"] &&
+           hudHost.triggeredMods == AKTouchKeyModifierControl);
+    [hudTarget sendActionsForControlEvents:UIControlEventTouchUpInside];
+    assert(hudHost.triggerCount == 3);
+    [hudInteract sendActionsForControlEvents:UIControlEventTouchDown];
+    assert(hudHost.triggerCount == 4 && hudHost.triggeredCode == 96 && [hudHost.triggeredChars isEqualToString:@"\uF708"] &&
+           hudHost.triggeredMods == (AKTouchKeyModifierControl | AKTouchKeyModifierShift));
+    [hudInteract sendActionsForControlEvents:UIControlEventTouchUpInside];
+    assert(hudHost.triggerCount == 4);
+    hudPad.layout.targetBinding = @"G";
+    [hudTarget sendActionsForControlEvents:UIControlEventTouchDown];
+    assert(hudHost.sendCount == 1 && hudHost.sentCode == 5 && hudHost.sentMods == 0 && hudHost.sentPressed && hudHost.triggerCount == 4);
+    [hudTarget sendActionsForControlEvents:UIControlEventTouchUpInside];
+    assert(hudHost.sendCount == 2 && hudHost.sentCode == 5 && !hudHost.sentPressed);
+    [hudPad invalidate];
+    [hudHost removeFromSuperview];
+    [NSUserDefaults.standardUserDefaults removeObjectForKey:AKMobileAvailableKey];
+    [NSUserDefaults.standardUserDefaults removeObjectForKey:@"WolkaraForeverTouchLayoutV1"];
+}
+
 static void TestPreferences(void) {
     NSString *suite=[@"org.tolkara.layout-test." stringByAppendingString:NSUUID.UUID.UUIDString];
     NSUserDefaults *defaults=[[NSUserDefaults alloc] initWithSuiteName:suite];
     // Existing installations keep layout, opacity, size and haptic settings.
     [defaults setObject:@{@"opacity":@0.6,@"rearScale":@1.2,@"frontScale":@0.9,
         @"hapticsEnabled":@NO,@"positions":@{@"menu":@[@0.5,@0.5]}} forKey:@"WowkaraTouchLayoutV1"];
+    assert([[AKGamepadLayout allowedTargetBindings].firstObject isEqualToString:@"Auto"]);
+    assert([[AKGamepadLayout allowedInteractBindings].firstObject isEqualToString:@"Auto"]);
     AKGamepadLayout *migrated=[[AKGamepadLayout alloc] initWithDefaults:defaults];
     assert(fabs(migrated.opacity-.6)<.001 && fabs(migrated.rearScale-1.2)<.001 &&
            fabs(migrated.frontScale-.9)<.001 && !migrated.hapticsEnabled);
+    assert([migrated.targetBinding isEqualToString:@"Auto"] && [migrated.interactBinding isEqualToString:@"Auto"]);
     assert([defaults dictionaryForKey:@"WolkaraForeverTouchLayoutV1"] && !migrated.swapShoulders);
     CGRect migratedFrame=[migrated frameForItem:@"menu" defaultFrame:CGRectMake(0,0,100,100) inBounds:CGRectMake(0,0,500,300)];
     assert(CGRectEqualToRect(migratedFrame,CGRectMake(200,100,100,100)));
     migrated.opacity=.3;[migrated save];
     assert(fabs([[AKGamepadLayout alloc] initWithDefaults:defaults].opacity-.3)<.001);
+    // Legacy Tab/F defaults migrate once to Auto; custom or v2-saved choices are preserved.
+    [defaults setObject:@{@"targetBinding":@"Tab",@"interactBinding":@"F"} forKey:@"WolkaraForeverTouchLayoutV1"];
+    AKGamepadLayout *v1Default=[[AKGamepadLayout alloc] initWithDefaults:defaults];
+    assert([v1Default.targetBinding isEqualToString:@"Auto"] && [v1Default.interactBinding isEqualToString:@"Auto"]);
+    [defaults setObject:@{@"targetBinding":@"G",@"interactBinding":@"mouse.right"} forKey:@"WolkaraForeverTouchLayoutV1"];
+    AKGamepadLayout *v1Custom=[[AKGamepadLayout alloc] initWithDefaults:defaults];
+    assert([v1Custom.targetBinding isEqualToString:@"G"] && [v1Custom.interactBinding isEqualToString:@"mouse.right"]);
+    v1Custom.targetBinding=@"Tab"; v1Custom.interactBinding=@"F"; [v1Custom save];
+    AKGamepadLayout *v2Explicit=[[AKGamepadLayout alloc] initWithDefaults:defaults];
+    assert([v2Explicit.targetBinding isEqualToString:@"Tab"] && [v2Explicit.interactBinding isEqualToString:@"F"]);
     // Explicit current values (even malformed ones) must not resurrect old values.
     [defaults setObject:@{@"opacity":@"bad",@"rearScale":@99,@"frontScale":@(-2),
         @"positions":@{@"broken":@[@"x",@0],@"left":@[@(-1),@4]}} forKey:@"WolkaraForeverTouchLayoutV1"];
@@ -199,6 +280,7 @@ static void TestPreferences(void) {
     CGRect small=CGRectMake(0,0,220,120);
     assert(CGRectContainsRect(small,[layout frameForItem:@"menu" defaultFrame:frame inBounds:small]));
     [layout reset]; assert(layout.opacity==.8 && layout.frontScale==1 && layout.hapticsEnabled && layout.swapShoulders);
+    assert([layout.targetBinding isEqualToString:@"Auto"] && [layout.interactBinding isEqualToString:@"Auto"]);
     assert(CGRectEqualToRect([layout frameForItem:@"menu" defaultFrame:frame inBounds:bounds],frame));
     [defaults removePersistentDomainForName:suite];
 }
@@ -538,6 +620,7 @@ static void TestNativeInput(UIView *host, AKPreviewGamepad *manager) {
     assert(pad.leftThumbstick.xAxis.value==0 && pad.rightThumbstick.yAxis.value==0);
     [leftStick cancelTrackingWithEvent:nil]; [rightStick cancelTrackingWithEvent:nil];
     [manager invalidate];
+    TestHudBindingDispatch(host);
     puts("TOUCH_GAMEPAD_INPUT_PASS: all nine buttons, D-pad diagonals/opposition/cancel, both sticks, held modifiers, neutral reset and trackpad passthrough.");
 }
 static void TestStickMapping(void) {

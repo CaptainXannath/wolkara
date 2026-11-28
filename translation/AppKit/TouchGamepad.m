@@ -5,6 +5,7 @@
 #import "TouchHaptics.h"
 #import "TouchStickButtons.h"
 #import "TouchActionInput.h"
+#import "TouchActionLayout.h"
 #import "TouchActionOverlay.h"
 #include <TargetConditionals.h>
 #include <math.h>
@@ -1414,6 +1415,16 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     }
 }
 
+- (void)triggerKeyCode:(unsigned short)keyCode characters:(NSString *)characters modifiers:(NSUInteger)modifiers {
+    UIView<AKTouchDragHost> *host = (id)_host;
+    if ([host respondsToSelector:@selector(ak_triggerKeyCode:characters:modifiers:)]) {
+        [host ak_triggerKeyCode:keyCode characters:characters modifiers:modifiers];
+        return;
+    }
+    [self sendKeyCode:keyCode characters:characters modifiers:modifiers pressed:YES];
+    [self sendKeyCode:keyCode characters:characters modifiers:modifiers pressed:NO];
+}
+
 - (void)triggerKeyboardAction:(AKTouchAction *)action {
     unsigned short keyCode = action.macKeyCode;
     NSString *characters = action.macCharacters;
@@ -1505,8 +1516,34 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     return nil;
 }
 
-- (void)dispatchBinding:(NSString *)binding pressed:(BOOL)pressed {
+- (void)dispatchBinding:(NSString *)binding forElement:(NSString *)element pressed:(BOOL)pressed {
     if (!binding.length) return;
+    if ([binding isEqualToString:@"Auto"]) {
+        if (!pressed) return;
+        BOOL mobileAvailable = [NSUserDefaults.standardUserDefaults boolForKey:AKMobileAvailableKey];
+        if ([element isEqualToString:@"hud.target"]) {
+            if (mobileAvailable) {
+                [self triggerKeyCode:96 characters:@"\uF708" modifiers:AKTouchKeyModifierControl];
+            } else {
+                unsigned short keyCode = 0;
+                NSString *chars = nil;
+                if ([AKTouchAction keyInfoForName:@"Tab" keyCode:&keyCode characters:&chars]) {
+                    [self triggerKeyCode:keyCode characters:chars modifiers:0];
+                }
+            }
+        } else if ([element isEqualToString:@"hud.interact"]) {
+            if (mobileAvailable) {
+                [self triggerKeyCode:96 characters:@"\uF708" modifiers:AKTouchKeyModifierControl | AKTouchKeyModifierShift];
+            } else {
+                unsigned short keyCode = 0;
+                NSString *chars = nil;
+                if ([AKTouchAction keyInfoForName:@"F" keyCode:&keyCode characters:&chars]) {
+                    [self triggerKeyCode:keyCode characters:chars modifiers:0];
+                }
+            }
+        }
+        return;
+    }
     if ([binding hasPrefix:@"gamepad."]) {
         NSString *btn = [binding substringFromIndex:@"gamepad.".length];
         [_actionInput setManualButton:btn pressed:pressed];
@@ -1532,12 +1569,12 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
         if (!binding.length) return;
         [_haptics buttonPressed];
         _activeHudBindings[element] = binding;
-        [self dispatchBinding:binding pressed:YES];
+        [self dispatchBinding:binding forElement:element pressed:YES];
     } else {
         NSString *binding = _activeHudBindings[element];
         if (binding.length) {
             [_activeHudBindings removeObjectForKey:element];
-            [self dispatchBinding:binding pressed:NO];
+            [self dispatchBinding:binding forElement:element pressed:NO];
         }
     }
 }
@@ -1545,8 +1582,8 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
 - (void)releaseAllHudBindings {
     NSDictionary<NSString *, NSString *> *held = [_activeHudBindings copy];
     [_activeHudBindings removeAllObjects];
-    for (NSString *binding in held.allValues) {
-        [self dispatchBinding:binding pressed:NO];
+    for (NSString *element in held) {
+        [self dispatchBinding:held[element] forElement:element pressed:NO];
     }
 }
 

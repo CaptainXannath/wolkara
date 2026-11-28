@@ -5,10 +5,10 @@ unpack = unpack or table.unpack
 local compile = loadstring or load
 local combat, now = false, 100
 local secure = false
-local frames, bindings, messages = {}, {}, {}
+local frames, bindings, overrideActions, messages = {}, {}, {}, {}
 local cursor, pickedUp = nil, nil
 local masksAdded, maskTextures = 0, {}
-local bagsToggled, mapToggled = 0, 0
+local bagsToggled, mapToggled, professionsToggled = 0, 0, 0
 local desktopSlots = {
     [1] = { kind = "spell", id = 101, texture = "tex-101" },
     [2] = { kind = "spell", id = 102, texture = "tex-102" },
@@ -75,10 +75,15 @@ C_PetJournal = {
 }
 function ToggleAllBags() bagsToggled = bagsToggled + 1 end
 function ToggleWorldMap() mapToggled = mapToggled + 1 end
+function ToggleProfessionsBook() professionsToggled = professionsToggled + 1 end
+local cvars = { SoftTargetInteract = "0" }
+function GetCVar(name) return cvars[name] end
+function SetCVar(name, value) cvars[name] = tostring(value) end
 local reloads = 0
 function ReloadUI() reloads = reloads + 1 end
 function RegisterStateDriver(f, state, body) f.drivers = f.drivers or {}; f.drivers[state] = body end
 function SetOverrideBindingClick(_, _, key, button) bindings[key] = button end
+function SetOverrideBinding(_, _, key, command) overrideActions[key] = command end
 function hooksecurefunc(t, name, fn)
     if type(t) == "string" then fn = name; name = t; t = _G end
     local original = t[name]
@@ -250,6 +255,17 @@ assert(not WolkaraMobileLeftButton1 and not WolkaraMobileRightButton1)
 Event("PLAYER_LOGIN"); assert(not ns.enabled and original:GetScale() == .8)
 assert(bindings["ALT-CTRL-SHIFT-F6"] == "WolkaraMobileCommand1")
 assert(bindings["ALT-CTRL-F5"] == "WolkaraMobileCommand10")
+assert(bindings["CTRL-F5"] == "WolkaraMobileTargetButton")
+assert(WolkaraMobileTargetButton and WolkaraMobileTargetButton:GetAttribute("type") == "macro")
+assert(WolkaraMobileTargetButton:GetAttribute("macrotext") == "/targetenemy\n/targetfriend [noexists,nocombat][help,nocombat]")
+assert(overrideActions["CTRL-SHIFT-F5"] == "INTERACTTARGET")
+assert(overrideActions["ALT-SHIFT-F5"] == "TOGGLEPROFESSIONBOOK")
+assert(cvars.SoftTargetInteract == "3" and ns.db.softInteractInit)
+cvars.SoftTargetInteract = "0"
+bindings["CTRL-F5"], overrideActions["CTRL-SHIFT-F5"], overrideActions["ALT-SHIFT-F5"] = nil, nil, nil
+Event("PLAYER_LOGIN"); assert(cvars.SoftTargetInteract == "0")
+assert(bindings["CTRL-F5"] == "WolkaraMobileTargetButton" and overrideActions["CTRL-SHIFT-F5"] == "INTERACTTARGET")
+overrideActions["ALT-SHIFT-F5"] = nil; Event("PLAYER_ENTERING_WORLD"); assert(overrideActions["ALT-SHIFT-F5"] == "TOGGLEPROFESSIONBOOK")
 
 local tracePath = os.getenv("WOLKARA_MOBILE_EVENT_TRACE")
 if tracePath then
@@ -298,7 +314,9 @@ ns.SetEnabled(true); assert(ns.enabled and original:GetScale() < .8)
 assert(mainBar:GetAlpha() == 0 and not mainBar:IsMouseClickEnabled())
 assert(masksAdded >= 4 and maskTextures[ns.CIRCLE])
 
-SlashCmdList.WOLKARAMOBILE("menu"); assert(WolkaraMobileMenu:IsShown() and Button(WolkaraMobileMenu, "Collections"))
+SlashCmdList.WOLKARAMOBILE("menu"); assert(WolkaraMobileMenu:IsShown() and Button(WolkaraMobileMenu, "Collections") and Button(WolkaraMobileMenu, "Professions"))
+Button(WolkaraMobileMenu, "Professions"):Click(); assert(professionsToggled == 1 and not WolkaraMobileMenu:IsShown())
+SlashCmdList.WOLKARAMOBILE("menu"); assert(WolkaraMobileMenu:IsShown())
 SlashCmdList.WOLKARAMOBILE("menu"); assert(not WolkaraMobileMenu:IsShown())
 
 slot:Click(); assert(clicks[#clicks] == "LeftButton")

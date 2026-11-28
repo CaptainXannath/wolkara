@@ -1,4 +1,5 @@
 #import "TouchControls.h"
+#import "AKMobileInterface.h"
 #import "AKSupport.h"
 #import "AKHostLocalization.h"
 #import "TouchTrackpad.h"
@@ -534,6 +535,8 @@ static NSArray<NSDictionary<NSString *, id> *> *AKWowMenuItems(void) {
         @{@"title": @"Talents", @"id": @"wolkara.toolbar.wow.talents", @"code": @45, @"char": @"n"},
         @{@"title": @"Quests", @"id": @"wolkara.toolbar.wow.quests", @"code": @37, @"char": @"l"},
         @{@"title": @"Spellbook", @"id": @"wolkara.toolbar.wow.spellbook", @"code": @35, @"char": @"p"},
+        @{@"title": @"Professions", @"id": @"wolkara.toolbar.wow.professions", @"code": @40, @"char": @"k",
+          @"mobileCode": @96, @"mobileChar": @"\uF708", @"mobileModifiers": @((1UL << 19) | (1UL << 17))},
         @{@"title": @"Collections", @"id": @"wolkara.toolbar.wow.collections", @"code": @35, @"char": @"p", @"modifiers": @(1UL << 17)},
         @{@"title": @"Edit Arcs", @"id": @"wolkara.toolbar.wow.editArcs", @"action": @"editArcs"},
         @{@"title": @"Edit HUD", @"id": @"wolkara.toolbar.wow.editHud", @"action": @"editHud"},
@@ -620,9 +623,12 @@ static NSArray<NSDictionary<NSString *, id> *> *AKWowMenuItems(void) {
         [self toggleKeyboard];
         return;
     }
-    NSUInteger modifiers = [entry[@"modifiers"] unsignedIntegerValue];
-    unsigned short code = (unsigned short)[entry[@"code"] unsignedShortValue];
-    NSString *characters = entry[@"char"];
+    BOOL mobileAvailable = [NSUserDefaults.standardUserDefaults boolForKey:AKMobileAvailableKey];
+    NSNumber *mobileCode = mobileAvailable ? entry[@"mobileCode"] : nil;
+    NSUInteger modifiers = mobileCode ? [entry[@"mobileModifiers"] unsignedIntegerValue]
+                                      : [entry[@"modifiers"] unsignedIntegerValue];
+    unsigned short code = (unsigned short)[(mobileCode ?: entry[@"code"]) unsignedShortValue];
+    NSString *characters = mobileCode ? entry[@"mobileChar"] : entry[@"char"];
     if (modifiers) {
         [self touchSpecialKey:code characters:characters modifiers:modifiers];
     } else {
@@ -726,7 +732,7 @@ static NSArray<NSDictionary<NSString *, id> *> *AKWowMenuItems(void) {
     }
     CGFloat spacing = _wowMenuButtons.count > 1 ? 5 : 0;
     CGFloat idealWidth = contentWidth + spacing * (_wowMenuButtons.count > 1 ? (CGFloat)(_wowMenuButtons.count - 1) : 0) + 16 + trailingWidth + 10;
-    CGFloat barWidth = MAX(220, MIN(safe.size.width - 8, MAX(560, MIN(idealWidth, 820))));
+    CGFloat barWidth = MAX(220, MIN(safe.size.width - 8, MAX(560, MIN(idealWidth, 900))));
     if (barWidth > safe.size.width) barWidth = safe.size.width;
     _wowMenuBar.frame = CGRectMake(CGRectGetMidX(safe) - barWidth / 2, safe.origin.y, barWidth, 38);
     _wowMenuCollapseButton.frame = CGRectMake(barWidth - trailingWidth, 4, 30, 30);

@@ -7,6 +7,9 @@ local entries={
     {CHARACTER_BUTTON or "Character","CharacterMicroButton"},
     {BAGSLOT or "Bags",nil,function() ToggleAllBags() end},
     {SPELLBOOK or "Spells","SpellbookMicroButton"},
+    {PROFESSIONS_BUTTON or "Professions","ProfessionMicroButton",function()
+        if ToggleProfessionsBook then ToggleProfessionsBook() elseif ToggleSkillFrame then ToggleSkillFrame() end
+    end},
     {TALENTS or "Talents","TalentMicroButton"},
     {QUESTLOG_BUTTON or "Quests","QuestLogMicroButton"},
     {WORLD_MAP or "Map",nil,function() ToggleWorldMap() end},
@@ -19,7 +22,7 @@ local entries={
 }
 function Menu:Init()
     panel=CreateFrame("Frame","WolkaraMobileMenu",UIParent,"UIPanelDialogTemplate")
-    panel:SetSize(420,300); panel:SetPoint("CENTER"); panel:SetFrameStrata("DIALOG"); panel:EnableMouse(true); panel:Hide()
+    panel:SetSize(420,350); panel:SetPoint("CENTER"); panel:SetFrameStrata("DIALOG"); panel:EnableMouse(true); panel:Hide()
     local title=ns.Label(panel,"GameFontNormalLarge",MAINMENU_BUTTON or "Menu"); title:SetPoint("TOP",0,-16)
     for i,e in ipairs(entries) do
         local b=ns.UIButton(panel,e[1],182,40,function()

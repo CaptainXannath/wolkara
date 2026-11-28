@@ -748,16 +748,26 @@ static NSEventModifierFlags AKStandaloneModifierFlagForKeyCode(unsigned short ke
 - (void)postFlagsChanged:(NSEventModifierFlags)flags {
     [self postFlagsChanged:flags keyCode:0];
 }
+- (void)ak_triggerKeyCode:(unsigned short)keyCode characters:(NSString *)characters modifiers:(NSUInteger)modifiers {
+    NSString *text = characters ?: @"";
+    NSEventModifierFlags target = AKTouchKeyModsToEventFlags(modifiers);
+    if (target) {
+        [self postKeyWithModifiers:target keyCode:keyCode characters:text unmodified:text];
+    } else {
+        [self postTextKey:keyCode characters:text unmodified:text modifiers:_mods];
+    }
+}
 - (void)ak_sendKeyCode:(unsigned short)keyCode characters:(NSString *)characters modifiers:(NSUInteger)modifiers pressed:(BOOL)pressed {
     NSString *text = characters ?: @"";
     NSEventModifierFlags standalone = AKStandaloneModifierFlagForKeyCode(keyCode);
     if (pressed) {
         NSEventModifierFlags req = AKTouchKeyModsToEventFlags(modifiers) | standalone;
         _virtualHeldKeys[@(keyCode)] = @(req);
-        NSEventModifierFlags next = AKModifiersReconciled(_mods, _hardwareMods | [self activeVirtualModifierFlags]);
-        if (next != _mods) {
+        NSEventModifierFlags previous = _mods;
+        NSEventModifierFlags next = AKModifiersReconciled(previous, _hardwareMods | [self activeVirtualModifierFlags]);
+        if (next != previous) {
             _mods = next;
-            [self postFlagsChanged:_mods keyCode:standalone ? keyCode : 0];
+            [self postMobileModifierTransitionFrom:previous to:next];
         }
         if (standalone != 0) return;
         NSEvent *e = [NSEvent new];
@@ -775,10 +785,11 @@ static NSEventModifierFlags AKStandaloneModifierFlagForKeyCode(unsigned short ke
             [NSApp postEvent:e atStart:NO];
         }
         [_virtualHeldKeys removeObjectForKey:@(keyCode)];
-        NSEventModifierFlags next = AKModifiersReconciled(_mods, _hardwareMods | [self activeVirtualModifierFlags]);
-        if (next != _mods) {
+        NSEventModifierFlags previous = _mods;
+        NSEventModifierFlags next = AKModifiersReconciled(previous, _hardwareMods | [self activeVirtualModifierFlags]);
+        if (next != previous) {
             _mods = next;
-            [self postFlagsChanged:_mods keyCode:standalone ? keyCode : 0];
+            [self postMobileModifierTransitionFrom:previous to:next];
         }
     }
 }

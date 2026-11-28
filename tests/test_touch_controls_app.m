@@ -4,6 +4,7 @@
 #import "TouchControls.h"
 #import "TouchGamepad.h"
 #import "TouchGamepadLayout.h"
+#import "TouchActionLayout.h"
 #import "SavedTextController.h"
 #include <assert.h>
 #include <dlfcn.h>
@@ -30,6 +31,7 @@
 // The last key event this guest view was given, so a test can say whether the adapter posted
 // one at all. Nil is the answer that matters for a key the user has taken.
 @property (nonatomic, strong, nullable) NSEvent *lastKeyEvent;
+@property (nonatomic, strong) NSMutableArray<NSEvent *> *recordedEvents;
 @end
 @implementation AKInputFixtureView
 - (instancetype)initWithFrame:(NSRect)frame {
@@ -37,6 +39,7 @@
         self.wantsLayer = YES;
         self.layer.backgroundColor = [UIColor colorWithRed:0.06 green:0.10 blue:0.16 alpha:1].CGColor;
         _text = [NSMutableString new];
+        _recordedEvents = [NSMutableArray new];
         _lastAction = @"Ready";
         for (NSString *key in @[@"heading", @"instructions", @"result"]) {
             CATextLayer *label = [CATextLayer new];
@@ -66,6 +69,7 @@
 }
 - (BOOL)acceptsFirstResponder { return YES; }
 - (void)keyDown:(NSEvent *)event {
+    [self.recordedEvents addObject:event];
     if (AKIsPrivateInputEvent(event)) self.privateKeyCount++;
     self.lastKeyEvent = event;
     if (event.keyCode == 0 && (event.modifierFlags & NSEventModifierFlagCommand)) {
@@ -88,6 +92,12 @@
     self.lastAction = @"Keyboard input received";
     [self refresh];
 }
+- (void)keyUp:(NSEvent *)event {
+    [self.recordedEvents addObject:event];
+}
+- (void)flagsChanged:(NSEvent *)event {
+    [self.recordedEvents addObject:event];
+}
 - (void)insertText:(id)text {
     [self insertText:text replacementRange:NSMakeRange(NSNotFound, 0)];
 }
@@ -100,6 +110,12 @@
     self.selection = NSMakeRange(range.location + value.length, 0);
     self.lastAction = @"Keyboard input received";
     [self refresh];
+}
+- (void)keyUp:(NSEvent *)event {
+    [self.recordedEvents addObject:event];
+}
+- (void)flagsChanged:(NSEvent *)event {
+    [self.recordedEvents addObject:event];
 }
 - (void)mouseMoved:(NSEvent *)event {
     self.lastAction = [NSString stringWithFormat:@"Pointer %.0f, %.0f", event.locationInWindow.x, event.locationInWindow.y];
@@ -556,6 +572,7 @@ static void AKRecordSelfTestResult(NSString *message) {
         @{@"id": @"wolkara.toolbar.wow.talents", @"code": @45},
         @{@"id": @"wolkara.toolbar.wow.quests", @"code": @37},
         @{@"id": @"wolkara.toolbar.wow.spellbook", @"code": @35},
+        @{@"id": @"wolkara.toolbar.wow.professions", @"code": @40},
     ];
     for (NSDictionary<NSString *, id> *entry in wowChecks) {
         UIButton *button = (id)FindToolbarView(controls, entry[@"id"]);
@@ -563,6 +580,7 @@ static void AKRecordSelfTestResult(NSString *message) {
         [button sendActionsForControlEvents:UIControlEventTouchUpInside];
         AKDrainFixtureEvents();
         assert(guest.lastKeyEvent.keyCode == [entry[@"code"] unsignedShortValue]);
+        assert([[host valueForKey:@"_mods"] unsignedIntegerValue] == 0);
     }
     UIButton *collections = (id)FindToolbarView(controls, @"wolkara.toolbar.wow.collections");
     assert(collections && !collections.hidden);
@@ -595,13 +613,63 @@ static void AKRecordSelfTestResult(NSString *message) {
     assert(!gamepad.editing && !toggle.hidden);
     [NSUserDefaults.standardUserDefaults setBool:YES forKey:@"WolkaraMobileAvailable"];
     [toggle sendActionsForControlEvents:UIControlEventTouchUpInside]; [controls layoutIfNeeded];
+    UIButton *professions = (id)FindToolbarView(controls, @"wolkara.toolbar.wow.professions");
+    assert(professions && !professions.hidden);
+    guest.lastKeyEvent = nil;
+    [guest.recordedEvents removeAllObjects];
+    [professions sendActionsForControlEvents:UIControlEventTouchUpInside];
+    AKDrainFixtureEvents();
+    assert(guest.lastKeyEvent && guest.lastKeyEvent.keyCode == 96);
+    assert((guest.lastKeyEvent.modifierFlags & (NSEventModifierFlagOption | NSEventModifierFlagShift)) ==
+           (NSEventModifierFlagOption | NSEventModifierFlagShift));
+    assert([[host valueForKey:@"_mods"] unsignedIntegerValue] == 0);
+    BOOL sawModDown = NO, sawModUpZero = NO;
+    for (NSEvent *ev in guest.recordedEvents) {
+        if (ev.type == NSEventTypeFlagsChanged) {
+            if ((ev.modifierFlags & NSEventModifierFlagOption) && ev.keyCode == 58) sawModDown = YES;
+            if (ev.modifierFlags == 0 && (ev.keyCode == 58 || ev.keyCode == 56)) sawModUpZero = YES;
+        }
+    }
+    assert(sawModDown && sawModUpZero);
+    // Verify host Auto/manual trigger and held key modifier transitions leave _mods clean.
+    id<AKTouchDragHost> dragHost = (id<AKTouchDragHost>)host;
+    guest.lastKeyEvent = nil; [guest.recordedEvents removeAllObjects];
+    [dragHost ak_triggerKeyCode:96 characters:@"\uF708" modifiers:AKTouchKeyModifierControl];
+    AKDrainFixtureEvents();
+    assert(guest.lastKeyEvent && guest.lastKeyEvent.keyCode == 96);
+    assert((guest.lastKeyEvent.modifierFlags & NSEventModifierFlagControl) != 0);
+    assert([[host valueForKey:@"_mods"] unsignedIntegerValue] == 0);
+    guest.lastKeyEvent = nil; [guest.recordedEvents removeAllObjects];
+    [dragHost ak_sendKeyCode:0 characters:@"a" modifiers:AKTouchKeyModifierControl pressed:YES];
+    AKDrainFixtureEvents();
+    assert(guest.lastKeyEvent && guest.lastKeyEvent.keyCode == 0 && (guest.lastKeyEvent.modifierFlags & NSEventModifierFlagControl) != 0);
+    [dragHost ak_sendKeyCode:0 characters:@"a" modifiers:AKTouchKeyModifierControl pressed:NO];
+    AKDrainFixtureEvents();
+    assert([[host valueForKey:@"_mods"] unsignedIntegerValue] == 0);
+    BOOL sawCtrlKeyCodeDown = NO, sawCtrlKeyCodeUp = NO;
+    for (NSEvent *ev in guest.recordedEvents) {
+        if (ev.type == NSEventTypeFlagsChanged && ev.keyCode == 59) {
+            if (ev.modifierFlags & NSEventModifierFlagControl) sawCtrlKeyCodeDown = YES;
+            if (ev.modifierFlags == 0) sawCtrlKeyCodeUp = YES;
+        }
+    }
+    assert(sawCtrlKeyCodeDown && sawCtrlKeyCodeUp);
     UIButton *editArcs = (id)FindToolbarView(controls, @"wolkara.toolbar.wow.editArcs");
     assert(editArcs && !editArcs.hidden);
-    if ([controls toolbarBounds].size.width >= 780) {
+    CGRect wideBefore = host.bounds;
+    if ([controls toolbarBounds].size.width < 920) {
+        host.bounds = CGRectMake(0, 0, 956, MAX(wideBefore.size.height, 440));
+        [controls setNeedsLayout]; [controls layoutIfNeeded];
+    }
+    if ([controls toolbarBounds].size.width >= 920) {
         UIScrollView *menuScroll = [controls valueForKey:@"_wowMenuScroll"];
         assert(menuScroll && menuScroll.contentSize.width <= menuScroll.bounds.size.width + 1);
         assert(CGRectContainsRect(menuScroll.bounds, editArcs.frame));
         assert(CGRectContainsRect(menuScroll.bounds, editHud.frame));
+    }
+    if (!CGRectEqualToRect(host.bounds, wideBefore)) {
+        host.bounds = wideBefore;
+        [controls setNeedsLayout]; [controls layoutIfNeeded];
     }
     [editArcs sendActionsForControlEvents:UIControlEventTouchUpInside]; [controls layoutIfNeeded];
     assert(gamepad.mobileEditing && controls.mobileEditing && controls.configuring && !controls.configuringNative && menuBar.hidden && toggle.hidden);

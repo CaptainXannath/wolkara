@@ -15,6 +15,7 @@ enum { AKTouchDragThreshold = 8 };
 - (void)ak_moveCameraStickDelta:(CGPoint)delta;
 - (void)ak_endCameraStickCancelled:(BOOL)cancelled;
 - (void)ak_sendKeyCode:(unsigned short)keyCode characters:(nullable NSString *)characters modifiers:(NSUInteger)modifiers pressed:(BOOL)pressed;
+- (void)ak_triggerKeyCode:(unsigned short)keyCode characters:(nullable NSString *)characters modifiers:(NSUInteger)modifiers;
 - (void)ak_sendMouseClick:(unsigned)button pressed:(BOOL)pressed;
 @end
 // Radial analog mapping with a small dead zone and clamped magnitude.

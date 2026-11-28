@@ -13,6 +13,22 @@ function ns.WrapAbilityButton(action)
         if control:GetAttribute("enabled") and (gesture=="drag" or gesture=="hold") then return false end
     ]=])
 end
+function Bridge:InstallBindings()
+    if not ns.bridge or InCombatLockdown() then return end
+    for index,b in ipairs(ns.bridgeButtons or {}) do
+        SetOverrideBindingClick(ns.bridge,false,keys[index],b:GetName())
+    end
+    if SetOverrideBindingClick and ns.targetButton then
+        SetOverrideBindingClick(ns.bridge,true,"CTRL-F5",ns.targetButton:GetName())
+    end
+    if SetOverrideBinding then
+        SetOverrideBinding(ns.bridge,true,"CTRL-SHIFT-F5","INTERACTTARGET")
+        SetOverrideBinding(ns.bridge,true,"ALT-SHIFT-F5","TOGGLEPROFESSIONBOOK")
+    end
+end
+function Bridge:AfterCombat()
+    self:InstallBindings()
+end
 function Bridge:Init()
     local bridge=CreateFrame("Frame","WolkaraMobileBridge",UIParent,"SecureHandlerBaseTemplate")
     ns.bridge=bridge
@@ -32,6 +48,7 @@ function Bridge:Init()
         elseif command=="reset" then ns.ResetDefaults() end
     end
     local values={"on","off","edit","done","tap","hold","clear","drag","cancel","reset"}
+    ns.bridgeButtons={}
     for index,value in ipairs(values) do
         local b=CreateFrame("Button","WolkaraMobileCommand"..index,UIParent,"SecureHandlerClickTemplate")
         b:RegisterForClicks("AnyUp"); b:SetFrameRef("bridge",bridge); b:SetAttribute("command",value)
@@ -43,8 +60,14 @@ function Bridge:Init()
             elseif command=="clear" then bridge:SetAttribute("gesture",nil)
             else bridge:CallMethod("Command",command) end
         ]=])
-        SetOverrideBindingClick(bridge,false,keys[index],b:GetName())
+        ns.bridgeButtons[index]=b
     end
+    local targetButton=CreateFrame("Button","WolkaraMobileTargetButton",UIParent,"SecureActionButtonTemplate")
+    targetButton:RegisterForClicks("AnyUp")
+    targetButton:SetAttribute("type","macro")
+    targetButton:SetAttribute("macrotext","/targetenemy\n/targetfriend [noexists,nocombat][help,nocombat]")
+    ns.targetButton=targetButton
+    self:InstallBindings()
     if ns.Bags then ns.Bags:Watch() end
     SLASH_WOLKARAMOBILE1="/wolkaramobile"
     SLASH_WOLKARAMOBILE2="/wm"

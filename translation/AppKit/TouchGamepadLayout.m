@@ -22,11 +22,11 @@ static NSString *ValidatedChoice(id value, NSArray<NSString *> *allowed, NSStrin
 }
 
 + (NSArray<NSString *> *)allowedTargetBindings {
-    return @[@"Tab", @"F", @"G", @"R", @"gamepad.RB", @"gamepad.Y"];
+    return @[@"Auto", @"Tab", @"F", @"G", @"R", @"gamepad.RB", @"gamepad.Y"];
 }
 
 + (NSArray<NSString *> *)allowedInteractBindings {
-    return @[@"F", @"G", @"E", @"T", @"mouse.right", @"gamepad.A", @"gamepad.X"];
+    return @[@"Auto", @"F", @"G", @"E", @"T", @"mouse.right", @"gamepad.A", @"gamepad.X"];
 }
 
 + (NSArray<NSString *> *)allowedJumpBindings {
@@ -54,8 +54,17 @@ static NSString *ValidatedChoice(id value, NSArray<NSString *> *allowed, NSStrin
         // triggers inside; an explicit stored choice always takes precedence.
         self.swapShoulders = Number(values[@"swapShoulders"], values.count ? 0 : 1) != 0;
         self.performanceOverlayEnabled = Number(values[@"performanceOverlayEnabled"], 0) != 0;
-        _targetBinding = ValidatedChoice(values[@"targetBinding"], [self.class allowedTargetBindings], @"Tab");
-        _interactBinding = ValidatedChoice(values[@"interactBinding"], [self.class allowedInteractBindings], @"F");
+        NSInteger bindingVersion = (NSInteger)Number(values[@"hudBindingVersion"], 0);
+        _targetBinding = ValidatedChoice(values[@"targetBinding"], [self.class allowedTargetBindings], @"Auto");
+        _interactBinding = ValidatedChoice(values[@"interactBinding"], [self.class allowedInteractBindings], @"Auto");
+        if (bindingVersion < 2) {
+            if (!values[@"targetBinding"] || [values[@"targetBinding"] isEqualToString:@"Tab"]) {
+                _targetBinding = @"Auto";
+            }
+            if (!values[@"interactBinding"] || [values[@"interactBinding"] isEqualToString:@"F"]) {
+                _interactBinding = @"Auto";
+            }
+        }
         _jumpBinding = ValidatedChoice(values[@"jumpBinding"], [self.class allowedJumpBindings], @"Space");
         self.cameraRightDrag = Number(values[@"cameraRightDrag"], 1) != 0;
         self.cameraSensitivity = Number(values[@"cameraSensitivity"], 1.0);
@@ -86,11 +95,11 @@ static NSString *ValidatedChoice(id value, NSArray<NSString *> *allowed, NSStrin
 - (void)setCameraSensitivity:(CGFloat)value { _cameraSensitivity = Clamp(value, 0.25, 3.0, 1.0); }
 
 - (void)setTargetBinding:(NSString *)value {
-    _targetBinding = ValidatedChoice(value, [self.class allowedTargetBindings], @"Tab");
+    _targetBinding = ValidatedChoice(value, [self.class allowedTargetBindings], @"Auto");
 }
 
 - (void)setInteractBinding:(NSString *)value {
-    _interactBinding = ValidatedChoice(value, [self.class allowedInteractBindings], @"F");
+    _interactBinding = ValidatedChoice(value, [self.class allowedInteractBindings], @"Auto");
 }
 
 - (void)setJumpBinding:(NSString *)value {
@@ -145,8 +154,9 @@ static NSString *ValidatedChoice(id value, NSArray<NSString *> *allowed, NSStrin
         @"hapticsEnabled": @(_hapticsEnabled),
         @"swapShoulders": @(_swapShoulders),
         @"performanceOverlayEnabled": @(_performanceOverlayEnabled),
-        @"targetBinding": _targetBinding ?: @"Tab",
-        @"interactBinding": _interactBinding ?: @"F",
+        @"hudBindingVersion": @2,
+        @"targetBinding": _targetBinding ?: @"Auto",
+        @"interactBinding": _interactBinding ?: @"Auto",
         @"jumpBinding": _jumpBinding ?: @"Space",
         @"cameraRightDrag": @(_cameraRightDrag),
         @"cameraSensitivity": @(_cameraSensitivity),
@@ -168,8 +178,8 @@ static NSString *ValidatedChoice(id value, NSArray<NSString *> *allowed, NSStrin
     self.hapticsEnabled = YES;
     self.swapShoulders = YES;
     self.performanceOverlayEnabled = NO;
-    _targetBinding = @"Tab";
-    _interactBinding = @"F";
+    _targetBinding = @"Auto";
+    _interactBinding = @"Auto";
     _jumpBinding = @"Space";
     self.cameraRightDrag = YES;
     self.cameraSensitivity = 1.0;
