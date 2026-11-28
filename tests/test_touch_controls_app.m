@@ -115,8 +115,8 @@
     self.lastAction = [NSString stringWithFormat:@"Pointer %.0f, %.0f", event.locationInWindow.x, event.locationInWindow.y];
     [self refresh];
 }
-- (void)mouseDown:(NSEvent *)event { self.lastAction = event.clickCount == 2 ? @"Double click" : @"Left click / hold"; [self refresh]; }
-- (void)rightMouseDown:(NSEvent *)event { (void)event; self.lastAction = @"Right click / hold"; [self refresh]; }
+- (void)mouseDown:(NSEvent *)event { [self.recordedEvents addObject:event]; self.lastAction = event.clickCount == 2 ? @"Double click" : @"Left click / hold"; [self refresh]; }
+- (void)rightMouseDown:(NSEvent *)event { [self.recordedEvents addObject:event]; self.lastAction = @"Right click / hold"; [self refresh]; }
 - (void)otherMouseDown:(NSEvent *)event { (void)event; self.lastAction = @"Middle click"; [self refresh]; }
 - (void)mouseDragged:(NSEvent *)event { (void)event; self.lastAction = @"Left drag"; [self refresh]; }
 - (void)rightMouseDragged:(NSEvent *)event { (void)event; self.lastAction = @"Right drag"; [self refresh]; }
@@ -648,6 +648,33 @@ static void AKRecordSelfTestResult(NSString *message) {
         }
     }
     assert(sawCtrlKeyCodeDown && sawCtrlKeyCodeUp);
+    // Verify Shift + R-Click mode and Ctrl + Left-Click deliver native modifier+mouse events cleanly.
+    [guest.recordedEvents removeAllObjects];
+    [dragHost ak_sendKeyCode:56 characters:@"" modifiers:0 pressed:YES];
+    [dragHost ak_setRightClickMode:YES];
+    [dragHost ak_sendMouseClick:0 pressed:YES];
+    [dragHost ak_sendMouseClick:0 pressed:NO];
+    AKDrainFixtureEvents();
+    BOOL sawShiftRightClick = NO;
+    for (NSEvent *ev in guest.recordedEvents) {
+        if (ev.type == NSEventTypeRightMouseDown && (ev.modifierFlags & NSEventModifierFlagShift)) sawShiftRightClick = YES;
+    }
+    assert(sawShiftRightClick);
+    [dragHost ak_sendKeyCode:56 characters:@"" modifiers:0 pressed:NO];
+    [dragHost ak_setRightClickMode:NO];
+    [guest.recordedEvents removeAllObjects];
+    [dragHost ak_sendKeyCode:59 characters:@"" modifiers:0 pressed:YES];
+    [dragHost ak_sendMouseClick:0 pressed:YES];
+    [dragHost ak_sendMouseClick:0 pressed:NO];
+    AKDrainFixtureEvents();
+    BOOL sawCtrlLeftClick = NO;
+    for (NSEvent *ev in guest.recordedEvents) {
+        if (ev.type == NSEventTypeLeftMouseDown && (ev.modifierFlags & NSEventModifierFlagControl)) sawCtrlLeftClick = YES;
+    }
+    assert(sawCtrlLeftClick);
+    [dragHost ak_sendKeyCode:59 characters:@"" modifiers:0 pressed:NO];
+    AKDrainFixtureEvents();
+    assert([[host valueForKey:@"_mods"] unsignedIntegerValue] == 0);
     [guest.text setString:@""]; guest.selection = NSMakeRange(0, 0); guest.lastKeyEvent = nil;
     UIButton *editArcs = (id)FindToolbarView(controls, @"wolkara.toolbar.wow.editArcs");
     assert(editArcs && !editArcs.hidden);

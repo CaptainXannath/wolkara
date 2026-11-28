@@ -395,6 +395,44 @@ static void CheckMobile(void) {
     Command(AKMobileDone, 0); Empty();
     assert(!gamepad.mobileEditing && !controls.mobileEditing && controls.trackpadEnabled);
     controls.trackpadEnabled = NO; Empty();
+    // Virtual Shift + R-Click and Ctrl + Left-Click direct taps bypass Bags tap rewrite and carry native modifiers.
+    [(id<AKTouchDragHost>)host ak_sendKeyCode:56 characters:@"" modifiers:0 pressed:YES];
+    NSEvent *shiftDown = Next(__LINE__);
+    assert(shiftDown.type == NSEventTypeFlagsChanged && shiftDown.keyCode == 56 && (shiftDown.modifierFlags & NSEventModifierFlagShift));
+    [(id<AKTouchDragHost>)host ak_setRightClickMode:YES];
+    __block NSUInteger directTapNotifications = 0;
+    id tapObs = [NSNotificationCenter.defaultCenter addObserverForName:@"AKHostDirectTapDidComplete" object:host queue:nil usingBlock:^(NSNotification *n) {
+        (void)n; directTapNotifications++;
+    }];
+    finger.testType = UITouchTypeDirect;
+    finger.testTime = 6; Send(host, event, finger, UITouchPhaseBegan, origin); Empty();
+    finger.testTime = 6.1; Send(host, event, finger, UITouchPhaseEnded, origin);
+    CheckEvent(NSEventTypeMouseMoved, origin, size, 0, 0);
+    NSEvent *shiftRDown = CheckEvent(NSEventTypeRightMouseDown, origin, size, 0, 0);
+    NSEvent *shiftRUp = CheckEvent(NSEventTypeRightMouseUp, origin, size, 0, 0);
+    assert((shiftRDown.modifierFlags & NSEventModifierFlagShift) && (shiftRUp.modifierFlags & NSEventModifierFlagShift));
+    assert(directTapNotifications == 1);
+    Empty();
+    [(id<AKTouchDragHost>)host ak_sendKeyCode:56 characters:@"" modifiers:0 pressed:NO];
+    NSEvent *shiftUp = Next(__LINE__);
+    assert(shiftUp.type == NSEventTypeFlagsChanged && shiftUp.keyCode == 56 && shiftUp.modifierFlags == 0);
+    [(id<AKTouchDragHost>)host ak_setRightClickMode:NO];
+    [(id<AKTouchDragHost>)host ak_sendKeyCode:59 characters:@"" modifiers:0 pressed:YES];
+    NSEvent *ctrlDown = Next(__LINE__);
+    assert(ctrlDown.type == NSEventTypeFlagsChanged && ctrlDown.keyCode == 59 && (ctrlDown.modifierFlags & NSEventModifierFlagControl));
+    finger.testTime = 7; Send(host, event, finger, UITouchPhaseBegan, origin); Empty();
+    finger.testTime = 7.1; Send(host, event, finger, UITouchPhaseEnded, origin);
+    CheckEvent(NSEventTypeMouseMoved, origin, size, 0, 0);
+    NSEvent *ctrlLDown = CheckEvent(NSEventTypeLeftMouseDown, origin, size, 0, 0);
+    NSEvent *ctrlLUp = CheckEvent(NSEventTypeLeftMouseUp, origin, size, 0, 0);
+    assert((ctrlLDown.modifierFlags & NSEventModifierFlagControl) && (ctrlLUp.modifierFlags & NSEventModifierFlagControl));
+    assert(directTapNotifications == 2);
+    Empty();
+    [(id<AKTouchDragHost>)host ak_sendKeyCode:59 characters:@"" modifiers:0 pressed:NO];
+    NSEvent *ctrlUp = Next(__LINE__);
+    assert(ctrlUp.type == NSEventTypeFlagsChanged && ctrlUp.keyCode == 59 && ctrlUp.modifierFlags == 0);
+    [NSNotificationCenter.defaultCenter removeObserver:tapObs];
+    Empty();
     // A physical pointer gets neither touch tags nor right-click conversion.
     finger.testType = UITouchTypeIndirectPointer;
     Send(host, event, finger, UITouchPhaseBegan, origin); CheckEvent(NSEventTypeLeftMouseDown, origin, size, 0, 0);

@@ -267,6 +267,7 @@ NSEventModifierFlags AKModifiersReconciled(NSEventModifierFlags held, NSEventMod
     BOOL _directMobile, _directAbsolute, _directMarked, _mobileEditing;
     BOOL _cameraStickActive;
     NSInteger _cameraStickButton;
+    BOOL _virtualRightClickMode, _touchButton0MappedRight;
     NSTimeInterval _directBeganAt;
     NSInteger _directButton;
 }
@@ -380,6 +381,13 @@ NSEventModifierFlags AKModifiersReconciled(NSEventModifierFlags held, NSEventMod
 }
 - (void)touchButton:(unsigned)button pressed:(BOOL)pressed {
     if (button > 2) return;
+    if (button == 0) {
+        if (pressed) _touchButton0MappedRight = _virtualRightClickMode;
+        if (_touchButton0MappedRight) {
+            button = 1;
+            if (!pressed) _touchButton0MappedRight = NO;
+        }
+    }
     [self activateTouchCursor];
     NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
     if (pressed) {
@@ -638,10 +646,16 @@ static UITouch *AKDirectTouch(NSSet<UITouch *> *touches) {
     return nil;
 }
 - (void)touchInputCancelled {
+    BOOL hadVirtual = _virtualHeldKeys.count > 0 || _virtualRightClickMode;
     if (_virtualHeldKeys.count) {
         for (NSNumber *k in _virtualHeldKeys.allKeys) {
             [self ak_sendKeyCode:k.unsignedShortValue characters:@"" modifiers:0 pressed:NO];
         }
+    }
+    _virtualRightClickMode = NO;
+    _touchButton0MappedRight = NO;
+    if (hadVirtual) {
+        [NSNotificationCenter.defaultCenter postNotificationName:@"AKTouchVirtualInputCancelled" object:self];
     }
     [self ak_endCameraStickCancelled:YES];
     _directCancelled = YES;
@@ -796,6 +810,9 @@ static NSEventModifierFlags AKStandaloneModifierFlagForKeyCode(unsigned short ke
 - (void)ak_sendMouseClick:(unsigned)button pressed:(BOOL)pressed {
     [self touchButton:button pressed:pressed];
 }
+- (void)ak_setRightClickMode:(BOOL)enabled {
+    _virtualRightClickMode = enabled;
+}
 - (void)ak_moveTouchDrag:(UITouch *)touch {
     if (touch != _directTouch || _directCancelled) return;
     CGPoint point = [touch locationInView:self];
@@ -850,7 +867,7 @@ static NSEventModifierFlags AKStandaloneModifierFlagForKeyCode(unsigned short ke
     UITouch *finger = AKDirectTouch(t);
     if (finger) {
         if (_touchControls.configuringNative || _cameraStickActive || _pressedLeft || _pressedRight || _pressedMiddle) return;
-        _directTouch = finger; _directButton = AKIsRight(ev);
+        _directTouch = finger; _directButton = (AKIsRight(ev) || _virtualRightClickMode) ? 1 : 0;
         _directOrigin = _directFingerLast = [finger locationInView:self];
         _directDragging = NO; _directCancelled = NO; _directTrackpad = NO;
         _directRelative = AKMouseIsCaptured();
@@ -884,12 +901,16 @@ static NSEventModifierFlags AKStandaloneModifierFlagForKeyCode(unsigned short ke
         if (!_directDragging && !_directCancelled && hypot(point.x-_directOrigin.x, point.y-_directOrigin.y) < AKTouchDragThreshold) {
             if (_directRelative || AKMouseIsCaptured()) point = _last;
             BOOL editingMobile = _mobileEditing || _touchControls.mobileEditing;
-            [self markMobileGesture:(_directTouch.timestamp - _directBeganAt >= 0.45 && !editingMobile) ? AKMobileHold : AKMobileTap];
+            BOOL explicitModifiedClick = (_directButton != 0) || ([self activeVirtualModifierFlags] != 0);
+            if (!explicitModifiedClick) {
+                [self markMobileGesture:(_directTouch.timestamp - _directBeganAt >= 0.45 && !editingMobile) ? AKMobileHold : AKMobileTap];
+            }
             [self postMouse:NSEventTypeMouseMoved at:point button:0 clicks:0 delta:CGPointZero];
             [self postMouse:_directButton ? NSEventTypeRightMouseDown : NSEventTypeLeftMouseDown
                          at:point button:_directButton clicks:1 delta:CGPointZero];
             [self postMouse:_directButton ? NSEventTypeRightMouseUp : NSEventTypeLeftMouseUp
                          at:point button:_directButton clicks:1 delta:CGPointZero];
+            [NSNotificationCenter.defaultCenter postNotificationName:@"AKHostDirectTapDidComplete" object:self];
         }
         [self ak_endTouchDrag:_directTouch cancelled:NO];
         return;

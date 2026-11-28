@@ -65,6 +65,7 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
 @interface AKGamepadButton : UIButton
 @property(nonatomic, copy) NSString *element;
 @property(nonatomic, readonly) BOOL pressed;
+@property(nonatomic) BOOL latched;
 @property(nonatomic) NSInteger sector;
 @property(nonatomic) BOOL circular;
 @property(nonatomic) CGFloat cornerRadiusOverride;
@@ -89,13 +90,31 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     return self;
 }
 
+- (void)updateVisualState {
+    UIColor *color = _latched ? [UIColor colorWithRed:0.86 green:0.68 blue:0.28 alpha:0.62]
+                              : (_pressed ? AKPhotoPressed() : AKPhotoFill(0.62));
+    if (_sector >= 0) {
+        _sectorLayer.fillColor = color.CGColor;
+    } else {
+        self.backgroundColor = color;
+        self.layer.borderWidth = _latched ? 1.75 : 1;
+        self.layer.borderColor = _latched ? [UIColor colorWithRed:0.98 green:0.85 blue:0.46 alpha:0.95].CGColor
+                                          : AKPhotoBorder(0.45).CGColor;
+    }
+    [self setTitleColor:(_latched ? UIColor.whiteColor : AKPhotoText()) forState:UIControlStateNormal];
+}
+
 - (void)setPressed:(BOOL)pressed {
     if (_pressed == pressed) return;
     _pressed = pressed;
-    UIColor *color = pressed ? AKPhotoPressed() : AKPhotoFill(0.62);
-    if (_sector >= 0) _sectorLayer.fillColor = color.CGColor;
-    else self.backgroundColor = color;
+    [self updateVisualState];
     [self sendActionsForControlEvents:UIControlEventValueChanged];
+}
+
+- (void)setLatched:(BOOL)latched {
+    if (_latched == latched) return;
+    _latched = latched;
+    [self updateVisualState];
 }
 
 - (void)setSector:(NSInteger)sector {
@@ -332,7 +351,37 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
         jumpBtn.accessibilityIdentifier = @"wolkara.hud.jump";
         [self addSubview:jumpBtn];
 
-        _hudButtons = @{@"hud.target": targetBtn, @"hud.interact": interactBtn, @"hud.jump": jumpBtn};
+        AKGamepadButton *shiftBtn = [AKGamepadButton new];
+        shiftBtn.element = @"hud.shift";
+        shiftBtn.cornerRadiusOverride = 16;
+        shiftBtn.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
+        [shiftBtn setTitle:@"Shift" forState:UIControlStateNormal];
+        shiftBtn.accessibilityLabel = @"Shift";
+        shiftBtn.accessibilityIdentifier = @"wolkara.hud.shift";
+        [self addSubview:shiftBtn];
+
+        AKGamepadButton *ctrlBtn = [AKGamepadButton new];
+        ctrlBtn.element = @"hud.ctrl";
+        ctrlBtn.cornerRadiusOverride = 16;
+        ctrlBtn.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
+        [ctrlBtn setTitle:@"Ctrl" forState:UIControlStateNormal];
+        ctrlBtn.accessibilityLabel = @"Control";
+        ctrlBtn.accessibilityIdentifier = @"wolkara.hud.ctrl";
+        [self addSubview:ctrlBtn];
+
+        AKGamepadButton *rclickBtn = [AKGamepadButton new];
+        rclickBtn.element = @"hud.rclick";
+        rclickBtn.cornerRadiusOverride = 16;
+        rclickBtn.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
+        [rclickBtn setTitle:@"R-Click" forState:UIControlStateNormal];
+        rclickBtn.accessibilityLabel = @"Right click";
+        rclickBtn.accessibilityIdentifier = @"wolkara.hud.rclick";
+        [self addSubview:rclickBtn];
+
+        _hudButtons = @{
+            @"hud.target": targetBtn, @"hud.interact": interactBtn, @"hud.jump": jumpBtn,
+            @"hud.shift": shiftBtn, @"hud.ctrl": ctrlBtn, @"hud.rclick": rclickBtn,
+        };
         _hudRightStick = [AKGamepadStick new];
         _hudRightStick.element = @"hud.camera";
         _hudRightStick.accessibilityLabel = @"Right joystick";
@@ -362,6 +411,9 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
             @"hud.interact": interactBtn,
             @"hud.jump": jumpBtn,
             @"hud.camera": _hudRightStick,
+            @"hud.shift": shiftBtn,
+            @"hud.ctrl": ctrlBtn,
+            @"hud.rclick": rclickBtn,
         };
         for (NSString *name in _items) {
             UIView *item = _items[name];
@@ -456,7 +508,7 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
         (!AKMobileInterfaceEnabled() || [NSUserDefaults.standardUserDefaults boolForKey:@"WolkaraTouchAbilitiesExplicit"]);
     BOOL showControls = !_externalInputActive && (_controlsVisible || self.configuring) && !_mobileEditing;
     NSArray<NSString *> *fullOnlyItems = @[@"right", @"LB", @"LT", @"RT", @"RB", @"menu"];
-    NSArray<NSString *> *simpleOnlyItems = @[@"hud.target", @"hud.interact", @"hud.jump", @"hud.camera"];
+    NSArray<NSString *> *simpleOnlyItems = @[@"hud.target", @"hud.interact", @"hud.jump", @"hud.camera", @"hud.shift", @"hud.ctrl", @"hud.rclick"];
     for (NSString *name in _items) {
         UIView *item = _items[name];
         BOOL omitted = _simple ? [fullOnlyItems containsObject:name] : [simpleOnlyItems containsObject:name];
@@ -465,10 +517,23 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
             else if ([name isEqualToString:@"hud.interact"] && !_preferences.showHudInteract) omitted = YES;
             else if ([name isEqualToString:@"hud.jump"] && !_preferences.showHudJump) omitted = YES;
             else if ([name isEqualToString:@"hud.camera"] && !_preferences.showHudCamera) omitted = YES;
+            else if ([name isEqualToString:@"hud.shift"] && !_preferences.showHudShift) omitted = YES;
+            else if ([name isEqualToString:@"hud.ctrl"] && !_preferences.showHudCtrl) omitted = YES;
+            else if ([name isEqualToString:@"hud.rclick"] && !_preferences.showHudRightClick) omitted = YES;
         }
         item.hidden = omitted || !showControls;
         item.alpha = _editing ? MAX(0.5, _preferences.opacity) : _preferences.opacity;
-        if ([item isKindOfClass:AKGamepadButton.class] || item == _hudRightStick) {
+        if ([item isKindOfClass:AKGamepadButton.class]) {
+            AKGamepadButton *btn = (AKGamepadButton *)item;
+            if (_editing) {
+                btn.layer.borderWidth = 1;
+                btn.layer.borderColor = UIColor.systemYellowColor.CGColor;
+            } else {
+                btn.layer.borderWidth = btn.latched ? 1.75 : 1;
+                btn.layer.borderColor = btn.latched ? [UIColor colorWithRed:0.98 green:0.85 blue:0.46 alpha:0.95].CGColor
+                                                    : AKPhotoBorder(0.45).CGColor;
+            }
+        } else if (item == _hudRightStick) {
             item.layer.borderWidth = 1;
             item.layer.borderColor = (_editing ? UIColor.systemYellowColor : AKPhotoBorder(0.45)).CGColor;
         } else {
@@ -560,6 +625,23 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
            baseSize:CGSizeMake(84, 36) safe:safe];
         [self place:@"hud.target" frame:CGRectMake(auxX, bottom - jumpSide - 18 - pillH * 2, pillW, pillH)
            baseSize:CGSizeMake(84, 36) safe:safe];
+
+        CGFloat modX = left + stickSide + 16;
+        CGFloat modGap = 6 * scale;
+        CGFloat shiftW = 60 * scale, ctrlW = 56 * scale, rclickW = 74 * scale, modH = 34 * scale;
+        CGFloat modTotal = shiftW + ctrlW + rclickW + modGap * 2;
+        CGFloat avail = MAX(120, jumpX - modX - 10);
+        if (modTotal > avail && modTotal > 0) {
+            CGFloat shrink = avail / modTotal;
+            shiftW *= shrink; ctrlW *= shrink; rclickW *= shrink; modGap *= shrink;
+        }
+        CGFloat modY = bottom - modH - 4;
+        [self place:@"hud.shift" frame:CGRectMake(modX, modY, shiftW, modH)
+           baseSize:CGSizeMake(60, 34) safe:safe];
+        [self place:@"hud.ctrl" frame:CGRectMake(modX + shiftW + modGap, modY, ctrlW, modH)
+           baseSize:CGSizeMake(56, 34) safe:safe];
+        [self place:@"hud.rclick" frame:CGRectMake(modX + shiftW + ctrlW + modGap * 2, modY, rclickW, modH)
+           baseSize:CGSizeMake(74, 34) safe:safe];
     } else {
         CGFloat side = MAX(44, MIN(216 * _preferences.frontScale, MIN(safe.size.height - 70, safe.size.width / 2 - 12)));
         CGFloat w = 56 * _preferences.rearScale, h = 44 * _preferences.rearScale;
@@ -742,8 +824,10 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
         }],
     ]];
     NSUInteger shownCount = (_preferences.showHudTarget ? 1 : 0) + (_preferences.showHudInteract ? 1 : 0) +
-                            (_preferences.showHudJump ? 1 : 0) + (_preferences.showHudCamera ? 1 : 0);
-    [_hudVisibilityButton setTitle:[NSString stringWithFormat:@"Right HUD Controls (%lu/4) ▾", (unsigned long)shownCount] forState:UIControlStateNormal];
+                            (_preferences.showHudJump ? 1 : 0) + (_preferences.showHudCamera ? 1 : 0) +
+                            (_preferences.showHudShift ? 1 : 0) + (_preferences.showHudCtrl ? 1 : 0) +
+                            (_preferences.showHudRightClick ? 1 : 0);
+    [_hudVisibilityButton setTitle:[NSString stringWithFormat:@"HUD Controls (%lu/7) ▾", (unsigned long)shownCount] forState:UIControlStateNormal];
     UIAction *(^visAction)(NSString *, BOOL, void (^)(AKGamepadOverlay *)) = ^UIAction *(NSString *title, BOOL shown, void (^flip)(AKGamepadOverlay *)) {
         UIAction *act = [UIAction actionWithTitle:title image:nil identifier:nil handler:^(__kindof UIAction *a) {
             (void)a;
@@ -762,6 +846,9 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
         visAction(@"Interact", _preferences.showHudInteract, ^(AKGamepadOverlay *s) { s->_preferences.showHudInteract = !s->_preferences.showHudInteract; }),
         visAction(@"Jump", _preferences.showHudJump, ^(AKGamepadOverlay *s) { s->_preferences.showHudJump = !s->_preferences.showHudJump; }),
         visAction(@"Right Stick", _preferences.showHudCamera, ^(AKGamepadOverlay *s) { s->_preferences.showHudCamera = !s->_preferences.showHudCamera; }),
+        visAction(@"Shift", _preferences.showHudShift, ^(AKGamepadOverlay *s) { s->_preferences.showHudShift = !s->_preferences.showHudShift; }),
+        visAction(@"Ctrl", _preferences.showHudCtrl, ^(AKGamepadOverlay *s) { s->_preferences.showHudCtrl = !s->_preferences.showHudCtrl; }),
+        visAction(@"R-Click", _preferences.showHudRightClick, ^(AKGamepadOverlay *s) { s->_preferences.showHudRightClick = !s->_preferences.showHudRightClick; }),
     ]];
 }
 
@@ -1168,6 +1255,11 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     AKTouchHaptics *_haptics;
     AKTouchActionInput *_actionInput;
     NSMutableDictionary<NSString *, NSString *> *_activeHudBindings;
+    NSMutableSet<NSString *> *_activeHudModes;
+    NSMutableSet<NSString *> *_latchedHudModes;
+    NSMutableDictionary<NSString *, NSNumber *> *_hudModePressTimes;
+    NSMutableSet<NSString *> *_hudModeWasLatchedOnDown;
+    NSMutableSet<NSString *> *_hudModeUsedDuringHold;
     NSMutableArray<AKPendingKeyRelease *> *_pendingKeyReleases;
     NSMutableDictionary<NSString *, AKTouchAction *> *_heldCustomActions;
     NSMutableSet<NSNumber *> *_heldWasdKeys;
@@ -1183,6 +1275,11 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
         _host = host;
         _enabled = YES;
         _activeHudBindings = [NSMutableDictionary new];
+        _activeHudModes = [NSMutableSet new];
+        _latchedHudModes = [NSMutableSet new];
+        _hudModePressTimes = [NSMutableDictionary new];
+        _hudModeWasLatchedOnDown = [NSMutableSet new];
+        _hudModeUsedDuringHold = [NSMutableSet new];
         _pendingKeyReleases = [NSMutableArray new];
         _heldCustomActions = [NSMutableDictionary new];
         _heldWasdKeys = [NSMutableSet new];
@@ -1300,6 +1397,8 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
             [center addObserver:self selector:@selector(environmentChanged:) name:name object:nil];
         [center addObserver:self selector:@selector(activate:) name:UIApplicationDidBecomeActiveNotification object:nil];
         [center addObserver:self selector:@selector(deactivate:) name:UIApplicationWillResignActiveNotification object:nil];
+        [center addObserver:self selector:@selector(hostDirectTapCompleted:) name:@"AKHostDirectTapDidComplete" object:host];
+        [center addObserver:self selector:@selector(hostVirtualInputCancelled:) name:@"AKTouchVirtualInputCancelled" object:host];
     }
     return self;
 }
@@ -1560,9 +1659,85 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     }
 }
 
+- (BOOL)isHudModeElement:(NSString *)element {
+    return [element isEqualToString:@"hud.shift"] ||
+           [element isEqualToString:@"hud.ctrl"] ||
+           [element isEqualToString:@"hud.rclick"];
+}
+
+- (void)applyHudMode:(NSString *)element active:(BOOL)active {
+    BOOL wasActive = [_activeHudModes containsObject:element];
+    if (active) [_activeHudModes addObject:element];
+    else [_activeHudModes removeObject:element];
+    AKGamepadButton *button = _overlay.hudButtons[element];
+    if (button) button.latched = active;
+    if (wasActive == active) return;
+    if ([element isEqualToString:@"hud.shift"]) {
+        [self sendKeyCode:56 characters:@"" modifiers:0 pressed:active];
+    } else if ([element isEqualToString:@"hud.ctrl"]) {
+        [self sendKeyCode:59 characters:@"" modifiers:0 pressed:active];
+    } else if ([element isEqualToString:@"hud.rclick"]) {
+        UIView<AKTouchDragHost> *host = (id)_host;
+        if ([host respondsToSelector:@selector(ak_setRightClickMode:)]) {
+            [host ak_setRightClickMode:active];
+        }
+    }
+}
+
+- (void)hostDirectTapCompleted:(NSNotification *)note {
+    (void)note;
+    for (NSString *element in _hudModePressTimes.allKeys) {
+        [_hudModeUsedDuringHold addObject:element];
+    }
+}
+
+- (void)hostVirtualInputCancelled:(NSNotification *)note {
+    (void)note;
+    [_activeHudModes removeAllObjects];
+    [_latchedHudModes removeAllObjects];
+    [_hudModePressTimes removeAllObjects];
+    [_hudModeWasLatchedOnDown removeAllObjects];
+    [_hudModeUsedDuringHold removeAllObjects];
+    for (NSString *element in @[@"hud.shift", @"hud.ctrl", @"hud.rclick"]) {
+        AKGamepadButton *button = _overlay.hudButtons[element];
+        if (button) button.latched = NO;
+    }
+}
+
 - (void)hudButtonChanged:(AKGamepadButton *)button {
     NSString *element = button.element;
     if (!element.length) return;
+    if ([self isHudModeElement:element]) {
+        if (button.pressed) {
+            if (!_visible || _overlay.configuring || !button.enabled) return;
+            [_haptics buttonPressed];
+            _hudModePressTimes[element] = @(NSProcessInfo.processInfo.systemUptime);
+            [_hudModeUsedDuringHold removeObject:element];
+            if ([_latchedHudModes containsObject:element]) {
+                [_hudModeWasLatchedOnDown addObject:element];
+            } else {
+                [_hudModeWasLatchedOnDown removeObject:element];
+                [self applyHudMode:element active:YES];
+            }
+        } else {
+            NSNumber *downTime = _hudModePressTimes[element];
+            if (!downTime) return;
+            [_hudModePressTimes removeObjectForKey:element];
+            BOOL wasLatched = [_hudModeWasLatchedOnDown containsObject:element];
+            [_hudModeWasLatchedOnDown removeObject:element];
+            BOOL usedDuringHold = [_hudModeUsedDuringHold containsObject:element];
+            [_hudModeUsedDuringHold removeObject:element];
+            NSTimeInterval held = NSProcessInfo.processInfo.systemUptime - downTime.doubleValue;
+            if (wasLatched || usedDuringHold || held >= 0.30) {
+                [_latchedHudModes removeObject:element];
+                [self applyHudMode:element active:NO];
+            } else {
+                [_latchedHudModes addObject:element];
+                [self applyHudMode:element active:YES];
+            }
+        }
+        return;
+    }
     if (button.pressed) {
         if (!_visible || _overlay.configuring || !button.enabled) return;
         NSString *binding = [self bindingForHudElement:element];
@@ -1584,6 +1759,18 @@ CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size) {
     [_activeHudBindings removeAllObjects];
     for (NSString *element in held) {
         [self dispatchBinding:held[element] forElement:element pressed:NO];
+    }
+    NSSet<NSString *> *modes = [_activeHudModes copy];
+    [_latchedHudModes removeAllObjects];
+    [_hudModePressTimes removeAllObjects];
+    [_hudModeWasLatchedOnDown removeAllObjects];
+    [_hudModeUsedDuringHold removeAllObjects];
+    for (NSString *mode in modes) {
+        [self applyHudMode:mode active:NO];
+    }
+    for (NSString *element in @[@"hud.shift", @"hud.ctrl", @"hud.rclick"]) {
+        AKGamepadButton *button = _overlay.hudButtons[element];
+        if (button) button.latched = NO;
     }
 }
 

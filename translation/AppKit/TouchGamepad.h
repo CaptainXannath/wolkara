@@ -17,6 +17,7 @@ enum { AKTouchDragThreshold = 8 };
 - (void)ak_sendKeyCode:(unsigned short)keyCode characters:(nullable NSString *)characters modifiers:(NSUInteger)modifiers pressed:(BOOL)pressed;
 - (void)ak_triggerKeyCode:(unsigned short)keyCode characters:(nullable NSString *)characters modifiers:(NSUInteger)modifiers;
 - (void)ak_sendMouseClick:(unsigned)button pressed:(BOOL)pressed;
+- (void)ak_setRightClickMode:(BOOL)enabled;
 @end
 // Radial analog mapping with a small dead zone and clamped magnitude.
 CGPoint AKTouchGamepadStickPosition(CGPoint point, CGSize size);

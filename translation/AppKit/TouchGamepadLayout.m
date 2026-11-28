@@ -74,6 +74,9 @@ static NSString *ValidatedChoice(id value, NSArray<NSString *> *allowed, NSStrin
         self.showHudInteract = Number(values[@"showHudInteract"], 1) != 0;
         self.showHudJump = Number(values[@"showHudJump"], 1) != 0;
         self.showHudCamera = Number(values[@"showHudCamera"], 1) != 0;
+        self.showHudShift = Number(values[@"showHudShift"], 1) != 0;
+        self.showHudCtrl = Number(values[@"showHudCtrl"], 1) != 0;
+        self.showHudRightClick = Number(values[@"showHudRightClick"], 1) != 0;
 
         _positions = [NSMutableDictionary new];
         id positions = values[@"positions"];
@@ -166,6 +169,9 @@ static NSString *ValidatedChoice(id value, NSArray<NSString *> *allowed, NSStrin
         @"showHudInteract": @(_showHudInteract),
         @"showHudJump": @(_showHudJump),
         @"showHudCamera": @(_showHudCamera),
+        @"showHudShift": @(_showHudShift),
+        @"showHudCtrl": @(_showHudCtrl),
+        @"showHudRightClick": @(_showHudRightClick),
         @"positions": _positions
     } forKey:LayoutKey];
     [NSNotificationCenter.defaultCenter postNotificationName:AKGamepadLayoutDidChangeNotification object:_defaults];
@@ -189,6 +195,9 @@ static NSString *ValidatedChoice(id value, NSArray<NSString *> *allowed, NSStrin
     self.showHudInteract = YES;
     self.showHudJump = YES;
     self.showHudCamera = YES;
+    self.showHudShift = YES;
+    self.showHudCtrl = YES;
+    self.showHudRightClick = YES;
     [_positions removeAllObjects];
     [self save];
 }

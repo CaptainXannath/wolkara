@@ -172,11 +172,11 @@ static void Drain(void) {
 - (void)drag:(UIPanGestureRecognizer *)pan;
 @end
 @interface AKHudTriggerTestHost : UIView <AKTouchDragHost>
-@property NSUInteger triggerCount, sendCount;
+@property NSUInteger triggerCount, sendCount, rightClickChanges;
 @property unsigned short triggeredCode, sentCode;
 @property(nonatomic, copy) NSString *triggeredChars;
 @property NSUInteger triggeredMods, sentMods;
-@property BOOL sentPressed;
+@property BOOL sentPressed, rightClickMode;
 @end
 @implementation AKHudTriggerTestHost
 - (BOOL)ak_beginTouchDrag:(UITouch *)touch origin:(CGPoint)origin {
@@ -201,6 +201,10 @@ static void Drain(void) {
     self.sentCode = keyCode;
     self.sentMods = modifiers;
     self.sentPressed = pressed;
+}
+- (void)ak_setRightClickMode:(BOOL)enabled {
+    self.rightClickMode = enabled;
+    self.rightClickChanges++;
 }
 @end
 static void TestHudBindingDispatch(UIView *container) {
@@ -242,7 +246,36 @@ static void TestHudBindingDispatch(UIView *container) {
     assert(hudHost.sendCount == 1 && hudHost.sentCode == 5 && hudHost.sentMods == 0 && hudHost.sentPressed && hudHost.triggerCount == 4);
     [hudTarget sendActionsForControlEvents:UIControlEventTouchUpInside];
     assert(hudHost.sendCount == 2 && hudHost.sentCode == 5 && !hudHost.sentPressed);
+    // Shift, Ctrl, and R-Click HUD buttons: tap-to-toggle, hold-while-tapping auto-release, and cleanup on invalidate.
+    UIControl *hudShift = (id)Find(hudHost, @"wolkara.hud.shift");
+    UIControl *hudCtrl = (id)Find(hudHost, @"wolkara.hud.ctrl");
+    UIControl *hudRClick = (id)Find(hudHost, @"wolkara.hud.rclick");
+    assert(hudShift && !hudShift.hidden && hudCtrl && !hudCtrl.hidden && hudRClick && !hudRClick.hidden);
+    // Quick tap Shift latches ON, second quick tap toggles OFF.
+    [hudShift sendActionsForControlEvents:UIControlEventTouchDown];
+    assert(hudHost.sendCount == 3 && hudHost.sentCode == 56 && hudHost.sentPressed && [[hudShift valueForKey:@"latched"] boolValue]);
+    [hudShift sendActionsForControlEvents:UIControlEventTouchUpInside];
+    assert(hudHost.sendCount == 3 && hudHost.sentPressed && [[hudShift valueForKey:@"latched"] boolValue]);
+    [hudShift sendActionsForControlEvents:UIControlEventTouchDown];
+    [hudShift sendActionsForControlEvents:UIControlEventTouchUpInside];
+    assert(hudHost.sendCount == 4 && hudHost.sentCode == 56 && !hudHost.sentPressed && ![[hudShift valueForKey:@"latched"] boolValue]);
+    // Hold Ctrl while tapping the game surface auto-releases Ctrl on lift.
+    [hudCtrl sendActionsForControlEvents:UIControlEventTouchDown];
+    assert(hudHost.sendCount == 5 && hudHost.sentCode == 59 && hudHost.sentPressed && [[hudCtrl valueForKey:@"latched"] boolValue]);
+    [NSNotificationCenter.defaultCenter postNotificationName:@"AKHostDirectTapDidComplete" object:hudHost];
+    [hudCtrl sendActionsForControlEvents:UIControlEventTouchUpInside];
+    assert(hudHost.sendCount == 6 && hudHost.sentCode == 59 && !hudHost.sentPressed && ![[hudCtrl valueForKey:@"latched"] boolValue]);
+    // Simultaneous Shift + R-Click latch stays active across direct taps and cleans up on invalidate.
+    [hudShift sendActionsForControlEvents:UIControlEventTouchDown];
+    [hudShift sendActionsForControlEvents:UIControlEventTouchUpInside];
+    [hudRClick sendActionsForControlEvents:UIControlEventTouchDown];
+    [hudRClick sendActionsForControlEvents:UIControlEventTouchUpInside];
+    assert(hudHost.rightClickMode && [[hudShift valueForKey:@"latched"] boolValue] && [[hudRClick valueForKey:@"latched"] boolValue]);
+    [NSNotificationCenter.defaultCenter postNotificationName:@"AKHostDirectTapDidComplete" object:hudHost];
+    assert(hudHost.rightClickMode && [[hudShift valueForKey:@"latched"] boolValue] && [[hudRClick valueForKey:@"latched"] boolValue]);
     [hudPad invalidate];
+    assert(!hudHost.rightClickMode && hudHost.sentCode == 56 && !hudHost.sentPressed);
+    assert(![[hudShift valueForKey:@"latched"] boolValue] && ![[hudRClick valueForKey:@"latched"] boolValue]);
     [hudHost removeFromSuperview];
     [NSUserDefaults.standardUserDefaults removeObjectForKey:AKMobileAvailableKey];
     [NSUserDefaults.standardUserDefaults removeObjectForKey:@"WolkaraForeverTouchLayoutV1"];
@@ -280,16 +313,20 @@ static void TestPreferences(void) {
         @"positions":@{@"broken":@[@"x",@0],@"left":@[@(-1),@4]}} forKey:@"WolkaraForeverTouchLayoutV1"];
     AKGamepadLayout *layout=[[AKGamepadLayout alloc] initWithDefaults:defaults];
     assert(layout.opacity==0.8 && layout.rearScale==1.5 && layout.frontScale==0.65 && layout.hapticsEnabled);
+    assert(layout.showHudShift && layout.showHudCtrl && layout.showHudRightClick);
     layout.opacity=NAN; layout.rearScale=INFINITY; layout.frontScale=-INFINITY;
     assert(layout.opacity==0.8 && layout.rearScale==1 && layout.frontScale==1);
     CGRect bounds=CGRectMake(20,10,500,300), frame=CGRectMake(200,60,120,120);
-    [layout moveItem:@"menu" toFrame:frame inBounds:bounds]; layout.opacity=.4; layout.hapticsEnabled=NO; layout.swapShoulders=NO; [layout save];
+    [layout moveItem:@"menu" toFrame:frame inBounds:bounds]; layout.opacity=.4; layout.hapticsEnabled=NO; layout.swapShoulders=NO;
+    layout.showHudShift=NO; layout.showHudCtrl=NO; layout.showHudRightClick=NO; [layout save];
     layout=[[AKGamepadLayout alloc] initWithDefaults:defaults];
     assert(layout.opacity==.4 && !layout.hapticsEnabled && !layout.swapShoulders);
+    assert(!layout.showHudShift && !layout.showHudCtrl && !layout.showHudRightClick);
     assert(CGRectEqualToRect([layout frameForItem:@"menu" defaultFrame:frame inBounds:bounds],frame));
     CGRect small=CGRectMake(0,0,220,120);
     assert(CGRectContainsRect(small,[layout frameForItem:@"menu" defaultFrame:frame inBounds:small]));
     [layout reset]; assert(layout.opacity==.8 && layout.frontScale==1 && layout.hapticsEnabled && layout.swapShoulders);
+    assert(layout.showHudShift && layout.showHudCtrl && layout.showHudRightClick);
     assert([layout.targetBinding isEqualToString:@"Auto"] && [layout.interactBinding isEqualToString:@"Auto"]);
     assert(CGRectEqualToRect([layout frameForItem:@"menu" defaultFrame:frame inBounds:bounds],frame));
     [defaults removePersistentDomainForName:suite];
@@ -325,7 +362,7 @@ static void TestSimpleShoulderPositions(UIView *host, AKPreviewGamepad *manager)
     EditShoulders(host,manager,CGPointMake(10,45),NO);
     CGRect fullLeft=Button(host,GCInputLeftShoulder).frame, fullRight=Button(host,GCInputRightShoulder).frame;
     manager.simple=YES; [host layoutIfNeeded];
-    NSArray *hudIds=@[@"wolkara.hud.target",@"wolkara.hud.interact",@"wolkara.hud.jump",@"wolkara.hud.camera"];
+    NSArray *hudIds=@[@"wolkara.hud.target",@"wolkara.hud.interact",@"wolkara.hud.jump",@"wolkara.hud.camera",@"wolkara.hud.shift",@"wolkara.hud.ctrl",@"wolkara.hud.rclick"];
     for (NSString *ident in hudIds) {
         UIView *item=Find(host,ident); assert(item && !item.hidden);
     }

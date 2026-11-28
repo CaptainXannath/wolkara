@@ -28,6 +28,9 @@ FOUNDATION_EXPORT NSNotificationName const AKGamepadLayoutDidChangeNotification;
 @property(nonatomic) BOOL showHudInteract;
 @property(nonatomic) BOOL showHudJump;
 @property(nonatomic) BOOL showHudCamera;
+@property(nonatomic) BOOL showHudShift;
+@property(nonatomic) BOOL showHudCtrl;
+@property(nonatomic) BOOL showHudRightClick;
 
 + (NSArray<NSString *> *)allowedTargetBindings;
 + (NSArray<NSString *> *)allowedInteractBindings;
